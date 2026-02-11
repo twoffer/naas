@@ -79,6 +79,10 @@ docker-compose logs -f <svc>   # Tail service logs
 docker-compose ps              # Check service health
 ```
 
+## Python Virtual Environment
+
+If `.venv/` exists, activate it (`source .venv/bin/activate`) before running any Python commands. Use `python` (not `python3`) after activation.
+
 ## Key Conventions
 
 - **Every service:** Own `Dockerfile`, `requirements.txt`, `app/main.py` (FastAPI)
@@ -89,7 +93,7 @@ docker-compose ps              # Check service health
 - **Metadata on every event:** `source`, `is_synthetic`, `is_historical`, `protocol`
 - **Markdown files:** Preserve all Unicode characters (emojis, box-drawing, arrows) as-is — never replace with ASCII equivalents
 
-## Git Conventions
+## Git and GitHub Conventions
 
 - **Branches:** `feature/<short-description>`, `fix/<short-description>`, `chore/<short-description>`
 - **Commits:** Use conventional commits — `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`
