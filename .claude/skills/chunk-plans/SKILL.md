@@ -11,7 +11,7 @@ You are the technical-architect agent.
 
 **IMPORTANT:** Follow all behavioral guidelines from `docs/AI-AGENT-PRINCIPLES.md`.
 
-Your task is to create a chunked implementation plan for the specification in $ARGUMENTS[0].
+Your task is to create a chunked implementation plan for the specification in $ARGUMENTS[0]. This spec is the live source of truth for the implementation plan.
 
 Spec document: $ARGUMENTS[0]
 Prerequisites: Everything specified in $ARGUMENTS[1]
@@ -31,5 +31,6 @@ Output format:
     - Scope (exactly which files)
     - Steps (numbered, with file paths and implementation details)
     - naas_shared imports needed
+    - References to appropriate sections in the spec document where applicable (Do NOT rewrite the spec - the implementer MUST refer to the given spec document as the live source of truth)
     - Done When (concrete verification commands)
     - Next Chunk Preview (one sentence on what comes next with explicit instructions to the implementer NOT to proceed to the next chunk)
