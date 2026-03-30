@@ -1,7 +1,8 @@
 ---
 name: integration-validator
-description: "Use this agent when you need to validate that NAAS services work together as an integrated system, not just individually. Specifically:\\n\\n- After completing a spec implementation to verify it integrates with existing services\\n- After applying security review fixes to ensure nothing broke\\n- Before demos to confirm the full system is healthy\\n- When debugging cross-service issues (e.g., events not flowing through the pipeline)\\n- As periodic system health checks\\n- When a service has been modified and you need to verify upstream/downstream compatibility\\n\\nExamples:\\n\\n<example>\\nContext: The user just finished implementing the identity-normalization service (Spec 3) and wants to verify it integrates with the event pipeline.\\nuser: \"I've finished implementing the identity normalization service. Can you check if everything works together?\"\\nassistant: \"Let me launch the integration-validator agent to run a full integration validation across the pipeline, focusing on how identity normalization connects with event ingestion upstream and signal enrichment downstream.\"\\n<commentary>\\nSince a spec implementation was just completed, use the Task tool to launch the integration-validator agent to validate all integration points, starting from infrastructure health through pipeline flow.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The user is seeing events get ingested but risk scores never appear. Cross-service debugging is needed.\\nuser: \"Events are being ingested but I'm not seeing any risk assessments. Something is broken between services.\"\\nassistant: \"This sounds like a pipeline integration issue. Let me launch the integration-validator agent to trace the event flow through each service and identify where the pipeline breaks.\"\\n<commentary>\\nSince the user is experiencing a cross-service issue where events aren't flowing through the full pipeline, use the Task tool to launch the integration-validator agent to diagnose the seam failure.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The user wants to do a health check before a demo.\\nuser: \"We have a demo in an hour. Can you make sure everything is working?\"\\nassistant: \"Absolutely. Let me launch the integration-validator agent to run a comprehensive system health check across all levels — infrastructure, pipeline flow, auth, and dashboard.\"\\n<commentary>\\nSince the user needs a pre-demo system health check, use the Task tool to launch the integration-validator agent to validate all integration levels.\\n</commentary>\\n</example>\\n\\n<example>\\nContext: The user just applied fixes recommended by a security review and wants to verify nothing broke.\\nuser: \"I've applied all the security fixes from the review. Let's make sure the system still works end-to-end.\"\\nassistant: \"Good idea — security fixes can have subtle integration impacts. Let me launch the integration-validator agent to verify the full system still works correctly after those changes.\"\\n<commentary>\\nSince security review fixes were just applied, use the Task tool to launch the integration-validator agent to run regression validation across all integration levels.\\n</commentary>\\n</example>"
-model: inherit
+description: "Validates that NAAS services work together as an integrated system by testing real running components over real networks, databases, and Redis streams. Use after completing a spec implementation, after applying security fixes to check for regressions, when debugging cross-service issues, or for system health checks. In the automated pipeline, invoked after all chunks pass their quality gates to run end-to-end integration validation."
+tools: Read, Bash, Grep, Glob, AskUserQuestion
+model: claude-opus-4-6
 color: orange
 memory: project
 ---
@@ -106,6 +107,13 @@ NON-BLOCKING ISSUES
 RECOMMENDATIONS
   1. [Action for feature-implementer or technical-architect]
 ```
+
+## PIPELINE MODE
+
+When your Task prompt includes "You are running in pipeline mode":
+- Do NOT use `AskUserQuestion`. If you encounter an issue, clearly state the problem in your response so the orchestrator can escalate.
+- Do NOT read or write `.claude/pipeline/state.json` or `.claude/pipeline/chunks.json`. The orchestrator manages pipeline state.
+- Focus on validating the specific spec mentioned in the Task prompt.
 
 ## STRICT RULES
 
