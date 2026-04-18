@@ -50,7 +50,13 @@ naas/
 │   ├── risk-evaluator/             # Rule-based + ML scoring → allow/MFA/deny
 │   ├── policy-management/          # YAML policy CRUD, versioning, shadow mode
 │   ├── alert-service/              # High-risk event alerting (never on historical events)
-│   └── persona-simulator/          # Test event generation (manual/auto/historical bulk)
+│   └── persona-simulator/          # LLM-powered event generation (Claude/Ollama/mock fallback)
+├── scripts/
+│   └── train_bootstrap_model.py    # ML model bootstrap — generates random_forest.pkl
+├── shared/
+│   └── naas_shared/
+│       ├── ml_features.py          # ML feature column ordering contract
+│       └── simulation_tools.py     # Tool definitions for persona-simulator and MCP server
 ├── dashboard/                      # React SPA (5 tabs + floating simulator panel)
 ├── infrastructure/                 # Docker configs: postgres, redis, keycloak, openldap, monitoring
 └── docs/
@@ -64,10 +70,11 @@ naas/
 
 ```
 Ingestion → [login_events] → Normalization → [normalized_events] → Enrichment → [enriched_events] → Risk Evaluator
-                                                                                                         │
-Alert Service ◄── [decisions Pub/Sub] ◄── Risk Evaluator                                                │
-Dashboard     ◄── [alerts Pub/Sub]    ◄── Alert Service                                                 │
-Dashboard     ◄── [decisions Pub/Sub] ◄─────────────────────────────────────────────────────────────────┘
+Ingestion → [login_events] → Normalization (+ LDAP enrichment for OIDC/SAML) → [normalized_events] → Enrichment → [enriched_events] → Risk Evaluator
+                                                                                                                                         │
+Alert Service ◄── [decisions Pub/Sub] ◄── Risk Evaluator                                                                                 │
+Dashboard     ◄── [alerts Pub/Sub]    ◄── Alert Service                                                                                  │
+Dashboard     ◄── [decisions Pub/Sub] ◄──────────────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ## Key Commands
@@ -91,7 +98,24 @@ If `.venv/` exists, activate it (`source .venv/bin/activate`) before running any
 - **Stream consumers:** `XREADGROUP` with consumer groups; ACK only after success
 - **Fail-safe:** Unknown risk → DENY; service down → CHALLENGE
 - **Metadata on every event:** `source`, `is_synthetic`, `is_historical`, `protocol`
+- **Cross-protocol enrichment:** Identity Normalization queries OpenLDAP for OIDC/SAML events to merge directory attributes with token claims. Configurable unified schema correlation field (default: `primary_email`; adapter reverse-maps to LDAP attribute internally). Cached in Redis (60s TTL). Graceful degradation on failure. LDAP events skip enrichment. Config in `config/normalization_authority.yaml` under `enrichment.sources.ldap`.
 - **Markdown files:** Preserve all Unicode characters (emojis, box-drawing, arrows) as-is — never replace with ASCII equivalents
+- **LLM Integration:** Persona Simulator uses configurable LLM provider (Claude API → Ollama → mock). Set via `LLM_PROVIDER` env var. Default: `mock` (no API keys needed). Events submitted via EventSink abstraction.
+- **Shared tools:** `shared/naas_shared/simulation_tools.py` contains tool definitions and executor used by persona-simulator (internal) and MCP server (external, P2).
+- **Policy Model:** Hybrid scoring — `signal_weights` (4 continuous signals: ip_reputation_risk, normalization_risk, failed_login_risk, login_recency_risk) + `conditions` (boolean expressions evaluated by Python ast-based safe evaluator). Expression language supports AND/OR/NOT/IN operators across 5 namespaces (user, device, signals, time, event).
+- **ML Model:** Bootstrap script at `scripts/train_bootstrap_model.py` generates `random_forest.pkl` from synthetic distribution profiles. Feature vector (16 columns) defined in `shared/naas_shared/ml_features.py` — shared between training and inference. Model labels are independent of rule-based scoring.
+
+## Agentic Pipeline
+
+This project is implemented via an automated agentic pipeline managed by a `pipeline-orchestrator` agent. If you are a worker agent invoked via Task, these rules apply:
+
+- **You are a stateless specialist.** Do your assigned work, produce your artifacts, return your summary. You do not manage pipeline lifecycle.
+- **Do not read or write pipeline state files** (`state.json`, `chunks.json`, pipeline logs). The orchestrator owns these exclusively.
+- **Do not run git commands.** No `git add`, `git commit`, `git push`, `git checkout`. SCM is the orchestrator's responsibility.
+- **Pipeline mode vs. manual mode:** When invoked via Task (pipeline mode), do not use `AskUserQuestion` — state problems clearly in your response and let the orchestrator handle escalation. When invoked directly by the developer (manual mode), use `AskUserQuestion` freely.
+- **Your context comes from the Task prompt.** Don't go looking for pipeline artifacts or other agents' output to figure out what you should be doing.
+
+Pipeline details, phase definitions, and inter-agent contracts live in `.claude/pipeline/` and `docs/Agentic_Workflow_Implementation_Guide.md`. The `pipeline-orchestrator` agent is the sole entry point for automated pipeline runs.
 
 ## Git and GitHub Conventions
 

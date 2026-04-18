@@ -42,6 +42,7 @@ naas/
 │       ├── logging.py                # Structlog configuration
 │       ├── config.py                 # Pydantic Settings (env-driven config)
 │       └── constants.py              # Stream names, channel names, consumer groups
+        └── simulation_tools.py       # Shared tool definitions + ToolExecutor (P0: definitions, P2: executor)
 └── services/                         # Empty subdirs with placeholder READMEs
     ├── api-gateway/
     │   └── README.md
@@ -102,6 +103,7 @@ LDAP_ADMIN_DN=cn=admin,dc=corp,dc=com
 LDAP_ADMIN_PASSWORD=admin
 LDAP_ORGANISATION=Corp Inc
 LDAP_DOMAIN=corp.com
+LDAP_POOL_SIZE=3                               # LDAP connection pool size for enrichment (normalization service)
 
 # Service Ports
 API_GATEWAY_PORT=8000
@@ -111,9 +113,19 @@ SIGNAL_ENRICHMENT_PORT=8003
 POLICY_MANAGEMENT_PORT=8004
 RISK_EVALUATOR_PORT=8005
 ALERT_SERVICE_PORT=8006
+PERSONA_SIMULATOR_PORT=8007
 
 # Dashboard
 DASHBOARD_PORT=3000
+
+# LLM Provider Configuration (Persona Simulator)
+LLM_PROVIDER=mock                              # claude | ollama | mock
+LLM_MODEL=claude-sonnet-4-20250514             # Model for Claude API
+ANTHROPIC_API_KEY=                              # Required only if LLM_PROVIDER=claude
+OLLAMA_URL=http://host.docker.internal:11434   # Ollama API URL (external to Docker)
+OLLAMA_MODEL=llama3.1                          # Model for Ollama
+SIMULATION_BATCH_SIZE=10                       # Events per LLM call for auto/bulk modes
+SIMULATION_MAX_RATE=30                         # Max events per minute for auto mode
 
 # Keycloak OIDC
 KEYCLOAK_URL=http://keycloak:8080
@@ -233,23 +245,53 @@ INSERT INTO policies (policy_id, name, version, is_active, is_shadow, policy_yam
     '
 name: Default Risk Policy
 version: "1.0.0"
-description: Baseline risk evaluation policy
+description: Baseline risk evaluation policy for NAAS demo
+is_shadow: false
+
+signal_weights:
+  ip_reputation_risk: 0.20
+  normalization_risk: 0.15
+  failed_login_risk: 0.15
+  login_recency_risk: 0.10
+
+conditions:
+  - name: "impossible-travel"
+    expression: "signals.impossible_travel"
+    weight: 0.25
+  - name: "contractor-after-hours"
+    expression: "user.employee_type == ''contractor'' AND time.hour > 18"
+    weight: 0.15
+  - name: "unknown-device-off-network"
+    expression: "NOT device.known_device AND NOT device.on_corporate_network"
+    weight: 0.20
+  - name: "known-device-off-network"
+    expression: "device.known_device AND NOT device.on_corporate_network"
+    weight: 0.05
+  - name: "weekend-login"
+    expression: "time.day_of_week >= 5"
+    weight: 0.05
+  - name: "foreign-contractor"
+    expression: "user.employee_type == ''contractor'' AND signals.country != ''US''"
+    weight: 0.15
+  - name: "legacy-protocol-usage"
+    expression: "event.protocol == ''ldap''"
+    weight: 0.05
+  - name: "dormant-account-login"
+    expression: "signals.days_since_last_login > 90"
+    weight: 0.10
+
 thresholds:
-  allow: 0.3
-  step_up_mfa: 0.7
+  step_up_mfa: 0.3
   deny: 0.7
-weights:
-  ip_reputation: 0.25
-  device_risk: 0.20
-  impossible_travel: 0.30
-  failed_logins: 0.15
-  time_of_day: 0.10
+
 ensemble:
   rule_weight: 0.6
   ml_weight: 0.4
 '
 ) ON CONFLICT (policy_id) DO NOTHING;
 ```
+
+**⚠️ SQL string escaping:** Single quotes inside the YAML string literals must be escaped as `''` (doubled) in the SQL INSERT statement. The expression `user.employee_type == 'contractor'` becomes `user.employee_type == ''contractor''` inside the SQL string. This is standard PostgreSQL string escaping.
 
 **⚠️ CRITICAL:** Keycloak needs its own database. The `init.sql` must also create the Keycloak database:
 
@@ -565,6 +607,15 @@ class Settings(BaseSettings):
     keycloak_url: str = "http://keycloak:8080"
     keycloak_realm: str = "naas-demo"
     keycloak_client_id: str = "naas-dashboard"
+
+    # LLM Provider Configuration
+    llm_provider: str = Field(default="mock", pattern="^(claude|ollama|mock)$")
+    llm_model: str = Field(default="claude-sonnet-4-20250514")
+    anthropic_api_key: Optional[str] = None
+    ollama_url: str = Field(default="http://host.docker.internal:11434")
+    ollama_model: str = Field(default="llama3.1")
+    simulation_batch_size: int = Field(default=10, ge=1, le=50)
+    simulation_max_rate: int = Field(default=30, ge=1, le=60)
 
     @property
     def database_url(self) -> str:
