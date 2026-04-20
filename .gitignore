@@ -24,6 +24,10 @@ redis-data/
 .DS_Store
 Thumbs.db
 
+# Obsidian
+.obsidian/
+.trash/
+
 # Node (dashboard)
 node_modules/
 dashboard/dist/
