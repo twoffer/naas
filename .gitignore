@@ -48,3 +48,4 @@ dashboard/dist/
 .claude/pipeline/state.json
 .claude/pipeline/chunks.json
 .claude/pipeline/simulation/runs/
+CLAUDE.local.md
