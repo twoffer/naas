@@ -2,163 +2,113 @@
 
 ## Executive Summary
 
-Six A-series items (A1, A2, A3, A4, A6, A7) were analyzed; A5 is absent from `docs/audit/` entirely. The documentation state is heterogeneous: four items (A1, A3, A4, A7) have both a spec and a manifest; one (A2) has a spec only; one (A6) has a manifest only; one (A5) has neither. The majority of explicit manifest directives have been applied to the current repository state. The most consequential finding is a systematic pattern: every manifest directive that instructed a repo-resident document to include an inline cross-reference to an A-series spec document (e.g., "See `A3_Policy_Expression_Language_and_Scoring_Model.md`") was suppressed on application. This is the correct outcome under the project's Cross-Reference Rules, but it means the manifests as written describe a state that would violate repository discipline. A small number of additional mechanical discrepancies were found (a duplicated line in `CLAUDE.md`, a broken markdown table row in `SYSTEM_ARCHITECTURE.md`, an indentation defect and a missing entry in the `SPEC_0` shared library file tree). A latent conflict also exists between the A1 and A3 manifests regarding the seed policy schema; the repository reflects the A3 resolution.
+Six A-series items (A1, A2, A3, A4, A6, A7) were analyzed against the current repository state on the `meta-working` branch. A5 and A8 are absent from `docs/audit/` and are treated as "neither" items per the inventory taxonomy. Documentation state distribution: four items with both spec and manifest (A1, A3, A4, A7), one spec-only (A2), one manifest-only (A6). Across all items, explicit manifest directives are largely applied; the main pattern of incomplete application is in the SPEC_0 project tree (new files/paths introduced by A4 and A7 are not reflected) and in one CLAUDE.md regression where an A7 REPLACE directive was applied as an ADD. Two tier-2 gaps are worth calling out: the `NormalizedIdentity` Pydantic model in SPEC_0 does not carry the enrichment-provenance fields the A2 and A7 specs require for downstream visualization, and an A4 Vision Document directive (§6a, ML ensemble bullet) was not applied. Total discrepancies logged: 10 (1 regression, 1 missed manifest directive, 4 project-tree gaps in SPEC_0, 2 tier-2 model-field gaps, 1 tree-character formatting defect, 1 partial consolidation).
 
 ## Inventory
 
-Directory listing of `docs/audit/`:
-
-- `A1_Document_Change_Manifest.md`
-- `A1_Persona_Simulator_LLM_Design.md`
-- `A2_Normalization_Conflict_Resolution_Spec.md`
-- `A3_Document_Change_Manifest.md`
-- `A3_Policy_Expression_Language_and_Scoring_Model.md`
-- `A4_Document_Change_Manifest.md`
-- `A4_ML_Model_Bootstrap_Workflow.md`
-- `A6_Document_Change_Manifest.md`
-- `A7_Cross_Protocol_Enrichment_Spec.md`
-- `A7_Document_Change_Manifest.md`
-- `NAAS_Cowork_A_Series_Reconciliation_Task.md` (the current task definition, not an A-series artifact)
-
-Classification per A-series item:
-
-- A1 — both spec and manifest present
-- A2 — spec only, no manifest
-- A3 — both spec and manifest present
-- A4 — both spec and manifest present
-- A5 — neither present (no A5 files exist in `docs/audit/`)
-- A6 — manifest only, no spec
-- A7 — both spec and manifest present
+| Item | Spec file | Manifest file | Documentation state |
+|------|-----------|---------------|---------------------|
+| A1   | `A1_Persona_Simulator_LLM_Design.md` | `A1_Document_Change_Manifest.md` | Both |
+| A2   | `A2_Normalization_Conflict_Resolution_Spec.md` | — | Spec only |
+| A3   | `A3_Policy_Expression_Language_and_Scoring_Model.md` | `A3_Document_Change_Manifest.md` | Both |
+| A4   | `A4_ML_Model_Bootstrap_Workflow.md` | `A4_Document_Change_Manifest.md` | Both |
+| A5   | — | — | Neither (absent from inventory) |
+| A6   | — | `A6_Document_Change_Manifest.md` | Manifest only |
+| A7   | `A7_Cross_Protocol_Enrichment_Spec.md` | `A7_Document_Change_Manifest.md` | Both |
 
 ## Per-Item Findings
 
-### A1 — Persona Simulator LLM Design (with EventSink + shared tools)
+### A1 — Persona Simulator LLM Integration & EventSink Architecture
 
-- **Documentation state**: both spec and manifest
-- **Stated intent**: Persona Simulator generates events through a transparent LLM provider chain (Claude → Ollama → Mock) via a `SimulationProvider` interface; all providers submit events as a side effect through an `EventSink` abstraction rather than returning data, and a shared `simulation_tools.py` library is reused by both the internal ClaudeMCPProvider (P2) and the external MCP Server (P2).
-- **Directives**: 13 explicit, 10 fully applied, 2 partially applied, 1 in conflict with another manifest.
-- **Tier-1 implicated changes**: 7 named terms traced (EventSink, SimulationProvider, GenerationResult, simulation_tools.py, TOOL_DEFINITIONS, LLM_PROVIDER, ToolExecutor). All consistent across repo-resident docs; no stale references found outside `docs/audit/`.
-- **Tier-2 implicated changes**: 4 invariants examined; all honored in current state.
+- **Documentation state**: Both spec and manifest
+- **Stated intent**: Introduce a single, transparent LLM-backed generation layer in the Persona Simulator (Claude → Ollama → Mock fallback chain) built on an `EventSink` abstraction that funnels all generated events through the Event Ingestion service, with a shared tool library that pre-primes the implementation for P2 MCP integration without later refactoring.
+- **Directives**: 14 explicit (across SYSTEM_ARCHITECTURE.md §8, MCP Server, Implementation Priority, Redis Usage, Communication Patterns; SPEC_0 `.env.example`, Settings model, shared tree; Tech Stack AI/ML section; CLAUDE.md project structure and Key Conventions; System Decomposition Guide Spec 6; default policy). 12 fully applied, 1 partially applied, 1 superseded.
+- **Tier-1 implicated changes**: 5 identified (EventSink, SimulationProvider, TOOL_DEFINITIONS, `shared/naas_shared/simulation_tools.py`, `LLM_PROVIDER`). All consistent in the repo docs that reference them (SYSTEM_ARCHITECTURE.md, CLAUDE.md, Tech Stack, System Decomposition Guide).
+- **Tier-2 implicated changes**: 3 identified — (a) no `is_synthetic` branching in the normalization layer (upheld), (b) transparent LLM integration without separate "AI Mode" UI (upheld per ADR-004 in Tech Stack), (c) shared tool definitions avoid reimplementation between Persona Simulator and MCP Server (upheld — SYSTEM_ARCHITECTURE.md §Optional MCP Server explicitly says "thin SSE transport layer wrapping shared implementations — not a reimplementation").
+- **Discrepancies**:
+  - `docs/architecture/SYSTEM_ARCHITECTURE.md` (§Communication Patterns, lines 386, 391–392): tier-1 / explicit / partial. A1 directive 1e enumerates two new rows: "LLM Generation" and "Event Submission". The "LLM Generation" row is present at line 391. The "Event Submission" row is NOT present as a standalone row — its content was instead merged into the existing "Synchronous REST" row at line 386 ("Persona Simulator → Event Ingestion (via EventSink)"). This is a consolidation rather than an omission; referential consistency is preserved but the table shape differs from the manifest.
+  - `docs/architecture/SPEC_0_Project_Scaffold_and_Shared_Foundation.md` (line 45): explicit / tree-character defect. A1 directive 2d places `simulation_tools.py` in the shared tree, but the tree drawing is malformed: line 44's `constants.py` uses `└──` (last-entry closer), then line 45 drops the left-rail spine entirely (`        └── simulation_tools.py`). Both lines use `└──`, which produces a visually broken tree. Directive content is applied; structural rendering is not.
+- **Notes**: A1 directive 6a (update to seed policy `weights` block in `init.sql`) is correctly superseded by A3, which replaces the entire seed policy with the hybrid schema. The A1 weights-only schema is obsolete; no remediation is required.
 
-Discrepancies:
+### A2 — Identity Normalization Conflict Resolution & Confidence Scoring
 
-- `docs/architecture/SYSTEM_ARCHITECTURE.md` §10 MCP Server (A1 directive 1b). The manifest's final bullet ("See `A1_Persona_Simulator_LLM_Design.md` for full design...") is absent from the current file. Classification: partial. The absence is correct under the Cross-Reference Rules (repo-resident documents must not reference A-series content), but it means directive 1b's trailing See-line was not applied verbatim.
+- **Documentation state**: Spec only
+- **Stated intent**: Define the conflict resolution algorithm, attribute authority configuration (`normalization_authority.yaml`), attribute importance weighting, and overall `normalization_confidence` calculation so the Identity Normalization service produces a principled per-attribute and per-identity confidence signal consumable by the Risk Evaluator.
+- **Inferred directives**: 6 (no manifest). (i) `config/normalization_authority.yaml` referenced by Spec 2 scope in repo-resident docs; (ii) `NormalizedIdentity` model carries `normalization_confidence` field; (iii) Spec 2 scope bullets include conflict resolution; (iv) `DEPARTMENT_CANONICAL` / `EMPLOYEE_TYPE_CANONICAL` lookup tables implemented inside the normalization service (implementation-level; no repo-doc mirror expected); (v) `ATTRIBUTE_IMPORTANCE` weighting implemented in the normalization service (implementation-level); (vi) `resolution_details` structure emitted alongside `normalized_attributes`.
+- **Tier-1 implicated changes**: 3 identified — `normalization_authority.yaml` path (referenced in `CLAUDE.md:101`, `SYSTEM_ARCHITECTURE.md:111`, `NAAS_System_Decomposition_Guide.md:67`); `normalization_confidence` (`SPEC_0:413`); `NormalizedIdentity` (`SPEC_0:405–414`). All present and consistent where referenced.
+- **Tier-2 implicated changes**: 2 identified — (a) source-agnostic processing (normalization does not branch on event source) — upheld; (b) `normalization_confidence` feeds the Risk Evaluator as `normalization_risk = 1.0 - normalization_confidence` — upheld in SPEC_0 seed policy (A3-defined) and in System Decomposition Spec 3.
+- **Discrepancies**:
+  - `docs/architecture/SPEC_0_Project_Scaffold_and_Shared_Foundation.md` (§ Project Tree, lines 20–63): inferred / tier-1. No `config/` directory appears in the SPEC_0 project tree, so the `normalization_authority.yaml` file referenced throughout the architecture has no home in the scaffold specification. Downstream Spec 2 will need to invent the location.
+  - `docs/architecture/SPEC_0_Project_Scaffold_and_Shared_Foundation.md` (`NormalizedIdentity`, lines 405–414): inferred / tier-2. The model carries `normalization_confidence` but does not define `resolution_details` as an output field. A2 §7.1 stores `resolution_details` inside `events.normalized_attributes` JSONB (so a Pydantic field is not strictly required), but the absence of any schema-level contract for resolution provenance means Spec 2 and the Normalization dashboard tab (Spec 6) will agree on the shape only by convention.
+- **Notes**: A2 has no manifest, so both discrepancies above carry medium confidence. They describe gaps in the scaffold's foresight about A2-mandated artifacts, not explicit non-application of any directive.
 
-- `docs/architecture/SPEC_0_Project_Scaffold_and_Shared_Foundation.md` shared library file tree (A1 directive 2d). The line `└── simulation_tools.py` was added at line 45 but with incorrect tree-drawing characters — the preceding line ends with `└── constants.py` (already the final sibling under `naas_shared/`), and the new line uses plain spaces instead of tree connectors, dangling visually outside the directory. The file is referenced, but the tree is malformed.
+### A3 — Policy Expression Language & Hybrid Risk Scoring Model
 
-- A1 directive 6a (seed policy update) and A3 directive 2a (seed policy replacement) target the same SQL INSERT in `SPEC_0`. A1 requests weights-only keys (`ip_reputation`, `device_risk`, `impossible_travel`, `failed_logins`, `time_of_day`, `normalization_risk`) with an `ensemble` block; A3 requests the hybrid `signal_weights` + `conditions` schema with canonical signal names (`ip_reputation_risk`, `failed_login_risk`, `login_recency_risk`, `normalization_risk`) and the eight-condition demonstration policy. The current `SPEC_0` (lines 246–290) reflects A3's design. A1's seed-policy directive was correctly superseded but this is not flagged in either manifest. See Cross-Cutting Observations.
-
-Notes: All 13 AI/ML Components additions in `docs/meta/NAAS_v2.0_Tech_Stack.md`, the A1 project-structure and key-conventions additions in `CLAUDE.md`, and the A1 Implementation Priority / Redis Usage / Persona Simulator section rewrites in `SYSTEM_ARCHITECTURE.md` are present. The manifest references `NAAS_v2_0_Tech_Stack_UPDATED.md` and `SPEC_0_Project_Scaffold_and_Shared_Foundation_UPDATED.md` — the actual file names have no `_UPDATED` suffix and use `NAAS_v2.0_Tech_Stack.md` with a dot. The directives were applied to the correctly-named files despite the manifest's stale filenames.
-
-### A2 — Normalization Conflict Resolution
-
-- **Documentation state**: spec only, no manifest
-- **Stated intent** (high-confidence, directly stated in spec): Identity Normalization resolves per-attribute conflicts across OIDC/SAML/LDAP using a configurable authority-weights YAML, producing a per-attribute confidence that is inverted into a `normalization_risk` signal consumed by the Risk Evaluator. Data inconsistency is thereby converted into a first-class risk signal.
-- **Directives** (inferred, lower-confidence): 8 inferred directives covering `resolve_attribute()`, value normalization, authority YAML, groups merge strategies, overall confidence calculation, `resolution_details` storage, downstream hand-off, and edge-case handling. These are implementation-level directives for Spec 2; they are not expected to appear in architectural documents and were not verified at file-content level.
-- **Tier-1 implicated changes**: 7 named terms traced. `normalization_confidence`, `normalization_risk`, `normalization_authority.yaml`, and the concept of "configurable priority rules" appear consistently in `SYSTEM_ARCHITECTURE.md` §3 (lines 110–111), `CLAUDE.md` Key Conventions (line 101), and `SPEC_0` seed policy (line 253, `normalization_risk: 0.15`). Implementation-level identifiers (`resolve_attribute`, `ATTRIBUTE_IMPORTANCE`, `resolution_details`) are not present in repo-resident or meta documents, which is appropriate for an implementation spec.
-- **Tier-2 implicated changes**: 3 invariants examined. The invariants (source agreement strengthens confidence; cross-protocol enrichment occurs at the normalization layer; adapter mappings are deterministic one-to-one) are all honored in current repo-resident documentation.
-
-Discrepancies: None identifiable at the architectural-document level. A2 is predominantly a Spec-2 implementation directive; its integration surface (the `normalization_risk` signal, the authority config path, the cross-protocol enrichment hook) is represented correctly.
-
-Notes: A2 cross-references are internal to `docs/audit/` (A2 §6.1–6.2 was updated by A3 manifest directive 3a/3b to point at A3). A2 spec §6.1 references `A3_Policy_Expression_Language_and_Scoring_Model.md` at line 388, which is a permitted cross-reference within `docs/audit/`.
-
-### A3 — Policy Expression Language and Hybrid Scoring Model
-
-- **Documentation state**: both spec and manifest
-- **Stated intent**: The Risk Evaluator uses a hybrid scoring model combining continuous `signal_weights` (four pre-normalized signals) with boolean `conditions` (ast-based expression evaluator over five namespaces), clamped to [0.0, 1.0], blended with an ML score via ensemble. The policy YAML is source of truth; invalid expressions are rejected at policy-creation time.
-- **Directives**: 13 explicit, 9 fully applied, 4 partially applied (all suppressed See-line cross-references to the A3 spec).
-- **Tier-1 implicated changes**: 10 named terms traced (signal_weights, conditions/expression, VALID_SIGNAL_WEIGHTS, evaluation context/namespaces, days_since_last_login, login_recency_risk, ast-based/safe evaluator, contributing_factors, ensemble, thresholds). All consistent across `SYSTEM_ARCHITECTURE.md`, `SPEC_0`, `CLAUDE.md`, and the meta documents.
-- **Tier-2 implicated changes**: 5 invariants examined. All honored.
-
-Discrepancies:
-
-- `docs/architecture/SYSTEM_ARCHITECTURE.md` §5 Policy Management (A3 directive 1b). The trailing "See `A3_Policy_Expression_Language_and_Scoring_Model.md` for full schema and validation rules" is absent from the current file (line 132 ends after "ensemble configuration"). Partial — boundary-rule-driven suppression.
-
-- `docs/architecture/SYSTEM_ARCHITECTURE.md` §6 Risk Evaluator (A3 directive 1c). The "See `A3_...` for full expression language spec" trailing sentence after the Expression evaluator bullet is absent from the current file (line 153 ends after "lowercase Python syntax."). Partial — boundary-rule-driven suppression.
-
-- `docs/architecture/SYSTEM_ARCHITECTURE.md` §5 Policy Management (A3 directive 1b). The "Shadow mode support" bullet is present at line 136; no discrepancy. (Noted explicitly because the Phase 1 intent model flagged it as a possible gap.)
-
-- A3 directive 2a (seed policy replacement in `SPEC_0`) was applied in full at lines 246–290, overriding the conflicting A1 directive 6a. See Cross-Cutting Observations.
-
-Notes: A3 directives targeting `docs/meta/NAAS_System_Decomposition_Guide.md` (Spec 3 and Spec 4 bullets), `docs/meta/NAAS_v2.0_Vision_Document.md` (policy YAML example and scoring bullets), and `docs/meta/NAAS_v2.0_Enhancement_Roadmap.md` (Phase 3 deliverables) were not verified line-by-line here; spot-checks found the hybrid-model language present in the meta documents and no stale "time_of_day" weight references in meta documents.
+- **Documentation state**: Both spec and manifest
+- **Stated intent**: Unify two previously inconsistent policy schemas (weights-only and conditions-only) into a single hybrid scoring model — `signal_weights` (four continuous pre-normalized signals) plus `conditions` (boolean AST expressions over five namespaces) — with an escalating-severity threshold structure, a closed `VALID_SIGNAL_WEIGHTS` enum, and a new `login_recency_risk` signal (plus `days_since_last_login` condition input).
+- **Directives**: 11 explicit (SYSTEM_ARCHITECTURE.md §4/§5/§6; SPEC_0 seed policy; A2 spec §6.1/§6.2; System Decomposition Spec 3/Spec 4; Vision policy example and scoring bullets; Enhancement Roadmap Phase 3; CLAUDE.md Key Conventions). 11 fully applied.
+- **Tier-1 implicated changes**: 7 identified — `signal_weights`, `conditions`, `VALID_SIGNAL_WEIGHTS`, `login_recency_risk`, `days_since_last_login`, removal of `device_risk` / `time_of_day` / bare `ip_reputation` signal names, removal of old `weights:` / `allow`/`deny` threshold pair. All consistent; no stale terminology found in repo-resident docs.
+- **Tier-2 implicated changes**: 3 identified — (a) separation of concerns: Policy Management validates expressions, Risk Evaluator evaluates them — upheld in SYSTEM_ARCHITECTURE.md §5/§6 and System Decomposition Spec 3/Spec 4; (b) hybrid score clamped to [0.0, 1.0] — upheld; (c) signal normalization lives in Risk Evaluator, not in Enrichment — upheld (Enrichment produces `days_since_last_login` as raw count; Risk Evaluator converts to `login_recency_risk`).
+- **Discrepancies**: None.
+- **Notes**: The A3 manifest instructs addition of a cross-reference to `A3_Policy_Expression_Language_and_Scoring_Model.md` in CLAUDE.md directive 7b, SYSTEM_ARCHITECTURE.md §5, §6, and A2 §6.1. Per the repo self-contained rule, these cross-references were correctly stripped from the repo-resident targets (CLAUDE.md:105, SYSTEM_ARCHITECTURE.md:132, 153) while preserved in the meta/audit targets (A2 spec line 388). This is the intended behavior given the rule override in the reconciliation task instructions.
 
 ### A4 — ML Model Bootstrap Workflow
 
-- **Documentation state**: both spec and manifest
-- **Stated intent**: The Random Forest ML model is bootstrapped from 12 synthetic distribution profiles (six benign, six malicious) encoding IAM domain knowledge. A 16-column feature vector is shared between training and inference via `shared/naas_shared/ml_features.py`. Model labels are independent of rule-based scoring (no entanglement). The trained `.pkl` is a committed artifact; P2 adds a full training service.
-- **Directives**: 8 explicit, 5 fully applied, 2 partially applied (suppressed See-line cross-references to the A4 spec), 1 inconsistent outcome (`SPEC_0` file tree).
-- **Tier-1 implicated changes**: 6 named terms traced (ML_FEATURE_COLUMNS, extract_ml_features, DistributionProfile, random_forest.pkl, 70:30 class balance, entanglement anti-pattern). Architectural-level terms (16-feature vector, entanglement anti-pattern, bootstrap script path, feature-ordering contract module) are consistent across `SYSTEM_ARCHITECTURE.md`, `CLAUDE.md`, and meta docs. Implementation-level identifiers (`ML_FEATURE_COLUMNS`, `extract_ml_features`, `DistributionProfile`) appropriately do not appear in architectural documents.
-- **Tier-2 implicated changes**: 4 invariants examined. All honored.
+- **Documentation state**: Both spec and manifest
+- **Stated intent**: Specify how `random_forest.pkl` is produced (standalone bootstrap script from 12 domain-derived distribution profiles), pin the 16-column feature vector and its ordering contract in `shared/naas_shared/ml_features.py`, and establish that ML training data is independent of rule-based scoring to avoid the entanglement anti-pattern.
+- **Directives**: 6 explicit (SYSTEM_ARCHITECTURE.md ML Bootstrap Script section + §6 ML-based bullet; System Decomposition Spec 3 ML bullets + Bootstrap Script block; Tech Stack Scikit-learn section; CLAUDE.md project structure + Key Conventions; A3 spec §10 cross-reference; Vision Document ML ensemble bullet). 5 fully applied, 1 missing.
+- **Tier-1 implicated changes**: 3 identified — `scripts/train_bootstrap_model.py`, `shared/naas_shared/ml_features.py`, `random_forest.pkl` feature vector width (16). All consistent in SYSTEM_ARCHITECTURE.md, CLAUDE.md, System Decomposition Guide, Tech Stack.
+- **Tier-2 implicated changes**: 2 identified — (a) ML graceful degradation (missing model → ML path disabled, score 0.0) — upheld; (b) no label entanglement between rule-based scoring and ML training — upheld (SYSTEM_ARCHITECTURE.md:231 and System Decomposition:98–99 both state labels are independent).
+- **Discrepancies**:
+  - `docs/meta/NAAS_v2.0_Vision_Document.md` (line 161): explicit / missing. A4 directive 6a instructs that the existing ASCII-diagram bullet `• ML ensemble (Random Forest)` be replaced with the expanded wording `ML ensemble (Random Forest, 16-feature vector trained on synthetic IAM distribution profiles)`. The bullet at line 161 still reads `• ML ensemble (Random Forest)` verbatim. The directive text does not fit the ASCII-box width, which may explain the omission, but no substitute text was applied.
+  - `docs/architecture/SPEC_0_Project_Scaffold_and_Shared_Foundation.md` (§ Project Tree, lines 20–63): implicit / tier-1. Neither `scripts/` (for `train_bootstrap_model.py`) nor `ml_features.py` (inside `shared/naas_shared/`) appears in the SPEC_0 project tree, even though CLAUDE.md's own tree now includes both. SPEC_0 is the scaffold authority; a downstream agent following SPEC_0 alone will not create these paths.
+- **Notes**: The A4 manifest adds a cross-reference to `A4_ML_Model_Bootstrap_Workflow.md` in SYSTEM_ARCHITECTURE.md §6 ML bullet and the ML Bootstrap Script section, and in System Decomposition Spec 3. Per the self-contained rule, these were correctly stripped from the repo-resident targets while preserved in meta/audit targets.
 
-Discrepancies:
+### A6 — SAML-Is-Synthetic Scope Decision
 
-- `docs/architecture/SYSTEM_ARCHITECTURE.md` ML Bootstrap Script section (A4 directive 1a). The trailing "See `A4_ML_Model_Bootstrap_Workflow.md`" sentence is absent from the current file (section ends at line 232 with the P2 bullet). Partial — boundary-rule-driven suppression.
-
-- `docs/architecture/SYSTEM_ARCHITECTURE.md` §6 Risk Evaluator ML-based bullet (A4 directive 1b). The trailing "See `A4_ML_Model_Bootstrap_Workflow.md`" sentence is absent from line 147. Partial — boundary-rule-driven suppression.
-
-- `docs/architecture/SPEC_0_Project_Scaffold_and_Shared_Foundation.md` shared library file tree (A4 implied consequence). `CLAUDE.md` Project Structure (lines 56–59) correctly lists both `ml_features.py` and `simulation_tools.py` under `shared/naas_shared/` per A4 directive 4a. The `SPEC_0` file tree (lines 34–45), which is the canonical file-tree specification for the shared library, lists `simulation_tools.py` (line 45, with the indentation defect noted under A1) but does **not** list `ml_features.py`. This is an implicit consequence not enumerated in the A4 manifest but required for consistency: if `ml_features.py` belongs in `shared/naas_shared/` per A4, it should appear in `SPEC_0`'s canonical file tree as well as in `CLAUDE.md`.
-
-Notes: The A3 spec §10 cross-reference update to point at A4 (A4 directive 5a) is present in `docs/audit/A3_Policy_Expression_Language_and_Scoring_Model.md` line 891. This is a cross-reference internal to `docs/audit/` and is permitted.
-
-### A5 — (no documentation)
-
-- **Documentation state**: neither spec nor manifest
-- **Stated intent**: Not available. No file in `docs/audit/` carries the `A5_` prefix. No documentation exists to permit intent reconstruction. Per task instructions, no directive enumeration or tier-1/tier-2 analysis is produced.
-
-### A6 — SAML Scope Documentation
-
-- **Documentation state**: manifest only, no spec
-- **Stated intent** (inferred from manifest): The SAML adapter maps SAML-convention attribute names to the unified schema rather than parsing SAML assertion XML, reflecting a deliberate scope decision to emphasize the multi-protocol normalization layer's architectural value. SAML events in the demo are simulator-generated because no live SAML IdP is present in the Docker Compose stack. A scope note is added to `SYSTEM_ARCHITECTURE.md` and a one-line expansion to the Vision Document to preempt reviewer questions.
-- **Directives**: 2 explicit, both fully applied.
-- **Tier-1 implicated changes**: 2 named phrases traced ("SAML Adapter", "simulator-generated" / `protocol: saml`). Consistent usage.
-- **Tier-2 implicated changes**: 2 invariants examined. Both honored (adapters are source-agnostic; adapters map attribute names rather than parsing protocol-specific wire formats).
-
-Discrepancies: None.
-
-Notes: The A6 manifest distinguishes "repo document" from "meta-document, NOT in repo" (manifest §2 header, line 38). This terminology predates the current repo layout in which `docs/meta/` is in-repo on the `meta-working` branch. The directive itself targets `docs/meta/NAAS_v2.0_Vision_Document.md`, and the content is present there; the label in the manifest is stale but the change landed correctly.
+- **Documentation state**: Manifest only
+- **Stated intent** (inferred from the manifest itself, which is a scope clarification): Preempt reviewer confusion by documenting in both SYSTEM_ARCHITECTURE.md and the Vision Document that SAML events are simulator-generated — not a bug or omission, but a deliberate scope decision — and correct the SAML adapter's description from "Parses SAML assertions, extracts attributes" to "Maps SAML-convention attribute names to the unified schema."
+- **Directives**: 2 explicit (SYSTEM_ARCHITECTURE.md §3 SAML Adapter bullet + Scope Note; Vision Document Multi-Protocol Identity Support bullet line 289). 2 fully applied.
+- **Tier-1 implicated changes**: 1 identified — the SAML adapter description should no longer claim XML assertion parsing. Consistent (SYSTEM_ARCHITECTURE.md:98–101, System Decomposition Spec 2 line 66).
+- **Tier-2 implicated changes**: 1 identified — self-contained repo docs: the Scope Note at SYSTEM_ARCHITECTURE.md:100–101 references `SYSTEM_ARCHITECTURE.md §3` (self-reference) but does not cross to any meta/audit document. Upheld.
+- **Discrepancies**: None.
+- **Notes**: The manifest's final section ("Related Finding: Multi-Protocol Enrichment Design Gap") explicitly hands off a follow-up concern to A7, which closed that gap. This is correctly resolved in the repo.
 
 ### A7 — Cross-Protocol LDAP Enrichment
 
-- **Documentation state**: both spec and manifest
-- **Stated intent**: Identity Normalization performs LDAP enrichment for OIDC and SAML events. The LDAP adapter is dual-role (extract for `protocol: ldap`, enrich for OIDC/SAML). The correlation lookup uses a configurable unified-schema field (default `primary_email`); the adapter reverse-maps to the LDAP attribute internally. Results cached in Redis; failures degrade gracefully; LDAP events skip enrichment.
-- **Directives**: 11 explicit, 10 fully applied, 1 with a markdown-rendering defect.
-- **Tier-1 implicated changes**: 6 named terms traced (cross-protocol enrichment, correlation_key, `enrich` method, `ldap_enrichment:{key}` cache pattern, enrichment metadata fields, `should_enrich_from_ldap`). Architectural-level concepts consistent across `SYSTEM_ARCHITECTURE.md`, `CLAUDE.md`, `SPEC_0`. Implementation-level identifiers appropriately absent from architectural docs.
-- **Tier-2 implicated changes**: 5 invariants examined. All honored.
-
-Discrepancies:
-
-- `docs/architecture/SYSTEM_ARCHITECTURE.md` Communication Patterns table (A7 directive 1e / Phase 2 designation directive 4). Line 392 reads: `| LDAP Enrichment  | Identity Normalization → OpenLDAP | LDAP (tcp/389, internal Docker network) |`. The manifest (A7 manifest line 59) specifies the row as `| LDAP Enrichment | Identity Normalization → OpenLDAP | LDAP (tcp/389, internal Docker network) |`. Both forms contain an internal `|` character in the "When Used" cell content before "LDAP", which breaks the 3-column markdown table into 4 cells on rendering. This affects every other row in the table by reference (alignment looks fine in a plain editor but rendered markdown will show the row with an extra column). The manifest's source text has the same bug, so this is a directive-level defect that was applied faithfully.
-
-- `CLAUDE.md` Event Pipeline diagram (A7 directive 5a). The directive instructs replacing the original `Ingestion → [login_events] → Normalization → [normalized_events] → ...` line with a version annotated `Normalization (+ LDAP enrichment for OIDC/SAML)`. The current file (lines 72–73) contains **both** lines — the original at line 72 and the annotated version at line 73. The replacement was additive rather than in-place. This results in a duplicated pipeline line in the diagram.
-
-Notes: All other A7 directives landed correctly. The `LDAP_POOL_SIZE=3` addition is present in `SPEC_0` at line 106. The LDAP Adapter dual-role rewrite in `SYSTEM_ARCHITECTURE.md` §3 is present at line 97. The cross-protocol enrichment bullet is at line 111. The Redis cache row `ldap_enrichment:{email}` is at line 372. The `CLAUDE.md` cross-protocol enrichment convention is at line 101.
+- **Documentation state**: Both spec and manifest
+- **Stated intent**: Make the live OpenLDAP container serve a real pipeline purpose by having the Identity Normalization service actively query LDAP for OIDC and SAML events — by a configurable unified-schema correlation field (default: `primary_email`) — to produce genuine multi-source normalized identities, with connection pool, Redis cache, graceful degradation, and source-agnostic treatment of live versus simulated events.
+- **Directives**: 12 explicit (SYSTEM_ARCHITECTURE.md §3 LDAP adapter bullet, enrichment bullet, Redis Usage row, Communication Patterns row; CLAUDE.md pipeline diagram, Key Conventions bullet; System Decomposition Spec 2 scope + validation; Vision Document Multi-Protocol features + demo script Act 2; SPEC_0 `.env.example` `LDAP_POOL_SIZE`; Implementation Guide demo script Act 2). 11 fully applied, 1 applied as ADD rather than REPLACE.
+- **Tier-1 implicated changes**: 4 identified — `LDAP_POOL_SIZE` env var, `ldap_enrichment:{email}` Redis key pattern, `config/normalization_authority.yaml` under `enrichment.sources.ldap`, the correlation-field-on-unified-schema pattern (default: `primary_email`; adapter reverse-maps to `mail`). All consistent in SYSTEM_ARCHITECTURE.md, CLAUDE.md, System Decomposition, SPEC_0 `.env.example`.
+- **Tier-2 implicated changes**: 3 identified — (a) source-agnostic processing (enrichment applies equally to live and simulated events, no `is_synthetic` branching) — upheld (stated explicitly in SYSTEM_ARCHITECTURE.md:111 and implicit everywhere else); (b) graceful degradation on LDAP lookup failure or miss — upheld (stated in SYSTEM_ARCHITECTURE.md:97, :111, CLAUDE.md:101, System Decomposition:67); (c) LDAP events skip enrichment (directory data already in payload) — upheld in all four places.
+- **Discrepancies**:
+  - `CLAUDE.md` (lines 72–73): explicit / **regression**. A7 directive 2a instructs that the existing Event Pipeline diagram line be REPLACED with a new line containing `(+ LDAP enrichment for OIDC/SAML)`. Both lines are now present — the original unannotated pipeline at line 72 and the A7-updated pipeline at line 73. A replace-style directive was applied additively, producing a duplicate diagram that conflicts with itself.
+  - `docs/architecture/SPEC_0_Project_Scaffold_and_Shared_Foundation.md` (§ Project Tree, lines 20–63): explicit / tier-1. The `config/` directory (home of `normalization_authority.yaml` per A7 directive 1b, A2 §3.1) is not part of the SPEC_0 project tree. `LDAP_POOL_SIZE` is present in `.env.example` (line 106), but the config file's location is unhomed in the scaffold.
+  - `docs/architecture/SPEC_0_Project_Scaffold_and_Shared_Foundation.md` (`NormalizedIdentity`, lines 405–414): implicit / tier-2. A7 §8 specifies `enrichment_applied`, `enrichment_source`, `enrichment_cache_hit`, and `enrichment_skip_reason` as fields added to the normalized output to support the Normalization dashboard tab's enrichment visualization. System Decomposition Spec 2 validation criteria at line 75 reference `enrichment_applied`. None of these fields appear in the `NormalizedIdentity` model in SPEC_0; if they are intended to live only inside the `events.normalized_attributes` JSONB (A7 §8 supports this reading), the repo-resident doc contract is silent on the point.
+- **Notes**: The A7 manifest adds a cross-reference to `A7_Cross_Protocol_Enrichment_Spec.md` in several repo-resident locations. Per the self-contained rule, those cross-references were correctly stripped. The CLAUDE.md duplicate pipeline diagram is the clearest single regression in this reconciliation; low-risk to fix (delete line 72) but left for a remediation pass per the task's diagnostic-only constraint.
 
 ## Cross-Cutting Observations
 
-**Systematic suppression of A-series cross-references in repo-resident documents.** The A1, A3, and A4 manifests each contain directives whose applied text would violate the project's Cross-Reference Rules (repo-resident documents must not reference A-series or meta-branch-only content). Every such "See `A{N}_*.md` for..." trailing sentence was omitted on application. The affected directives are: A1 manifest 1b (line 52), A3 manifest 1b (line 43), A3 manifest 1c (line 70), A4 manifest 1a (line 22), and A4 manifest 1b (line 36). This is the correct outcome under repository discipline; the report classifies these as partial rather than missing because the substantive content was applied and only the boundary-violating suffix was omitted. Consider either amending the manifests to remove these suffixes or moving these cross-references into `docs/audit/`-resident connector documents.
+**SPEC_0 project-tree drift.** The single most consequential pattern is that SPEC_0's project tree (lines 20–63) was not updated to match the files and directories introduced by A1, A4, and A7: `scripts/train_bootstrap_model.py`, `shared/naas_shared/ml_features.py`, and `config/normalization_authority.yaml` are all absent from the scaffold tree, and the `simulation_tools.py` entry at line 45 has malformed tree characters. CLAUDE.md's project-structure section was updated (it now lists the scripts and shared files correctly), but SPEC_0 — the canonical scaffold spec — diverged from CLAUDE.md. Agents implementing SPEC_0 without also reading CLAUDE.md will not create these paths. This matches the task's explicit flag: "Give extra focus to new files and paths added by the A-series designs."
 
-**Seed-policy directive conflict between A1 and A3.** A1 manifest §6 (lines 312–331) and A3 manifest §2a (lines 80–144) both specify complete replacements of the `SPEC_0` seed policy but with incompatible schemas. A1 requires a weights-only schema with six keys including `device_risk` and `time_of_day`; A3 requires the hybrid `signal_weights` + `conditions` schema with four signal keys and eight demonstration conditions. The repository state reflects A3's design. Neither manifest acknowledges the other. The A1 directive should be treated as superseded by A3 and annotated as such to prevent future re-application.
+**Repo self-containment invariant is intact.** No repo-resident document (CLAUDE.md, SYSTEM_ARCHITECTURE.md, SPEC_0, or any file outside `docs/meta/` and `docs/audit/`) cross-references an A-series or meta document. All manifest directives that instructed such cross-references were correctly stripped at application time. The only A-series / "A-series" string matches outside `docs/audit/` are in meta documents, which are allowed.
 
-**Manifest file-path drift.** A1's manifest targets "`NAAS_v2_0_Tech_Stack_UPDATED.md`" (manifest line 155) and "`SPEC_0_Project_Scaffold_and_Shared_Foundation_UPDATED.md`" (manifest line 89); A4 references "`NAAS_v2.0_Tech_Stack.md`" (correct); A6 and A7 headers tag some of their targets as "NOT in repo" (A6 manifest line 38; A7 manifest lines 146, 220). The actual file paths have no `_UPDATED` suffix, and `docs/meta/` documents are in-repo on the `meta-working` branch. Directives were applied against the correct files despite these labels, but the manifests themselves are internally inconsistent about file locations.
+**Tier-2 output-provenance gap (A2 + A7 together).** The `NormalizedIdentity` model in SPEC_0 carries `normalization_confidence` but not the richer provenance structure that both A2 (`resolution_details`) and A7 (`enrichment_applied`, `enrichment_source`, `enrichment_cache_hit`, `enrichment_skip_reason`) specify as required for downstream dashboard visualization. These fields currently have no schema-level home; if they are intended to live only as free-form JSONB under `events.normalized_attributes`, the contract is informal and the Spec 2 implementer and Spec 6 dashboard implementer will agree on field names only by convention. This is a tier-2 observation, not a directive failure — both A2 and A7 leave the packaging decision implicit.
 
-**`SPEC_0` shared library file tree is out of sync with `CLAUDE.md`.** Both documents attempt to enumerate the contents of `shared/naas_shared/`. `CLAUDE.md` (lines 56–59) lists `ml_features.py` and `simulation_tools.py`. `SPEC_0` (lines 34–45) lists only `simulation_tools.py`, and with the indentation defect described under A1. Since `SPEC_0` is the scaffolding spec whose file tree is the authoritative definition of the directory structure, the omission of `ml_features.py` there is the more consequential gap.
+**Directive-application mode inconsistency.** Two A7 directives (2a — CLAUDE.md pipeline diagram) and A1 (1e — Communication Patterns "Event Submission" row) exhibit different application modes than the manifest specified: A7 2a was a REPLACE but was applied as ADD, producing a duplicate; A1 1e was two-row ADD but one row was instead merged into an existing row. In both cases the referential information is present in the repo, but the structural form diverges from the manifest. Future verification passes should check application mode, not just content presence.
 
-**Asymmetry by documentation state.** Items with both spec and manifest (A1, A3, A4, A7) have the largest directive footprint and the tightest architectural-level term consistency, but also concentrate the boundary-rule directives-vs-rules tension. The single manifest-only item (A6) has the cleanest application — two small, local directives, both landed exactly. The single spec-only item (A2) has no directly-verifiable directive surface because its intent is almost entirely at the implementation-spec level (Spec 2), and its integration hooks (`normalization_risk` signal, authority config path, cross-protocol enrichment) appear consistently in architectural documents. The neither-document item (A5) is entirely opaque.
-
-**Mechanical application defects are localized and small.** Two minor application bugs were found in otherwise-applied directives: a duplicated line in the `CLAUDE.md` event pipeline diagram (A7 directive 5a), and a broken markdown table row in `SYSTEM_ARCHITECTURE.md` Communication Patterns (A7 directive 1e, where the directive source itself also has the bug). A third mechanical defect (indentation in the `SPEC_0` file tree) affects A1's `simulation_tools.py` entry. None of these affect the described architectural intent; all are cosmetic or structural.
+**Asymmetry by documentation state.** Items with both spec and manifest (A1, A3, A4, A7) have the tightest tier-1 consistency — manifest directives drive verbatim application. Spec-only A2 has consistent tier-1 coverage but its scaffold-level artifacts (the `config/` directory, the `resolution_details` structure) are homeless in SPEC_0. Manifest-only A6 is the cleanest item in the set — its narrow scope and complete application leave no gaps. This supports the pattern that heterogeneous documentation states produce asymmetric gap profiles: manifest-driven items have tight tier-1 + weaker tier-2, spec-only items have intact principles but thinner surface coverage.
 
 ## Items Without Verifiable Documentation
 
-- **A5**: absent from `docs/audit/` entirely. No spec, no manifest, no referenced file. No intent reconstruction is attempted. The item exists only as a gap in the A-series numbering; it may have been resolved in design discussion without producing documentation, or the number may simply have been skipped.
+- **A5**: not present in `docs/audit/`. No spec, no manifest, no other trace in the repo under any A5-prefixed name. Per the task constraints, intent is not speculated.
+- **A8**: not present in `docs/audit/`. Same handling as A5. The A-series numbering is contiguous from A1 through A7 (with A5 missing); no eighth item is evidenced.
 
 ## Out-of-Scope Items Noticed
 
-- **Manifests themselves instruct boundary-rule violations.** The project's Cross-Reference Rules are not reflected in the language of the manifests. A future design discussion should decide whether to amend existing manifests, establish a convention for where such cross-references belong (e.g., only in `docs/audit/`-resident connector notes), or define an exception where repo-resident documents may reference A-series content.
+- `docs/implementation-plans/` contains chunked plan documents (e.g., `plan_SPEC_0_Project_Scaffold_and_Shared_Foundation_chunk0..3.md`) that are agentic-pipeline derivatives of SPEC_0. If SPEC_0 is updated to include the missing project-tree entries (scripts/, config/, ml_features.py), the chunked plans may require regeneration to stay in sync.
+- The A1 manifest directive 2e ("Verify `persona-simulator` is included in the list of directories that get placeholder READMEs") is a verification instruction, not a change — noted as satisfied at SPEC_0:61.
+- The CLAUDE.md pipeline-diagram regression (A7 2a) is a single-line cleanup. Its remediation is deferred per this task's diagnostic-only constraint.
+- A2 §7.1 stores `resolution_details` inside JSONB, and A7 §8 adds enrichment provenance to the same payload. A separate design discussion could formalize the `normalized_attributes` JSONB shape as a Pydantic model in `shared/naas_shared/models.py`, which would close the tier-2 provenance gap without adding fields to `NormalizedIdentity` itself.
 
-- **Latent manifest conflicts have no explicit resolution record.** The A1 vs A3 seed-policy conflict was resolved in practice (A3 won) but is not acknowledged in either manifest. A future A-series resolution protocol may benefit from a convention for recording conflicts between manifests and noting which directive supersedes which.
-
-- **The A7 manifest's own Communication Patterns table row has a pre-existing markdown-table bug** that was faithfully transcribed into `SYSTEM_ARCHITECTURE.md`. This suggests manifest review should include a rendered-markdown check, not just source-level inspection.
-
-- **A5's absence is undocumented.** If A5 was intentionally skipped, a single-line note in `docs/audit/` would eliminate future confusion. If it was resolved in design discussion, a short stub document would preserve traceability.
-
-- **File-tree specifications duplicated across `SPEC_0` and `CLAUDE.md`** are a maintenance hazard; any future change to `shared/naas_shared/` requires updates to both. A single canonical location (likely `SPEC_0`) with `CLAUDE.md` linking to it would reduce drift risk — though note this would require `CLAUDE.md` to link to a repo-resident target, not an A-series or meta document.
+*End of A-Series Intent-vs-Application Reconciliation Report.*
