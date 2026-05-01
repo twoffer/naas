@@ -57,6 +57,8 @@ naas/
 │   └── naas_shared/
 │       ├── ml_features.py          # ML feature column ordering contract
 │       └── simulation_tools.py     # Tool definitions for persona-simulator and MCP server
+├── config/
+│   └── normalization_authority.yaml  # Normalization authority weights, attribute importance, enrichment source config
 ├── dashboard/                      # React SPA (5 tabs + floating simulator panel)
 ├── infrastructure/                 # Docker configs: postgres, redis, keycloak, openldap, monitoring
 └── docs/
@@ -69,7 +71,6 @@ naas/
 ## Event Pipeline (async, Redis Streams)
 
 ```
-Ingestion → [login_events] → Normalization → [normalized_events] → Enrichment → [enriched_events] → Risk Evaluator
 Ingestion → [login_events] → Normalization (+ LDAP enrichment for OIDC/SAML) → [normalized_events] → Enrichment → [enriched_events] → Risk Evaluator
                                                                                                                                          │
 Alert Service ◄── [decisions Pub/Sub] ◄── Risk Evaluator                                                                                 │
