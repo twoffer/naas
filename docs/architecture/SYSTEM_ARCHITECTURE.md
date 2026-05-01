@@ -108,7 +108,7 @@ Simulation:
   LDAP employeeType / SAML employeeType / OIDC employee_type → employee_type (normalized to: FTE|contractor|vendor)
   ```
 - **Conflict resolution:** When multiple sources disagree, applies configurable priority rules.
-- **Cross-protocol enrichment:** For OIDC and SAML events, the service queries OpenLDAP to find the same user (by configurable unified schema field, default: `primary_email` — the adapter internally reverse-maps this to the corresponding LDAP attribute). If found, both the primary protocol's attributes and the LDAP directory attributes are fed into the conflict resolution algorithm, producing a multi-source normalized identity with per-attribute confidence scores. Enrichment is source-agnostic (applies equally to live and simulated events). LDAP events skip enrichment (directory data is already in the payload). Configuration lives in `config/normalization_authority.yaml` under `enrichment.sources.ldap`.
+- **Cross-protocol enrichment:** For OIDC and SAML events, the service queries OpenLDAP to find the same user (by configurable unified schema field, default: `primary_email` — the adapter internally reverse-maps this to the corresponding LDAP attribute). If found, both the primary protocol's attributes and the LDAP directory attributes are fed into the conflict resolution algorithm, producing a multi-source normalized identity with per-attribute confidence scores. Enrichment is source-agnostic (applies equally to live and simulated events). LDAP events skip enrichment (directory data is already in the payload). Configuration lives in `config/normalization.yaml` under `enrichment.sources.ldap`.
 - **Updates:** PostgreSQL `events.normalized_attributes` (JSONB)
 
 ### 4. Signal Enrichment Service

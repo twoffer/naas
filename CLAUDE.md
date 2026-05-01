@@ -58,7 +58,7 @@ naas/
 │       ├── ml_features.py          # ML feature column ordering contract
 │       └── simulation_tools.py     # Tool definitions for persona-simulator and MCP server
 ├── config/
-│   └── normalization_authority.yaml  # Normalization authority weights, attribute importance, enrichment source config
+│   └── normalization.yaml            # Normalization service config: per-attribute authority weights, attribute importance, cross-protocol enrichment source config
 ├── dashboard/                      # React SPA (5 tabs + floating simulator panel)
 ├── infrastructure/                 # Docker configs: postgres, redis, keycloak, openldap, monitoring
 └── docs/
@@ -99,7 +99,7 @@ If `.venv/` exists, activate it (`source .venv/bin/activate`) before running any
 - **Stream consumers:** `XREADGROUP` with consumer groups; ACK only after success
 - **Fail-safe:** Unknown risk → DENY; service down → CHALLENGE
 - **Metadata on every event:** `source`, `is_synthetic`, `is_historical`, `protocol`
-- **Cross-protocol enrichment:** Identity Normalization queries OpenLDAP for OIDC/SAML events to merge directory attributes with token claims. Configurable unified schema correlation field (default: `primary_email`; adapter reverse-maps to LDAP attribute internally). Cached in Redis (60s TTL). Graceful degradation on failure. LDAP events skip enrichment. Config in `config/normalization_authority.yaml` under `enrichment.sources.ldap`.
+- **Cross-protocol enrichment:** Identity Normalization queries OpenLDAP for OIDC/SAML events to merge directory attributes with token claims. Configurable unified schema correlation field (default: `primary_email`; adapter reverse-maps to LDAP attribute internally). Cached in Redis (60s TTL). Graceful degradation on failure. LDAP events skip enrichment. Config in `config/normalization.yaml` under `enrichment.sources.ldap`.
 - **Markdown files:** Preserve all Unicode characters (emojis, box-drawing, arrows) as-is — never replace with ASCII equivalents
 - **LLM Integration:** Persona Simulator uses configurable LLM provider (Claude API → Ollama → mock). Set via `LLM_PROVIDER` env var. Default: `mock` (no API keys needed). Events submitted via EventSink abstraction.
 - **Shared tools:** `shared/naas_shared/simulation_tools.py` contains tool definitions and executor used by persona-simulator (internal) and MCP server (external, P2).
