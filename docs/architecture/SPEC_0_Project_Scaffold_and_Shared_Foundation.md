@@ -781,7 +781,7 @@ This IS the shared imports spec. All subsequent specs import from `naas_shared`:
 # Standard imports available to all services:
 from naas_shared.database import get_db_session, get_engine
 from naas_shared.redis_client import get_redis, publish_to_stream, publish_to_channel, ensure_consumer_group
-from naas_shared.models import LoginEventBase, LoginEventIngest, LoginEventRecord, NormalizedIdentity, RiskDecision, AlertMessage, HealthResponse
+from naas_shared.models import LoginEventBase, LoginEventIngest, LoginEventRecord, NormalizedAttributes, RiskDecision, AlertMessage, HealthResponse
 from naas_shared.logging import setup_logging, get_logger
 from naas_shared.config import get_settings
 from naas_shared.constants import (
