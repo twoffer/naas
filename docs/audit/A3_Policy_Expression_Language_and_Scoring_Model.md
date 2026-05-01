@@ -136,7 +136,7 @@ ensemble:
 
 The evaluation context is the set of variables available to condition expressions at evaluation time. It is constructed by the Risk Evaluator from the enriched event data. Every field listed below is guaranteed to be present when the expression evaluator runs.
 
-### 3.1 `user.*` — from NormalizedIdentity (Spec 2 output)
+### 3.1 `user.*` — from NormalizedAttributes (Spec 2 output)
 
 | Field                 | Type                            | Example            | Source                                    |
 |-----------------------|---------------------------------|--------------------|-------------------------------------------|

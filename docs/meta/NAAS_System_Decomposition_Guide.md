@@ -64,7 +64,7 @@ Claude Code works best with **clear boundaries, well-defined inputs/outputs, and
 - OIDC adapter (extract JWT claims from `raw_attributes`)
 - LDAP adapter — dual role: (1) extract LDAP attributes from `raw_attributes` for `protocol: "ldap"` events; (2) query live OpenLDAP server for cross-protocol enrichment of OIDC/SAML events
 - SAML adapter (map SAML-convention attribute names from `raw_attributes`)
-- Cross-protocol LDAP enrichment: unified schema correlation field lookup (configurable, default: `primary_email`; adapter reverse-maps to LDAP attribute internally), Redis cache (60s TTL), graceful degradation on failure, enrichment config in `normalization_authority.yaml`
+- Cross-protocol LDAP enrichment: unified schema correlation field lookup (configurable, default: `primary_email`; adapter reverse-maps to LDAP attribute internally), Redis cache (60s TTL), graceful degradation on failure, enrichment config in `normalization.yaml`
 - LDAP connection pool (`python-ldap`, async-wrapped, pool size 3)
 - Unified schema definition and attribute mapping engine
 - Conflict resolution logic (multi-source attributes — triggered by cross-protocol enrichment)
@@ -72,7 +72,7 @@ Claude Code works best with **clear boundaries, well-defined inputs/outputs, and
 
 **Why this grouping:** This is the NAAS differentiator — the most important code in the project. Complex enough to deserve its own spec. Must be high quality.
 
-**Validation:** Ingest events with different protocols → verify `normalized_attributes` JSONB in PostgreSQL contains unified schema output. LDAP `cn` → `display_name`, SAML `displayName` → `display_name`, OIDC `name` → `display_name`. For OIDC events where the user exists in OpenLDAP: verify `enrichment_applied: true` in normalized output and multi-source `resolution_details` showing both `oidc` and `ldap` sources. For OIDC events where the user does NOT exist in OpenLDAP: verify `enrichment_applied: false` and single-source resolution.
+**Validation:** Ingest events with different protocols → verify `normalized_attributes` JSONB in PostgreSQL contains unified schema output. LDAP `cn` → `display_name`, SAML `displayName` → `display_name`, OIDC `name` → `display_name`. For OIDC events where the user exists in OpenLDAP: verify `enrichment.applied: true` in normalized output and multi-source `resolution_details` showing both `oidc` and `ldap` sources. For OIDC events where the user does NOT exist in OpenLDAP: verify `enrichment.applied: false` with `enrichment.skip_reason: "no_ldap_match"` and single-source resolution.
 
 ---
 

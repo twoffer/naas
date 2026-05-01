@@ -120,10 +120,10 @@ Note: `is_synthetic` is deliberately not checked. The normalization service does
 
 ### 5.1 Configuration Schema
 
-LDAP enrichment is configured in the existing `normalization_authority.yaml` file (defined in A2 §3.1), extended with a new `enrichment` section:
+LDAP enrichment is configured in the existing `normalization.yaml` file (defined in A2 §3.1), extended with a new `enrichment` section:
 
 ```yaml
-# Appended to config/normalization_authority.yaml
+# Appended to config/normalization.yaml
 
 enrichment:
   sources:
@@ -299,7 +299,7 @@ Event arrives on Redis Stream `login_events`
   │
   ├── 4. Calculate overall normalization_confidence (A2 §5)
   │
-  ├── 5. Build NormalizedIdentity with resolution_details
+  ├── 5. Build NormalizedAttributes with resolution_details and enrichment metadata
   │
   ├── 6. Write to PostgreSQL events.normalized_attributes (JSONB)
   │
@@ -313,14 +313,16 @@ When LDAP enrichment occurs, the `resolution_details` in the normalized output r
 ```json
 {
   "normalization_confidence": 0.87,
-  "enrichment_applied": true,
-  "enrichment_source": "ldap",
-  "enrichment_cache_hit": false,
+  "enrichment": {
+    "applied": true,
+    "source": "ldap",
+    "cache_hit": false
+  },
   "resolution_details": {
     "department": {
+      "resolution": "priority",
       "resolved_value": "Engineering",
       "confidence": 0.72,
-      "resolution": "priority",
       "winner_source": "ldap",
       "conflicting_values": {"oidc": "Product"},
       "penalty_applied": true
@@ -334,20 +336,22 @@ When enrichment is skipped or fails:
 ```json
 {
   "normalization_confidence": 0.80,
-  "enrichment_applied": false,
-  "enrichment_skip_reason": "no_ldap_match",
+  "enrichment": {
+    "applied": false,
+    "skip_reason": "no_ldap_match"
+  },
   "resolution_details": {
     "department": {
+      "resolution": "single_source",
       "resolved_value": "Product",
       "confidence": 0.80,
-      "resolution": "single_source",
       "sources": ["oidc"]
     }
   }
 }
 ```
 
-The `enrichment_applied`, `enrichment_source`, `enrichment_cache_hit`, and `enrichment_skip_reason` fields are added to the normalized output to support the Normalization dashboard tab's enrichment visualization.
+The `enrichment` field (a discriminated union over `EnrichmentApplied` and `EnrichmentSkipped` variants, defined on `NormalizedAttributes` in `shared/naas_shared/models.py`) carries the enrichment-provenance information that supports the Normalization dashboard tab's enrichment visualization. The `applied: true` variant carries `source` and `cache_hit`; the `applied: false` variant carries a closed-enum `skip_reason`.
 
 ---
 

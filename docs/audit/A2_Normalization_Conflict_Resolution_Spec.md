@@ -15,7 +15,7 @@ The Identity Normalization Service receives login events tagged with one of thre
 2. **Normalizes** attribute values (e.g., `"eng"` → `"Engineering"`, `"E"` → `"FTE"`)
 3. **Resolves conflicts** when multiple sources provide different values for the same attribute
 4. **Calculates confidence** based on source agreement and authority weights
-5. **Produces** a `NormalizedIdentity` object with the resolved values and an overall `normalization_confidence` score
+5. **Produces** a `NormalizedAttributes` object with the resolved values and an overall `normalization_confidence` score
 
 The confidence score feeds downstream into the Risk Evaluator as a normalization-quality signal: lower confidence (sources disagree) contributes to higher risk scores.
 
@@ -111,7 +111,7 @@ Normalization is case-insensitive. Unrecognized values log a warning and default
 Attribute authority is defined in a YAML configuration file loaded by the normalization service at startup and cached. Each attribute specifies which sources are authoritative and with what weight.
 
 ```yaml
-# config/normalization_authority.yaml
+# config/normalization.yaml
 
 # Default authority weights applied when an attribute has no explicit config
 defaults:
@@ -305,7 +305,7 @@ function resolve_groups(source_values, authority_config):
 
 ## 5. Overall Normalization Confidence
 
-The `normalization_confidence` field on `NormalizedIdentity` is the **weighted average** of per-attribute confidences, where weights reflect attribute importance to downstream risk evaluation.
+The `normalization_confidence` field on `NormalizedAttributes` is the **weighted average** of per-attribute confidences, where weights reflect attribute importance to downstream risk evaluation.
 
 ### 5.1 Attribute Importance Weights
 
@@ -393,9 +393,9 @@ The default seed policy in `init.sql` (Spec 0) uses the hybrid policy schema def
 
 ---
 
-## 7. Normalization Output: Updated NormalizedIdentity
+## 7. Normalization Output: NormalizedAttributes Model
 
-The existing `NormalizedIdentity` Pydantic model (defined in Spec 0's `shared/naas_shared/models.py`) already has the right fields. No schema changes are needed. However, the normalization service should populate two additional pieces of data in the event record:
+The full normalization output is formalized as the `NormalizedAttributes` Pydantic model in `shared/naas_shared/models.py` (defined in Spec 0). The model uses discriminated unions for the polymorphic `resolution_details` and `enrichment` substructures, providing a typed contract between the normalization service (writer) and downstream consumers (the Risk Evaluator and the Spec 6 dashboard's Normalization tab). The §7.1 example below shows the JSON shape produced by serializing this model.
 
 ### 7.1 What Gets Stored
 
@@ -410,34 +410,40 @@ The `events.normalized_attributes` JSONB column stores the full normalization ou
   "groups": ["engineering", "admin", "vpn-users"],
   "source_protocol": "oidc",
   "normalization_confidence": 0.87,
+  "enrichment": {
+    "applied": true,
+    "source": "ldap",
+    "cache_hit": false
+  },
   "resolution_details": {
     "display_name": {
+      "resolution": "unanimous",
       "resolved_value": "Alice Smith",
       "confidence": 0.90,
-      "resolution": "unanimous",
       "sources": ["oidc", "ldap"]
     },
     "primary_email": {
+      "resolution": "unanimous",
       "resolved_value": "alice@corp.com",
       "confidence": 0.95,
-      "resolution": "unanimous",
       "sources": ["oidc", "ldap"]
     },
     "department": {
+      "resolution": "priority",
       "resolved_value": "Engineering",
       "confidence": 0.72,
-      "resolution": "priority",
       "winner_source": "ldap",
       "conflicting_values": {"oidc": "Product"},
       "penalty_applied": true
     },
     "employee_type": {
+      "resolution": "unanimous",
       "resolved_value": "FTE",
       "confidence": 0.95,
-      "resolution": "unanimous",
       "sources": ["oidc", "ldap"]
     },
     "groups": {
+      "resolution": "list_merge",
       "resolved_value": ["engineering", "admin", "vpn-users"],
       "confidence": 0.85,
       "strategy": "union",
