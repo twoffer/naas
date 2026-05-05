@@ -1,7 +1,7 @@
 # NAAS Agentic Workflow Enhancement Guide
 ## Implementation Plan for Claude Code
 
-**Document Date:** March 23, 2026
+**Document Date:** May 2026 (revised)
 **Purpose:** Guide the implementation of automated agentic development pipeline enhancements for the NAAS project.
 **Audience:** Project architect and Claude Code agents operating on the NAAS codebase.
 
@@ -28,20 +28,20 @@ An automated pipeline where a single invocation (e.g., "Implement Spec 3") to a 
 
 ### Agent Roster
 
-| Agent | Role | Category |
-|-------|------|----------|
-| `pipeline-orchestrator` | Pipeline entry point, lifecycle manager, and coordination loop | Orchestration |
-| `technical-architect` | Analyzes specs, produces implementation plans and chunk decompositions | Worker |
-| `feature-implementer` | Implements code chunk by chunk, makes tests pass, fixes security issues | Worker |
-| `code-security-reviewer` | Reviews code for security and quality | Worker |
-| `test-suite-generator` | Generates test suites (TDD-first and post-implementation) | Worker |
-| `integration-validator` | Tests cross-service integration | Worker |
+| Component | Role | Category | Surface |
+|-----------|------|----------|---------|
+| `pipeline-orchestrator` | Pipeline entry point, lifecycle manager, and coordination loop | Orchestration | Skill (`.claude/skills/`) |
+| `technical-architect` | Analyzes specs, produces implementation plans and chunk decompositions | Worker | Subagent (`.claude/agents/`) |
+| `feature-implementer` | Implements code chunk by chunk, makes tests pass, fixes security issues | Worker | Subagent (`.claude/agents/`) |
+| `code-security-reviewer` | Reviews code for security and quality | Worker | Subagent (`.claude/agents/`) |
+| `test-suite-generator` | Generates test suites (TDD-first and post-implementation) | Worker | Subagent (`.claude/agents/`) |
+| `integration-validator` | Tests cross-service integration | Worker | Subagent (`.claude/agents/`) |
 
-The `pipeline-orchestrator` is the only agent the developer invokes directly during automated pipeline runs. All five worker agents are invoked by the orchestrator via `Task`, never by the developer.
+The `pipeline-orchestrator` is invoked directly by the developer (via `/pipeline-orchestrator <spec>`) and runs in the main Claude Code session. All five worker agents are invoked by the orchestrator via the `Agent` tool, never by the developer. The orchestrator MUST run in the main session because subagents cannot themselves invoke other subagents — placing the orchestrator in `.claude/agents/` would prevent it from delegating to the worker pool.
 
 ### Architecture: Thick Orchestrator with Phase Decomposition
 
-The orchestrator manages the **entire pipeline execution loop** — not just pre/post phases. It invokes each worker via `Task`, reads results from Task responses and artifact files, updates pipeline state (`state.json`) and the execution log, and decides the next step.
+The orchestrator manages the **entire pipeline execution loop** — not just pre/post phases. It invokes each worker via the `Agent` tool, reads results from `Agent` tool responses and artifact files, updates pipeline state (`state.json`) and the execution log, and decides the next step.
 
 Workers are stateless specialists. They receive their context via the orchestrator's Task prompt, do their work, produce artifact files, and return a summary. They never read or write pipeline state files (`state.json`, `chunks.json`).
 
@@ -63,6 +63,20 @@ This design:
 └── human-review.md      # Shared escalation/resume protocol
 ```
 
+### Design Philosophy: Defense in Depth for Increased Rigor
+
+The pipeline incorporates several layers of guardrails — iteration caps on the implementer (3 attempts to make tests pass), iteration caps on the security review reflection loop (3 attempts before escalation), an invocation-count budget guard (pause at 30 invocations), regression checks after every security fix, and explicit HUMAN_REVIEW escalation paths. With current-generation frontier models (Claude Opus 4.7, Claude Sonnet 4.6), some of this scaffolding is heavier than what is strictly required for the pipeline to produce correct output. Modern models exhibit stronger task persistence, better self-verification, and more reliable tool use than earlier generations, and many runs would succeed without any of these guardrails firing.
+
+These layers are retained deliberately for three reasons:
+
+1. **Demonstration value.** A pipeline that includes explicit quality gates, escalation paths, and budget controls visibly demonstrates agentic engineering discipline — exactly the discipline that distinguishes a production-ready agentic system from a prototype. The receipts (iteration counts, security fixes, escalations) tell a verifiable story.
+
+2. **Robustness across model generations.** The pipeline is designed to remain reliable if a less capable model is substituted for cost reasons (e.g., Sonnet 4.6 in place of Opus 4.7), or if a future model exhibits regression on a particular workflow. The guardrails are calibrated for the *minimum* trustworthy behavior, not the typical case.
+
+3. **Catching the long tail.** Even with a well-behaved model, edge cases — flaky test environments, ambiguous spec requirements, intricate security findings — can produce a runaway loop or a confidently wrong output. The guardrails catch these without requiring the developer to babysit every run.
+
+The cost of this defense-in-depth is mostly cognitive surface area, not runtime overhead — the guards rarely fire on a healthy run, but their presence makes the pipeline trustworthy enough to leave unattended for spans of 30+ minutes. The per-spec `pipeline-quality-report.md` artifact (see Post-Pipeline Phase) makes these guardrails visible by recording when and how often each fired during a run.
+
 ---
 
 ## Priority 1: Modernize Agent Definitions
@@ -71,44 +85,53 @@ This design:
 
 Update all five existing worker subagent files and create the new `pipeline-orchestrator` agent using the current Claude Code agent format with YAML frontmatter fields for tool scoping, model selection, and memory.
 
-### Create the Pipeline Orchestrator Agent
+### Create the Pipeline Orchestrator Skill
 
-**`.claude/agents/pipeline-orchestrator.md`**
+**`.claude/skills/pipeline-orchestrator/SKILL.md`**
 
-The `pipeline-orchestrator` is a **thick orchestrator** that manages the entire pipeline lifecycle:
+The `pipeline-orchestrator` is a **thick orchestrator** that runs in the main Claude Code session and manages the entire pipeline lifecycle:
 
-1. **Pre-pipeline phase:** Parse the spec identifier from the developer's prompt, create the feature branch, initialize pipeline state (`state.json`), and create the pipeline execution log.
-2. **Architecture phase:** Invoke the `technical-architect` via Task. Read the resulting plan file and `chunks.json`.
-3. **Per-chunk loop:** For each chunk, invoke the `test-suite-generator`, `feature-implementer`, and `code-security-reviewer` via Task, handling reflection loops when quality gates fail. Commit each chunk after it passes.
-4. **Integration phase:** Invoke the `integration-validator` via Task.
-5. **Post-pipeline phase:** Push the feature branch, generate the draft PR from the execution log, write the final pipeline summary.
+1. **Pre-pipeline phase:** Parse the spec identifier from the developer's invocation, create the feature branch, initialize pipeline state (`state.json`), and create the pipeline execution log.
+2. **Architecture phase:** Invoke the `technical-architect` via the `Agent` tool. Read the resulting plan file and `chunks.json`.
+3. **Per-chunk loop:** For each chunk, invoke the `test-suite-generator`, `feature-implementer`, and `code-security-reviewer` via the `Agent` tool, handling reflection loops when quality gates fail. Commit each chunk after it passes.
+4. **Integration phase:** Invoke the `integration-validator` via the `Agent` tool.
+5. **Post-pipeline phase:** Push the feature branch, generate the draft PR from the execution log, write the final pipeline summary, and emit the per-spec quality report.
 6. **Resume:** If `state.json` already exists, resume from the last recorded state instead of starting fresh.
 7. **Cleanup:** On "Clean up pipeline for Spec X", remove transient pipeline artifacts.
 
-After **every Task completion**, the orchestrator performs a three-step update:
-1. Extract key data from the worker's Task response and any artifact files
+After **every `Agent` tool completion**, the orchestrator performs a three-step update:
+1. Extract key data from the worker's response and any artifact files
 2. Update `state.json` with structured data
 3. Append a summary line to the pipeline execution log
 
+**Why a skill, not a subagent:** Claude Code subagents cannot themselves invoke other subagents. Placing the orchestrator in `.claude/agents/` would prevent it from delegating to the worker pool — the `Agent` tool is unavailable inside a subagent context. Skills, by contrast, run in the main Claude Code session, which retains full `Agent` tool access. The skill body becomes the orchestrator's operating instructions when invoked.
+
 **Recommended configuration:**
 
-| Field | Value | Rationale |
-|-------|-------|-----------|
-| `tools` | `Bash`, `Read`, `Write`, `Task`, `Grep`, `Glob`, `AskUserQuestion` | Needs `Bash` for git/gh CLI. `Task` to invoke all workers. `Read`/`Write` for state files and log. `Grep`/`Glob` for codebase inspection. `AskUserQuestion` for HUMAN_REVIEW escalation and budget guard approval. |
-| `model` | `claude-opus-4-6` | Complex multi-step coordination with significant accumulated context. Benefits from 1M context window and deep reasoning. |
-| `memory` | `project` | Remembers pipeline configuration decisions across sessions. |
+| Frontmatter field | Value | Rationale |
+|-------------------|-------|-----------|
+| `name` | `pipeline-orchestrator` | Invoked as `/pipeline-orchestrator <spec>` |
+| `description` | "Pipeline entry point and lifecycle manager. Invoke as `/pipeline-orchestrator <spec>` to run the full automated pipeline, `/pipeline-orchestrator resume <spec>` to continue an interrupted run, or `/pipeline-orchestrator cleanup <spec>` to remove transient artifacts." | Loaded into context so Claude knows when to apply the skill |
+| `argument-hint` | `[spec-id]` | Autocomplete hint when typing the slash command |
+| `disable-model-invocation` | `true` | Pipeline runs are explicit developer actions, never auto-triggered by Claude pattern-matching chat |
+| `allowed-tools` | `Bash Read Write Edit Agent Grep Glob AskUserQuestion TaskCreate TaskGet TaskList TaskUpdate` | Pre-approves the toolset the orchestrator needs, eliminating per-call permission prompts during a run |
+| `model` | `claude-opus-4-7` | Complex multi-step coordination with significant accumulated context. Benefits from 1M context window, improved long-horizon focus, and stronger file-system-based memory |
+| `effort` | `xhigh` | Recommended for coding and agentic use cases on Opus 4.7 |
 
-**System prompt structure:**
+**System prompt structure (skill body):**
 
-The orchestrator's system prompt is intentionally concise (~70 lines). It defines:
+The skill body is intentionally concise (~70 lines). It defines:
 - Identity and role
 - First-action document loading (CLAUDE.md, AI-AGENT-PRINCIPLES.md, CONTRACTS.md)
-- Three entry modes (fresh start, resume, cleanup)
+- Three entry modes (fresh start, resume, cleanup) and how arguments select between them
 - The state machine diagram and **phase-to-file mapping table**
-- Budget guard (pause at 30 invocations)
-- Critical rules (sole state.json writer, three-step update, targeted staging, pipeline mode instruction)
+- Budget guard (pause at 30 invocations) and how to surface it to the developer
+- Critical rules (sole `state.json` writer, three-step update, targeted staging, pipeline mode instruction)
+- The post-pipeline obligation to emit `pipeline-quality-report.md`
 
-Detailed per-phase instructions live in `.claude/pipeline/phases/`. The orchestrator reads the relevant phase file when entering each phase. This keeps the system prompt focused on structure and constraints, while phase files provide natural language guidance for execution.
+Detailed per-phase instructions remain at `.claude/pipeline/phases/*.md` (unchanged from prior layout). The skill reads the relevant phase file when entering each phase. This keeps the skill body focused on structure and constraints while phase files provide natural-language guidance for execution. Phase files remain at `.claude/pipeline/` rather than moving inside the skill directory in order to keep their pipeline-aligned behavior more generally consumable.
+
+**Token budget guard note:** The Anthropic API beta `task_budget` feature (introduced with Opus 4.7) is set via API headers and is not exposed in terminal Claude Code. The pipeline therefore retains its existing `invocation_count` field in `state.json` as the budget control mechanism. If the orchestrator is ever migrated to the Agent SDK, `task_budget` becomes available as a refinement.
 
 ### Update the Technical Architect Agent
 
@@ -144,20 +167,26 @@ For each `.claude/agents/<agent-name>.md` file:
 
 **1. Verify `tools:` field restricts capabilities appropriately.**
 
-| Agent | Tools | Rationale |
-|-------|-------|-----------|
-| `pipeline-orchestrator` | `Bash, Read, Write, Task, Grep, Glob, AskUserQuestion` | Full pipeline management + developer escalation |
-| `technical-architect` | `Read, Write, Grep, Glob, AskUserQuestion` | Plan + chunks.json production |
-| `feature-implementer` | `Read, Write, Edit, Bash, Grep, Glob, LSP, AskUserQuestion` | Full implementation toolset |
-| `code-security-reviewer` | `Read, Grep, Glob, LSP` | Read-only by design |
-| `test-suite-generator` | `Read, Write, Edit, Bash, Grep, Glob, LSP, AskUserQuestion` | Test file creation + verification |
-| `integration-validator` | `Read, Bash, Grep, Glob, AskUserQuestion` | Test execution + diagnostics |
+| Component | Tools | Rationale |
+|-----------|-------|-----------|
+| `pipeline-orchestrator` (skill `allowed-tools`) | `Bash Read Write Edit Agent Grep Glob AskUserQuestion TaskCreate TaskGet TaskList TaskUpdate` | Full pipeline management + developer escalation. `Agent` invokes worker subagents (formerly named `Task`). `TaskCreate`/`TaskGet`/`TaskList`/`TaskUpdate` populate the Claude Code task UI for visual progress tracking |
+| `technical-architect` (subagent `tools`) | `Read, Write, Grep, Glob, AskUserQuestion` | Plan + chunks.json production |
+| `feature-implementer` (subagent `tools`) | `Read, Write, Edit, Bash, Grep, Glob, LSP, AskUserQuestion` | Full implementation toolset. `LSP` provides live type errors after edits when a code-intelligence plugin is installed for the language |
+| `code-security-reviewer` (subagent `tools`) | `Read, Grep, Glob, LSP` | Read-only by design. `LSP` enables call-hierarchy and reference-finding for vulnerability analysis |
+| `test-suite-generator` (subagent `tools`) | `Read, Write, Edit, Bash, Grep, Glob, LSP, AskUserQuestion` | Test file creation + verification. `LSP` flags type errors in generated test code |
+| `integration-validator` (subagent `tools`) | `Read, Bash, Grep, Glob, AskUserQuestion` | Test execution + diagnostics |
 
-No worker agent has access to `Bash` for git operations. The `feature-implementer`, `test-suite-generator`, and `integration-validator` use `Bash` for running code and tests, not for SCM. Git operations are exclusively the `pipeline-orchestrator`'s responsibility.
+No worker subagent has access to `Bash` for git operations. The `feature-implementer`, `test-suite-generator`, and `integration-validator` use `Bash` for running code and tests, not for SCM. Git operations are exclusively the `pipeline-orchestrator`'s responsibility.
+
+**LSP activation note:** The `LSP` tool is inactive until a Claude Code code-intelligence plugin is installed for the relevant language (Python, TypeScript). The agents declare `LSP` in their tool lists so the capability is available when plugins are installed; absent a plugin the tool entry is harmless. Installing language-specific code-intelligence plugins is recommended but optional.
+
+**Frontmatter field naming:** Skill frontmatter uses `allowed-tools` (hyphenated, space-separated) while subagent frontmatter uses `tools` (comma-separated). The set of valid tool names is identical between the two surfaces.
 
 **2. Verify `model:` field.**
 
-Use `claude-opus-4-6` for agents that benefit from deeper reasoning (`pipeline-orchestrator`, `technical-architect`, `code-security-reviewer`, `integration-validator`). Use `claude-sonnet-4-6` for agents that benefit from speed (`feature-implementer`, `test-suite-generator`).
+Use `claude-opus-4-7` for components that benefit from deeper reasoning (`pipeline-orchestrator`, `technical-architect`, `code-security-reviewer`, `integration-validator`). Use `claude-sonnet-4-6` for components that benefit from speed (`feature-implementer`, `test-suite-generator`).
+
+Opus 4.7 brings three improvements that disproportionately benefit the orchestration and review roles: stronger long-horizon task persistence (relevant to multi-chunk pipeline runs), better file-system-based memory (relevant to the orchestrator's `state.json` and execution-log discipline), and proactive output self-verification (relevant to architect chunks.json validation and security reviewer verdicts). The same context window (1M tokens) and standard Opus pricing apply.
 
 **3. Refactor system prompts to remove duplicated project context.**
 
@@ -685,6 +714,28 @@ EOF
 Each pipeline run produces a human-readable summary in `.claude/pipeline/logs/`. The orchestrator appends to this log after every Task completion — see CONTRACTS.md Section 5 for the format and the specific entries written at each phase.
 
 This log is a demonstration artifact. It shows that the pipeline ran, caught real issues, and resolved them autonomously. The orchestrator includes it in the PR description during the post-pipeline phase.
+
+### Pipeline Quality Report
+
+After the draft PR is created, the orchestrator emits a per-spec quality report that summarizes the run's defense-in-depth receipts:
+
+```bash
+# Pseudocode — actual implementation lives in .claude/pipeline/phases/post-pipeline.md
+mkdir -p .claude/pipeline/reports
+REPORT_FILE=".claude/pipeline/reports/${SPEC_SLUG}-quality-report.md"
+
+# Generate from state.json and the execution log
+# Format defined in .claude/pipeline/CONTRACTS.md Section 6
+```
+
+The report is a durable, version-controlled artifact that records:
+- Per-chunk metrics: tests written, implementation iterations, security review iterations, security issues caught
+- Aggregate metrics: total tests, total reflection-loop firings, total HUMAN_REVIEW escalations
+- Self-correction events: instances where the security review caught issues the implementer fixed without human intervention
+- Defense-in-depth receipts: confirmation that iteration caps, budget guards, and regression checks operated as designed
+- Time metrics: pipeline duration
+
+The report serves three audiences: (a) the developer, who can scan it to confirm a clean run; (b) the code reviewer on the resulting PR, who can verify quality without reading the full execution log; (c) any future portfolio reviewer evaluating the agentic engineering discipline of the project. Schema details are in CONTRACTS.md Section 6.
 
 ### README Section
 

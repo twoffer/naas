@@ -2,7 +2,7 @@
 name: technical-architect
 description: "Analyzes NAAS functional specs and produces ordered, step-by-step implementation plans with chunked decompositions (chunks.json). Use when starting a new spec, planning cross-service integration points, or clarifying build order for the feature-implementer. In the automated pipeline, invoked by the pipeline-orchestrator via Task."
 tools: Read, Write, Grep, Glob, AskUserQuestion
-model: claude-opus-4-6
+model: claude-opus-4-7
 color: purple
 memory: project
 ---

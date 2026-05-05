@@ -108,7 +108,7 @@ If `.venv/` exists, activate it (`source .venv/bin/activate`) before running any
 
 ## Agentic Pipeline
 
-This project is implemented via an automated agentic pipeline managed by a `pipeline-orchestrator` agent. If you are a worker agent invoked via Task, these rules apply:
+This project is implemented via an automated agentic pipeline managed by a `pipeline-orchestrator` skill. If you are a worker agent invoked by the orchestrator, these rules apply:
 
 - **You are a stateless specialist.** Do your assigned work, produce your artifacts, return your summary. You do not manage pipeline lifecycle.
 - **Do not read or write pipeline state files** (`state.json`, `chunks.json`, pipeline logs). The orchestrator owns these exclusively.
@@ -116,7 +116,7 @@ This project is implemented via an automated agentic pipeline managed by a `pipe
 - **Pipeline mode vs. manual mode:** When invoked via Task (pipeline mode), do not use `AskUserQuestion` — state problems clearly in your response and let the orchestrator handle escalation. When invoked directly by the developer (manual mode), use `AskUserQuestion` freely.
 - **Your context comes from the Task prompt.** Don't go looking for pipeline artifacts or other agents' output to figure out what you should be doing.
 
-Pipeline details, phase definitions, and inter-agent contracts live in `.claude/pipeline/` and `docs/Agentic_Workflow_Implementation_Guide.md`. The `pipeline-orchestrator` agent is the sole entry point for automated pipeline runs.
+Pipeline details, phase definitions, and inter-agent contracts live in `.claude/pipeline/` and `docs/Agentic_Workflow_Implementation_Guide.md`. The `pipeline-orchestrator` skill (invoked as `/pipeline-orchestrator`) is the sole entry point for automated pipeline runs.
 
 ## Git and GitHub Conventions
 

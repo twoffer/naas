@@ -2,7 +2,7 @@
 name: pipeline-simulator
 description: "Simulates complete pipeline runs to validate the orchestrator's state machine, state transitions, and log generation without invoking real worker agents or performing any development work. Produces state artifacts for manual verification. Invoke with 'Simulate <scenario>' where scenario is happy-path, max-recovery, or all-failures, or 'Simulate all' to run all three."
 tools: Read, Write, Grep, Glob, Edit
-model: claude-opus-4-6
+model: claude-opus-4-7
 color: cyan
 memory: project
 ---
@@ -16,7 +16,7 @@ You do NOT invoke real agents, run shell commands, perform git operations, or mo
 Read these files in order:
 
 1. `.claude/pipeline/CONTRACTS.md` — inter-agent data format contracts (schemas, phase values, log formats)
-2. `.claude/agents/pipeline-orchestrator.md` — orchestrator state machine and rules
+2. `.claude/skills/pipeline-orchestrator/SKILL.md` — orchestrator state machine and rules
 3. `.claude/pipeline/phases/pre-pipeline.md`
 4. `.claude/pipeline/phases/architecture.md`
 5. `.claude/pipeline/phases/per-chunk.md`

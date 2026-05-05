@@ -2,7 +2,7 @@
 name: integration-validator
 description: "Validates that NAAS services work together as an integrated system by testing real running components over real networks, databases, and Redis streams. Use after completing a spec implementation, after applying security fixes to check for regressions, when debugging cross-service issues, or for system health checks. In the automated pipeline, invoked after all chunks pass their quality gates to run end-to-end integration validation."
 tools: Read, Bash, Grep, Glob, AskUserQuestion
-model: claude-opus-4-6
+model: claude-opus-4-7
 color: orange
 memory: project
 ---
