@@ -1,19 +1,19 @@
 # Pipeline Communication Contracts
 
-**Version:** 3
-**Last updated:** 2026-05-04
+**Version:** 5
+**Last updated:** 2026-05-06
 
 This file defines the data formats used for inter-agent communication in the NAAS agentic pipeline. It is the single source of truth — orchestrator and worker prompts reference this file rather than inlining format definitions.
 
 **Scope:** Data formats only. For pipeline architecture, implementation guidance, and design rationale, see `docs/Agentic_Workflow_Implementation_Guide.md`.
 
-**Ownership model:** The `pipeline-orchestrator` skill (running in the main Claude Code session) is the sole writer of `state.json`, the pipeline execution log, and the per-spec quality report. Worker subagents communicate results through their `Agent` tool responses and artifact files — they never read or write pipeline state files.
+**Ownership model:** The `pipeline-orchestrator` skill (running in the main Claude Code session) is the sole writer of `state.json`, the pipeline execution log, the per-spec quality report (§6), the code security review file (§8), and the integration validation report file (§9). The technical-architect writes the implementation plan file (§7) and `chunks.json` (§2) directly so the feature-implementer can read the plan during implementation without orchestrator reinterpretation. Worker subagents otherwise communicate results through their `Agent` tool responses — they never read or write pipeline state files.
 
 ---
 
 ## 1. PIPELINE_OUTPUT (Documentation Convention)
 
-Optional structured block at the end of an agent's response. Retained for **human readability** when reviewing agent transcripts. Not parsed by any automated system — the pipeline-orchestrator reads worker results from Task responses and artifact files, not from this block.
+Optional structured block at the end of an agent's response. Retained for **human readability** when reviewing agent transcripts. Not parsed by any automated system — the pipeline-orchestrator reads worker results from `Agent` responses and artifact files, not from this block.
 
 ### Format
 
@@ -36,7 +36,7 @@ Optional structured block at the end of an agent's response. Retained for **huma
 
 1. This block is **optional**. The pipeline functions correctly without it.
 2. Workers may include it at the end of their responses as a readable summary.
-3. No automated system parses this block. The `pipeline-orchestrator` determines next steps by reading `state.json` and worker Task responses directly.
+3. No automated system parses this block. The `pipeline-orchestrator` determines next steps by reading `state.json` and worker `Agent` responses directly.
 4. The `next_agent` and `context_for_next` fields from Contract Version 1 have been removed — routing decisions are made exclusively by the orchestrator's state machine.
 
 ---
@@ -126,10 +126,10 @@ Workers do not read this file directly. The orchestrator extracts the relevant c
 Pipeline execution state. Tracks progress, iterations, and quality gate results. Provides resume capability after pipeline interruptions.
 
 **Location:** `.claude/pipeline/state.json`
-**Sole writer:** pipeline-orchestrator (initializes during pre-pipeline, updates after every Task completion)
+**Sole writer:** pipeline-orchestrator (initializes during pre-pipeline, updates after every `Agent` invocation)
 **Read by:** pipeline-orchestrator (for resume, post-pipeline PR generation), developer (human visibility into pipeline progress)
 
-Workers never read or write this file. The orchestrator extracts data from worker Task responses and artifact files, then updates state.json itself.
+Workers never read or write this file. The orchestrator extracts data from worker `Agent` responses and artifact files, then updates state.json itself.
 
 ### Schema
 
@@ -142,7 +142,7 @@ Workers never read or write this file. The orchestrator extracts data from worke
   "phase": "implementing",                          // Current pipeline phase
   "current_chunk": 2,                               // Chunk being processed (0 = not started)
   "total_chunks": 5,                                // From chunks.json (0 until architecture completes)
-  "invocation_count": 8,                            // Total Task invocations for budget tracking
+  "invocation_count": 8,                            // Total `Agent` invocations for budget tracking
   "chunks": [ /* ... */ ],                          // Per-chunk status records
   "started_at": "2026-03-17T10:00:00Z",             // ISO 8601 UTC
   "completed_at": null                              // ISO 8601 UTC, null until done
@@ -178,7 +178,7 @@ Each element in `chunks`:
 | `phase` | string | Current pipeline phase. See Phase Values below. |
 | `current_chunk` | integer | ID of chunk being processed. `0` = not yet in per-chunk loop. |
 | `total_chunks` | integer | Total chunks from `chunks.json`. `0` until architecture completes. |
-| `invocation_count` | integer | Count of Task invocations. Orchestrator increments after each worker Task. Used for budget monitoring. |
+| `invocation_count` | integer | Count of `Agent` invocations. Orchestrator increments after each worker invocation. Used for budget monitoring. |
 | `chunks` | array | Per-chunk status records. Empty until per-chunk loop starts. |
 | `started_at` | string | ISO 8601 UTC timestamp of pipeline start. |
 | `completed_at` | string \| null | ISO 8601 UTC timestamp of pipeline completion. `null` until done. |
@@ -272,11 +272,15 @@ Note: When the pipeline pauses for human review, the top-level `phase` is set to
 
 ---
 
-## 4. Commit Message
+## 4. Commit Messages
 
-Structured git commit produced by the `pipeline-orchestrator` after a chunk passes the security review gate.
+The `pipeline-orchestrator` produces two kinds of structured commits during a run: a **per-chunk commit** after each chunk passes the security review gate, and a single **finalization commit** at the end of the post-pipeline phase that captures the execution log and the quality report. Both use conventional-commit prefixes consistent with `CLAUDE.md`.
 
-### Template
+### 4.1 Per-Chunk Commit Message
+
+Produced by the orchestrator after a chunk passes its security review gate.
+
+#### Template
 
 ```
 feat(<spec-slug>/chunk-<chunk-id>): <chunk-title>
@@ -289,7 +293,7 @@ Security issues caught: <sec-issues>
 Pipeline: auto-committed by agentic pipeline
 ```
 
-### Field Sources
+#### Field Sources
 
 | Field | Source |
 |-------|--------|
@@ -301,7 +305,7 @@ Pipeline: auto-committed by agentic pipeline
 | `sec-iterations` | `state.json` → `chunks[id].sec_iterations` |
 | `sec-issues` | `state.json` → `chunks[id].sec_issues` |
 
-### Example
+#### Example
 
 ```
 feat(spec-3-enrichment/chunk-2): IP reputation enrichment
@@ -314,6 +318,72 @@ Security issues caught: 2
 Pipeline: auto-committed by agentic pipeline
 ```
 
+### 4.2 Finalization Commit Message
+
+Produced by the orchestrator once during the post-pipeline phase, after the execution log has been finalized and the quality report has been generated. This commit stages the five durable per-spec artifacts (execution log, quality report, plan file, security review file, integration validation report) so they travel with the spec's PR. It is created **before** `git push` and PR creation; per-chunk commits already on the branch are not re-staged.
+
+#### Template
+
+```
+chore(<spec-slug>): finalize pipeline run
+
+Pipeline execution log: .claude/pipeline/logs/<spec-slug>.md
+Quality report: .claude/pipeline/reports/<spec-slug>-quality-report.md
+Implementation plan: .claude/pipeline/plans/<spec-slug>-plan.md
+Code security review: .claude/pipeline/reviews/<spec-slug>-review.md
+Integration validation report: .claude/pipeline/reports/<spec-slug>-integration-report.md
+
+Total chunks: <total-chunks>
+Total implementation iterations: <total-impl-iterations>
+Total security review iterations: <total-sec-iterations>
+Total security issues caught: <total-sec-issues>
+
+Pipeline: auto-committed by agentic pipeline
+```
+
+#### Field Sources
+
+| Field | Source |
+|-------|--------|
+| `spec-slug` | `state.json` → `spec_slug` |
+| `total-chunks` | `state.json` → `total_chunks` |
+| `total-impl-iterations` | Sum of `state.json` → `chunks[].impl_iterations` |
+| `total-sec-iterations` | Sum of `state.json` → `chunks[].sec_iterations` |
+| `total-sec-issues` | Sum of `state.json` → `chunks[].sec_issues` |
+
+#### Example
+
+```
+chore(spec-3-enrichment): finalize pipeline run
+
+Pipeline execution log: .claude/pipeline/logs/spec-3-enrichment.md
+Quality report: .claude/pipeline/reports/spec-3-enrichment-quality-report.md
+Implementation plan: .claude/pipeline/plans/spec-3-enrichment-plan.md
+Code security review: .claude/pipeline/reviews/spec-3-enrichment-review.md
+Integration validation report: .claude/pipeline/reports/spec-3-enrichment-integration-report.md
+
+Total chunks: 3
+Total implementation iterations: 4
+Total security review iterations: 4
+Total security issues caught: 2
+
+Pipeline: auto-committed by agentic pipeline
+```
+
+#### Staging Rules
+
+1. Stage exactly five paths, in this order:
+   - `.claude/pipeline/logs/<spec-slug>.md`
+   - `.claude/pipeline/reports/<spec-slug>-quality-report.md`
+   - `.claude/pipeline/plans/<spec-slug>-plan.md`
+   - `.claude/pipeline/reviews/<spec-slug>-review.md`
+   - `.claude/pipeline/reports/<spec-slug>-integration-report.md`
+
+   Never `git add -A` or `git add .`.
+2. `state.json` and `chunks.json` must not appear in the commit (they are gitignored; verify with `git status` before committing if uncertain).
+3. If any of the plan, review, or integration-report file is unexpectedly absent (e.g., the architect never produced a plan, or the orchestrator never appended a review section for a spec that ran), the orchestrator stages the files that exist and notes the omission in the developer-facing summary; it does not fabricate placeholder content.
+4. The finalization commit is the last commit on the feature branch before push.
+
 ---
 
 ## 5. Pipeline Execution Log
@@ -321,75 +391,78 @@ Pipeline: auto-committed by agentic pipeline
 Human-readable Markdown log of the pipeline run. Developer-friendly artifact included in PR descriptions.
 
 **Location:** `.claude/pipeline/logs/<spec-slug>.md`
-**Sole writer:** pipeline-orchestrator (initializes during pre-pipeline, appends after every Task completion)
+**Sole writer:** pipeline-orchestrator (initializes during pre-pipeline, appends after every `Agent` invocation)
 **Read by:** pipeline-orchestrator (post-pipeline, for PR body generation)
 
 This file is NOT machine-parseable. All machine-readable state lives in `state.json`.
 
-### Structure
+The execution log is a canonical, schema-defined artifact. Every line and section header that any producer (phase doc, human-review protocol, orchestrator skill, simulator scenario) writes to this file is registered in the sub-sections below. Producers reference entries by ID and never restate literal formats — CONTRACTS.md is the single source of truth.
 
-```markdown
-# Pipeline Run: <spec-title>
-# Started: <iso-timestamp>
+### 5.1 File-Level Structure
 
-## Architecture
-- Plan: <plan-summary>
-- Chunks: <total-chunks>
+The execution log's section headers, in canonical order. A producer writes each header once; conditional headers (e.g., `## Architecture`) are appended only on first entry to that section.
 
-## Chunks
+| Order | Heading | Depth | Producer | When emitted |
+|-------|---------|-------|----------|--------------|
+| 1 | `# Pipeline Run: <spec-title>` | H1 | pre-pipeline | initialization (file create) |
+| 2 | `# Started: <iso-timestamp>` | H1 | pre-pipeline | initialization (file create) |
+| 3 | `## Architecture` | H2 | architecture | on phase entry, idempotent |
+| 4 | `## Implementation` | H2 | per-chunk | on loop entry, before chunk 1, idempotent |
+| 5 | `### Chunk <id>: <title>` | H3 | per-chunk | on each chunk entry, idempotent |
+| 6 | `## Integration Validation: <PASS\|FAIL>` | H2 | integration | once, after validator returns |
+| 7 | `## Completed: <iso-timestamp>` | H2 | post-pipeline | finalization |
+| 8 | `## Total Implementation Iterations: <n> (across all chunks)` | H2 | post-pipeline | finalization |
+| 9 | `## Total Security Issues Caught: <n>` | H2 | post-pipeline | finalization |
 
-### Chunk <id>: <title>
-- Tests Written: <n> tests (all failing)
-- Implementer: <result> (<iterations> iteration(s), <passing>/<written> tests passing)
-- Security Review: <PASS|FAIL (iteration N) — issue summary>
-[If FAIL, additional lines for fix + re-review:]
-- Implementer: <FIX APPLIED|FIX FAILED> (...)
-[If FIX APPLIED:]
-- Security Review: <PASS|FAIL>
-[If FIX FAILED:]
-- ⏸ AWAITING INPUT: Security fix failed — implementer could not resolve issues: <failure summary>
-- ▶ RESUMED: <decision>
+The three top-level H2 sections — `## Architecture`, `## Implementation`, `## Integration Validation` — mirror the pipeline's main phases and group all bullet lines beneath their corresponding phase.
 
-## Integration Validation: <PASS|FAIL>
-## Completed: <iso-timestamp>
-## Total Implementation Iterations: <n> (across all chunks)
-## Total Security Issues Caught: <n>
-```
+### 5.2 Bullet-Line Registry
 
-### Human Review Events
+Every bullet line written to the execution log. Producers reference these by ID (e.g., "append the line per CONTRACTS.md §5.2.3"). Placeholders in angle brackets are substituted at write time.
 
-When the pipeline pauses for developer input, two log lines are written: an **escalation line** when the pipeline pauses, and a **resolution line** when the developer responds. These appear inline within the relevant section (Architecture, Chunk, or Integration Validation).
+| ID | Format String | Producer | Trigger |
+|----|---------------|----------|---------|
+| 5.2.1 | `- Plan: <plan-summary>` | architecture | architect succeeds |
+| 5.2.2 | `- Chunks: <total-chunks>` | architecture | architect succeeds |
+| 5.2.3 | `- Tests Written: <n> tests (all failing)` | per-chunk (test gen) | test-suite-generator succeeds |
+| 5.2.4 | `- Implementer: COMPLETE (<n> iteration\|iterations, <passing>/<total> tests passing)` | per-chunk (impl) | tests pass + lint clean. Use `iteration` when `<n>` = 1, `iterations` otherwise. |
+| 5.2.5 | `- Implementer: FAIL (iteration <n>)` | per-chunk (impl) | tests fail or lint fails in iteration `<n>`. No test-count tail. |
+| 5.2.6 | `- Security Review: PASS` | per-chunk (sec review) | reviewer returns PASS |
+| 5.2.7 | `- Security Review: FAIL (iteration <n>) — <issue summary>` | per-chunk (sec review) | reviewer returns FAIL; em-dash precedes issue summary |
+| 5.2.8 | `- Security Review: ACCEPTED BY DEVELOPER` | human-review | accept-risk resolution; always written immediately after the §5.2.12 line carrying the `Developer accepted risk, proceeding` decision (§5.4) |
+| 5.2.9 | `- Implementer: FIX APPLIED (regression check: <passing>/<total> tests still passing)` | per-chunk (sec fix) | fix succeeds; parenthesized regression check |
+| 5.2.10 | `- Implementer: FIX FAILED — <failure summary>` | per-chunk (sec fix) | fix fails; em-dash precedes free-form summary |
+| 5.2.11 | `- ⏸ AWAITING INPUT: <reason>` | human-review / orchestrator (budget guard) | any escalation; `<reason>` is the literal text from the matching §5.3 row |
+| 5.2.12 | `- ▶ RESUMED: <decision>` | human-review / orchestrator (budget guard) | any resolution; `<decision>` is the literal text from the matching §5.4 row |
 
-**Escalation line** (pipeline pauses for input):
-```
-- ⏸ AWAITING INPUT: <reason>
-```
+Notes on shape asymmetry: 5.2.4 (COMPLETE) and 5.2.5 (FAIL) have different shapes — only the success form carries test counts. 5.2.9 (FIX APPLIED) uses parentheses around a regression check while 5.2.10 (FIX FAILED) uses an em-dash with a free-form summary. These are intentional and load-bearing.
 
-**Resolution line** (developer responds):
-```
-- ▶ RESUMED: <decision>
-```
+### 5.3 Escalation Reasons
 
-**Escalation reasons by phase:**
+The literal text substituted into `<reason>` in §5.2.11. The orchestrator selects a row by the phase that escalated.
 
 | Phase | Reason Format |
 |-------|---------------|
 | Architecture | `Architecture analysis flagged ambiguity — <summary of concern>` |
 | Test generation | `Test generation failed — <summary of failure>` |
-| Implementation (max iterations) | `Implementation failed — <N> tests still failing after 3 iterations` |
-| Security review (max iterations) | `Security review failed — unresolved issues after 3 iterations` |
-| Security fix (implementer failure) | `Security fix failed — implementer could not resolve issues: <failure summary>` |
-| Integration validation | `Integration validation failed` |
+| Implementation | `Implementation failed — <n> tests still failing after 3 iterations` |
+| Security review | `Security review failed — unresolved issues after 3 iterations` |
+| Security fix | `Security fix failed — implementer could not resolve issues: <failure summary>` |
+| Integration | `Integration validation failed` |
+| Budget guard | `Budget guard — invocation count reached <n>, threshold is <threshold>` |
 
-**Resolution decisions:**
+### 5.4 Resolution Decisions
+
+The literal text substituted into `<decision>` in §5.2.12. The orchestrator selects a row by the developer's response to the escalation.
 
 | Decision | Log Text |
 |----------|----------|
 | Retry with guidance | `Developer provided guidance, retrying` |
 | Abort pipeline | `Developer aborted pipeline` |
-| Accept risk (security only) | `Developer accepted risk, proceeding` |
+| Accept risk (security review or security fix only) | `Developer accepted risk, proceeding` — the orchestrator must immediately follow the §5.2.12 line with a §5.2.8 line (`- Security Review: ACCEPTED BY DEVELOPER`) |
+| Budget-guard continuation | `Developer approved continuation` |
 
-### Example
+### 5.5 Example
 
 ```markdown
 # Pipeline Run: Spec 3 — Enrichment and Evaluation
@@ -401,7 +474,7 @@ When the pipeline pauses for developer input, two log lines are written: an **es
 - Plan: 12-step implementation plan across signal-enrichment and risk-evaluator services
 - Chunks: 3
 
-## Chunks
+## Implementation
 
 ### Chunk 1: Service scaffold and stream setup
 - Tests Written: 8 tests (all failing)
@@ -444,7 +517,7 @@ Human-readable Markdown report summarizing a complete pipeline run's defense-in-
 
 **Location:** `.claude/pipeline/reports/<spec-slug>-quality-report.md`
 **Producer:** pipeline-orchestrator (post-pipeline phase)
-**Consumer:** human reviewers (developer, PR reviewer, portfolio reviewer)
+**Consumer:** human reviewers (developer, PR reviewer, project reviewer)
 
 ### Format
 
@@ -504,6 +577,13 @@ Human-readable Markdown report summarizing a complete pipeline run's defense-in-
 ## Notes
 
 [Free-form orchestrator commentary. Empty for clean runs.]
+
+## Related Artifacts
+
+- Implementation plan: `.claude/pipeline/plans/<spec-slug>-plan.md` (technical-architect)
+- Code security review: `.claude/pipeline/reviews/<spec-slug>-review.md` (pipeline-orchestrator, append-only across chunks/iterations)
+- Integration validation report: `.claude/pipeline/reports/<spec-slug>-integration-report.md` (pipeline-orchestrator, append-only across runs)
+- Pipeline execution log: `.claude/pipeline/logs/<spec-slug>.md` (this run)
 ```
 
 ### Field Sources
@@ -513,13 +593,111 @@ Human-readable Markdown report summarizing a complete pipeline run's defense-in-
 | `Spec`, `spec-slug`, `Started`, `Completed`, `Total Agent invocations` | `state.json` (`spec`, `spec_slug`, `started_at`, `completed_at`, `invocation_count`) |
 | Per-chunk row data | `state.json` → `chunks[]` array |
 | Self-correction events | Pipeline execution log entries where security review FAIL was followed by PASS in the same chunk |
-| Escalations | Pipeline execution log entries with `## HUMAN_REVIEW` headers |
+| Escalations | Pipeline execution log entries written per §5.2.11 (`- ⏸ AWAITING INPUT:` bullet lines), each paired with the immediately following §5.2.12 (`- ▶ RESUMED:`) line that records the developer's resolution |
 | Outcome | `state.json` → top-level `phase`: `complete` → COMPLETED, `failed` → FAILED, anything else with at least one `failed` chunk → ESCALATED |
 | Defense-in-Depth Receipts | Computed from `state.json` chunk records: `max(impl_iterations)`, `max(sec_iterations)`, `invocation_count`, count of regression-check log entries |
 
 ### Generation Rules
 
-1. The report is generated **once per pipeline run** at the end of the post-pipeline phase, after the draft PR is created.
+1. The report is generated **once per pipeline run** during the post-pipeline phase, after the execution log has been finalized and before the finalization commit defined in §4.2. The finalization commit is the last commit on the branch, so the report is written before `git push` and before PR creation.
 2. The orchestrator overwrites any existing report at the same path (a re-run of the same spec produces a fresh report).
-3. The report is committed as part of the post-pipeline finalization (no separate commit). It travels with the spec's PR for reviewer visibility.
+3. The report is committed by the finalization commit defined in §4.2, alongside the execution log and the §§7–9 artifacts. A single commit covers all five so they travel with the spec's PR for reviewer visibility.
 4. If the pipeline ends with `phase: "failed"` (developer aborted after HUMAN_REVIEW), the report is still generated to record the partial run; the Outcome row reads FAILED and the report covers all completed-or-attempted chunks.
+
+---
+
+## 7. Implementation Plan File
+
+Human-readable Markdown narrative of the technical-architect's spec interpretation: ordered implementation steps, integration notes, and known risks. Companion to `chunks.json` — `chunks.json` is the machine-readable decomposition consumed by the orchestrator; the plan file is the prose narrative the feature-implementer (and human reviewers) can read for context that the per-chunk `implementation_instructions` field cannot fully convey.
+
+**Location:** `.claude/pipeline/plans/<spec-slug>-plan.md`
+**Producer:** technical-architect (architecture phase, single write per pipeline run)
+**Consumers:** feature-implementer (during implementation, for cross-chunk context); human reviewers (post-pipeline, for spec interpretation review)
+
+The orchestrator does not parse this file. Its presence is informational; the orchestrator extracts data from `chunks.json` and worker `Agent` responses.
+
+### Format
+
+The file follows the OUTPUT FORMAT defined in `.claude/agents/technical-architect.md` (`PLAN`, `SPEC REFERENCE`, `PREREQUISITES`, `STEPS`, `INTEGRATION NOTES`, `KNOWN RISKS`). The agent prompt is the single source of truth for the format — it is not duplicated here to avoid drift.
+
+### Generation Rules
+
+1. Written by the technical-architect during the architecture phase, alongside `chunks.json`.
+2. The architect runs once per spec, so the file is written once per pipeline (no append, no overwrite within a run).
+3. The architect creates `.claude/pipeline/plans/` if it does not exist. The pre-pipeline phase also ensures the directory exists; the agent's `mkdir -p`-equivalent is defensive.
+4. In manual mode the architect still produces this file by default unless the developer specifies an alternate output path in the Task prompt.
+
+---
+
+## 8. Code Security Review File
+
+Append-only Markdown file accumulating every code-security-reviewer invocation for a spec. Preserves the detail surfaced in the reviewer's `Agent` response — including non-blocking (LOW/MEDIUM-severity) findings, recommended improvements, and other context that the orchestrator's PASS/FAIL parsing and the §5.2.6/§5.2.7 execution-log one-liners do not preserve.
+
+**Location:** `.claude/pipeline/reviews/<spec-slug>-review.md`
+**Producer:** pipeline-orchestrator (after each code-security-reviewer invocation, once per invocation). The orchestrator records the reviewer's response under the canonical section header below; body format is at the orchestrator's discretion (see Format below).
+**Consumer:** human reviewers (post-pipeline). The pipeline-orchestrator does NOT read this file back — it parses verdict and blocking-issue summary from the reviewer's `Agent` response.
+
+### Why This File Exists
+
+A chunk passes its security gate when the reviewer returns `PASS`. `PASS` does not mean the reviewer found no issues — only that none were blocking. Recommended improvements (LOW-severity findings, style nits, defensive-programming suggestions in the `Recommended Improvements (non-blocking)` section of the reviewer's output) are visible only in the reviewer's `Agent` response transcript, which is ephemeral. This file preserves them as a durable, version-controlled artifact the developer can consult after the pipeline finishes to address lower-priority issues in a follow-up commit.
+
+### Format
+
+Each invocation appends a new section to the same file. The section header is canonical:
+
+```
+## Chunk <id> — Iteration <n> — <VERDICT> — <ISO 8601 UTC timestamp>
+```
+
+Where:
+- `<id>` is the integer chunk ID from `chunks.json`.
+- `<n>` is the security-review iteration for that chunk; matches `state.json` → `chunks[id].sec_iterations` after this invocation.
+- `<VERDICT>` is one of `PASS`, `PASS WITH NOTES`, `NEEDS CHANGES`, `SECURITY CONCERN` — the reviewer's overall verdict for this invocation.
+- `<ISO 8601 UTC timestamp>` is the time the review completed (e.g., `2026-05-06T14:23:11Z`).
+
+Only the section header is normative. The body content under each header is at the orchestrator's discretion — this file is for human consumption only, so any format that preserves the reviewer's findings is acceptable. The simplest approach is to copy the relevant portion of the reviewer's `Agent` response verbatim, but the orchestrator may reformat or summarize as it sees fit.
+
+### Generation Rules
+
+1. **Append-only.** Never truncate or rewrite earlier sections. Retries, fixes, and re-reviews each produce a new appended section so the file becomes a chronological audit trail across all chunks and iterations for the spec.
+2. Written by the orchestrator immediately after each code-security-reviewer `Agent` invocation in pipeline mode — `PASS` and FAIL outcomes both append.
+3. The orchestrator creates `.claude/pipeline/reviews/` if it does not exist. The pre-pipeline phase also ensures the directory exists.
+4. In manual mode this file is NOT written. The reviewer returns its review in the `Agent` response only; the developer captures the output if they want a durable copy.
+5. The orchestrator never reads this file back. Its existence is a post-pipeline convenience for human reviewers.
+
+---
+
+## 9. Integration Validation Report File
+
+Append-only Markdown file accumulating every integration-validator invocation for a spec. Preserves the detail surfaced in the validator's `Agent` response — including per-seam failure context, non-blocking issues, and recommendations that the orchestrator's PASS/FAIL parsing and the §5.1 row 6 execution-log heading do not preserve.
+
+**Location:** `.claude/pipeline/reports/<spec-slug>-integration-report.md`
+**Producer:** pipeline-orchestrator (after each integration-validator invocation, once per invocation; multiple invocations on retry). The orchestrator records the validator's response under the canonical section header below; body format is at the orchestrator's discretion (see Format below).
+**Consumer:** human reviewers (post-pipeline). The pipeline-orchestrator does NOT read this file back — it parses `PASS`/`FAIL` from the validator's `Agent` response.
+
+### Why This File Exists
+
+The validator may surface non-blocking issues (consumer-group lag, log-noise patterns, environment drift between `docker-compose` and prod) and recommendations (e.g., "add retry to OIDC callback handler") that do not block the spec from completing but are worth acting on. These are visible only in the validator's `Agent` response transcript, which is ephemeral. This file preserves them as a durable artifact for follow-up.
+
+### Format
+
+Each invocation appends a new section. The section header is canonical:
+
+```
+## Validation Run <n> — <VERDICT> — <ISO 8601 UTC timestamp>
+```
+
+Where:
+- `<n>` is the validator invocation count for the spec, 1-based. The first invocation is run 1; each retry after a failed integration validation increments by one.
+- `<VERDICT>` is `PASS` or `FAIL`.
+- `<ISO 8601 UTC timestamp>` is the time the validation completed.
+
+Only the section header is normative. The body content under each header is at the orchestrator's discretion — this file is for human consumption only, so any format that preserves the validator's findings is acceptable. The simplest approach is to copy the relevant portion of the validator's `Agent` response verbatim, but the orchestrator may reformat or summarize as it sees fit.
+
+### Generation Rules
+
+1. **Append-only.** Retries after failure append a new section; previous sections are preserved as the validation history.
+2. Written by the orchestrator immediately after each integration-validator `Agent` invocation in pipeline mode — `PASS` and `FAIL` outcomes both append.
+3. The orchestrator creates `.claude/pipeline/reports/` if it does not exist. The pre-pipeline phase also ensures the directory exists.
+4. In manual mode this file is NOT written. The validator returns its report in the `Agent` response only; the developer captures the output if they want a durable copy.
+5. The orchestrator never reads this file back. Its existence is a post-pipeline convenience for human reviewers.

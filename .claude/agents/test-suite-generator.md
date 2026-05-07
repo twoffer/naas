@@ -52,14 +52,18 @@ Before writing ANY tests, read these files (stop and ask if a referenced spec is
 
 ## NAAS-SPECIFIC SCENARIOS — ALWAYS CONSIDER
 
-1. **Multi-Protocol Normalization:** Same user via OIDC/SAML/LDAP → consistent `normalized_attributes`. Parameterized tests.
-2. **Fail-Safe:** Enrichment failure → `risk_score = 1.0` (DENY). Never pass unknown risk.
-3. **Redis Stream Schema:** Messages MUST match `naas_shared/models.py`. Test serialization roundtrips.
-4. **Correlation ID Propagation:** Verify `correlation_id` survives the full pipeline. Test missing ID handling.
-5. **Historical Event Safety:** `is_historical=true` → NEVER trigger alerts. Critical security invariant.
-6. **Shadow Mode:** `shadow_decision` present but `decision` reflects non-shadow policy. Test both independently.
-7. **Impossible Travel:** Haversine with known coords/times (NY→London 1hr = impossible; NY→Newark 1hr = plausible).
-8. **Synthetic Events:** `is_synthetic=true` and `source="persona-simulator"` must propagate correctly.
+1. **Multi-Source Identity Resolution:** Same user via OIDC/SAML/LDAP → consistent unified attributes. Verify `resolution_details` per attribute uses the correct discriminator (`unanimous` / `priority` / `single_source` / `list_merge`); `priority` records `winner_source`, `conflicting_values`, and `penalty_applied`. `normalization_confidence` rises with agreement, falls with conflict. `groups` honors the configured merge `strategy` (`union` default, `intersection`, `priority`) and must never silently default. Unknown `employee_type` values are preserved with a confidence penalty, never silently discarded.
+2. **Cross-Protocol LDAP Enrichment:** OIDC/SAML events query OpenLDAP (correlation key default `primary_email`, reverse-mapped to LDAP `mail`); LDAP events skip. The `enrichment` field on `NormalizedAttributes` is ALWAYS populated as `EnrichmentApplied` or `EnrichmentSkipped`. Cover every `skip_reason`: `ldap_disabled`, `ldap_event`, `no_ldap_match`, `ldap_timeout`, `ldap_connection_error`, `ldap_search_error`, `invalid_correlation_key`. Cache hit reflected in `cache_hit=True` (60s TTL). LDAP outage → primary-source-only result, no exception, structured warning logged.
+3. **Schema-Validation Recovery on Read:** Risk Evaluator and Dashboard call `NormalizedAttributes.model_validate()` on JSONB and MUST catch `pydantic.ValidationError`. Risk Evaluator on failure: log warning, treat as `normalization_risk=1.0`, continue scoring (never crash, never pass through unknown risk). Dashboard on failure: schema-mismatch placeholder. Include rows that conform to an older schema (missing fields, extra fields, wrong types).
+4. **Fail-Safe Defaults:** Enrichment or scoring failure → `final_score = 1.0` (DENY). Never pass unknown risk through as low.
+5. **Redis Stream Schema:** Messages MUST match `naas_shared/models.py`. Test serialization roundtrips.
+6. **Correlation ID Propagation:** Verify `correlation_id` survives the full pipeline. Test missing ID handling.
+7. **Historical Event Safety:** `is_historical=true` → NEVER trigger alerts. Critical security invariant.
+8. **Shadow Mode:** `shadow_decision` present but `decision` reflects non-shadow policy. Test both independently.
+9. **Risk Scoring Pipeline:** `signal_weights` keys MUST come from the closed enum {`ip_reputation_risk`, `normalization_risk`, `failed_login_risk`, `login_recency_risk`} — unknown keys rejected at policy load. `rule_score = clamp(signal_score + condition_score, 0.0, 1.0)`; `final_score = rule × rule_weight + ml × ml_weight`, weights sum to 1.0. Parametrize threshold boundaries (0.299/0.300 ALLOW↔STEP_UP_MFA, 0.699/0.700 STEP_UP_MFA↔DENY); threshold ordering (`step_up_mfa < deny`) validated at policy load. Conditions evaluate against the 5 namespaces (`user`, `device`, `signals`, `time`, `event`). `contributing_factors` JSONB populated on every assessment. Impossible Travel: deterministic Haversine (NY→London 1hr = impossible; NY→Newark 1hr = plausible).
+10. **Expression Evaluator Safety:** `ast`-based safe evaluator with whitelisted node types; uppercase `AND/OR/NOT/IN` preprocessed to lowercase Python. Validation runs at **policy creation** time, not at evaluation. Negative tests for prohibited constructs: function calls, attribute access, subscript, imports, dunders, and sandbox-escape attempts (`__import__`, `().__class__.__bases__`).
+11. **Provider & Model Graceful Degradation:** Missing `services/risk-evaluator/models/random_forest.pkl` → `ml_score=0.0` (ML path disabled), `final_score` reduces to `rule_score × rule_weight`, system continues. 16-feature column ordering contract in `shared/naas_shared/ml_features.py` is shared by training and inference. LLM `LLM_PROVIDER=mock` (default) works without API keys; Claude → Ollama → Mock fallback chain activates on provider failure; EventSink ensures events flow through ingestion regardless.
+12. **Synthetic Events:** `is_synthetic=true` and `source="simulator"` must propagate correctly.
 
 ## TEST DATA
 

@@ -31,7 +31,7 @@ Do NOT proceed until all files are read. If any file is missing, report the erro
 
 All state machine behavior — transitions, counter increments, escalation logic, resume actions, iteration thresholds, schema requirements — is derived from the orchestrator definition, CONTRACTS.md, and the phase files you just read. You add NO transition logic of your own. When you need to know how a phase transition works, what fields to update, or when to escalate, refer back to those documents.
 
-All simulated data — the spec, chunks, step-by-step agent outcomes, human responses to escalations, and expected final state — comes from the scenario file.
+All simulated data — the spec, chunks, per-step agent response payloads, and human responses to escalations or budget-guard pauses — comes from the scenario file. The scenario also carries *expected* artifacts (final state, execution log, per-spec artifact-file headers) used only at end-of-run for diffing. The scenario does NOT carry state-transition or log-line fields, and you must not synthesize them from the scenario; see the SCENARIO CONTRACT section below for the exhaustive list of fields you may read.
 
 If a phase file instruction is ambiguous when you try to apply it, flag it as a **CLARITY ISSUE** in the simulation report. Describe what was unclear and how you interpreted it. Do not resolve ambiguity silently — these findings are valuable because they indicate places where the real orchestrator might also misinterpret the instructions.
 
@@ -41,11 +41,14 @@ You follow the same state machine as the real orchestrator, with these substitut
 
 | Real orchestrator does... | You do instead... |
 |---|---|
-| Launch a worker agent via Task | Read the next step's outcome from the scenario's Step Sequence |
+| Launch a worker agent via `Agent` tool | Read the next step's outcome from the scenario's Step Sequence |
 | Use real timestamps | Use deterministic timestamps: start at `2026-01-15T10:00:00Z`, advance +3 minutes per step |
 | Write to `.claude/pipeline/state.json` | Write to `.claude/pipeline/simulation/runs/<scenario>/state.json` |
 | Write to `.claude/pipeline/chunks.json` | Write to `.claude/pipeline/simulation/runs/<scenario>/chunks.json` |
 | Write to `.claude/pipeline/logs/<slug>.md` | Write to `.claude/pipeline/simulation/runs/<scenario>/log.md` |
+| Architect writes `.claude/pipeline/plans/<spec-slug>-plan.md` | Write to `.claude/pipeline/simulation/runs/<scenario>/plan.md` |
+| Append a section to `.claude/pipeline/reviews/<spec-slug>-review.md` | Append to `.claude/pipeline/simulation/runs/<scenario>/review.md` |
+| Append a section to `.claude/pipeline/reports/<spec-slug>-integration-report.md` | Append to `.claude/pipeline/simulation/runs/<scenario>/integration-report.md` |
 | Run git operations (branch, commit, push) | Log "committed (simulated)" — no real git operations |
 | Use `AskUserQuestion` for escalations | Read the scenario's human response and decision for that step |
 | Use `AskUserQuestion` for budget guard | Read the scenario's budget guard response |
@@ -55,7 +58,13 @@ After each simulated step, write a numbered snapshot to the `snapshots/` subdire
 
 ## HARD CONSTRAINTS
 
-1. **NEVER write to `.claude/pipeline/state.json` or `.claude/pipeline/chunks.json`.** These are the REAL pipeline state files.
+1. **NEVER write to the real pipeline artifact paths.** All of these are reserved for the real pipeline orchestrator and worker agents:
+   - `.claude/pipeline/state.json`
+   - `.claude/pipeline/chunks.json`
+   - anything under `.claude/pipeline/logs/`
+   - anything under `.claude/pipeline/plans/`
+   - anything under `.claude/pipeline/reviews/`
+   - anything under `.claude/pipeline/reports/`
 2. **NEVER write to any file outside `.claude/pipeline/simulation/runs/<scenario>/`.** You have no business modifying any other file in the repository.
 3. **Use deterministic timestamps**, not real clock time. This makes snapshots reproducible and diffable.
 
@@ -82,6 +91,9 @@ Each simulation produces these files in `.claude/pipeline/simulation/runs/<scena
 | `state.json` | Pipeline state — updated after EVERY step, not batched at the end |
 | `chunks.json` | Chunk definitions copied from the scenario's Simulated Chunks section |
 | `log.md` | Pipeline execution log — append-only within a simulation |
+| `plan.md` | Implementation plan — produced once during the architecture step; format per CONTRACTS.md §7 |
+| `review.md` | Code security review — append-only, one section per `code-security-reviewer` step (PASS or FAIL); format per CONTRACTS.md §8.1 |
+| `integration-report.md` | Integration validation report — append-only, one section per `integration-validator` step (PASS or FAIL); format per CONTRACTS.md §9.1 |
 | `snapshots/NNN-description.json` | Numbered state snapshots — one after every step |
 | `report.md` | Simulation report (see template below) |
 
@@ -95,7 +107,88 @@ Each simulation produces these files in `.claude/pipeline/simulation/runs/<scena
 
 **JSON formatting:** Write all JSON files with 2-space indentation.
 
-**Incremental writes:** Write state.json and log.md after EVERY step. This ensures artifacts on disk are always current even if context is compressed, and allows inspection of intermediate state at any point.
+**Incremental writes:** Keep artifacts on disk current as the simulation progresses so they can be inspected at any point and survive context compression:
+
+- `state.json` and `log.md` — written after EVERY step.
+- `plan.md` — written once when the architecture step succeeds (see CONTRACTS.md §7 for format and the architect's responsibility).
+- `review.md` — appended after every `code-security-reviewer` step (PASS or FAIL alike), per CONTRACTS.md §8.
+- `integration-report.md` — appended after every `integration-validator` step (PASS or FAIL alike), per CONTRACTS.md §9.
+
+For `plan.md`, `review.md`, and `integration-report.md`, the canonical section headers defined in CONTRACTS.md §§7–9 are normative and must match exactly. Body content under each header is at the producer's discretion — minimal placeholder bodies are acceptable for simulation purposes.
+
+## SCENARIO CONTRACT
+
+A scenario file is the simulation's only source of *simulated data*. It must NOT specify state transitions or log lines — those are derived by the simulator from CONTRACTS.md and the phase files, exactly as the real orchestrator would. Reading transition or log fields from a scenario defeats the simulator's purpose.
+
+### Inputs the simulator reads from a scenario
+
+1. **Metadata** — `description`, `expected_invocations`, `final_phase`, `expected_human_escalations`, optional `failure_modes_exercised`.
+2. **Simulated Spec** — `spec`, `spec_slug`, `branch`.
+3. **Simulated Chunks** — JSON block; copy verbatim into `chunks.json`.
+4. **Step Sequence** — for each step:
+   - `agent` (one of the six worker types) and `chunk` (id or `—`).
+   - `simulated_response` — the structured fields the agent would have returned (see catalog below).
+   - `human_response` (optional) — developer reply when the step's outcome triggers an escalation per the phase files.
+   - `budget_guard_response` (optional) — developer reply when this step's `invocation_count` increment crosses the §5.3 Budget guard threshold.
+5. **Expected Final state.json** — used only at end-of-run for diffing.
+6. **Expected Pipeline Execution Log** — used only at end-of-run for diffing.
+7. **Expected Per-Spec Artifact Files** — used only at end-of-run for header-sequence comparison (`plan.md`, `review.md`, `integration-report.md`).
+8. **Validation Focus Points** — human-readable cross-checks; not consumed mechanically.
+
+### Inputs the simulator MUST NOT read
+
+If a scenario file contains any of `state changes`, `log entry`, `escalation`, `resume state changes`, `resume log entry`, `details`, or `decision` blocks per step, ignore those fields and flag a CLARITY ISSUE noting that the scenario format is out of date. The simulator derives every state mutation and every log line from CONTRACTS.md §3 (state schema), §5 (log registry), §§7–9 (artifact headers), and the phase files in `.claude/pipeline/phases/`.
+
+### simulated_response Field Catalog
+
+Each step's `simulated_response` carries the structured payload the named agent would have returned. The simulator substitutes these values into the appropriate CONTRACTS.md §5.2 templates and applies the appropriate phase-file rule for state mutation. No other fields drive simulation.
+
+| Agent | Sub-phase | Required fields | Optional fields |
+|---|---|---|---|
+| `technical-architect` | architecture | `outcome` ∈ {`success`, `ambiguity_flagged`} | `plan_summary` (success → §5.2.1), `chunks_produced` (success → §5.2.2), `ambiguity_summary` (ambiguity_flagged → §5.3 Architecture row) |
+| `test-suite-generator` | test_generation | `outcome` ∈ {`success`, `failure`} | `tests_count` (success → §5.2.3 and `chunks[id].tests`), `failure_summary` (failure → §5.3 Test generation row) |
+| `feature-implementer` | implementation | `outcome` ∈ {`success`, `failure`}, `tests_passing`, `tests_total`, `lint_clean` | — |
+| `code-security-reviewer` | security_review | `verdict` ∈ {`PASS`, `PASS WITH NOTES`, `NEEDS CHANGES`, `SECURITY CONCERN`} | `issue_summary` (FAIL verdicts → §5.2.7 tail), `new_sec_issues` (delta added to `chunks[id].sec_issues`; default 0) |
+| `feature-implementer` | security_fix | `fix_applied` (bool), `tests_passing`, `tests_total`, `regression_free` (bool) | `failure_summary` (failure → §5.2.10 tail and §5.3 Security fix row) |
+| `integration-validator` | integration_validation | `verdict` ∈ {`PASS`, `FAIL`} | `failure_summary` (FAIL → §5.3 Integration row) |
+
+The same `feature-implementer` agent is used for both `implementation` and `security_fix` sub-phases; the simulator distinguishes by the chunk's current sub-phase per per-chunk.md, not by anything in the scenario.
+
+### human_response shape
+
+```yaml
+human_response:
+  choice: retry-with-guidance | accept-risk | abort
+  guidance: "<free-form developer text, present when choice is retry-with-guidance>"
+```
+
+The simulator selects the §5.4 decision row by `choice`:
+- `retry-with-guidance` → `Developer provided guidance, retrying`
+- `accept-risk` → `Developer accepted risk, proceeding` (security review or security fix only; the simulator must immediately follow the §5.2.12 line with a §5.2.8 line per CONTRACTS.md §5.4)
+- `abort` → `Developer aborted pipeline`
+
+`guidance` is preserved in the scenario for human readability and would be the input to the next agent invocation in a real run; the simulator does not pass it to anything (it is a simulation), and the literal guidance text never appears in the log per §5.4.
+
+### budget_guard_response shape
+
+```yaml
+budget_guard_response:
+  choice: continue | stop
+```
+
+The simulator checks the budget guard threshold after every increment of `invocation_count`. If `invocation_count > 30` (per §5.3 Budget guard) and the step carries a `budget_guard_response`, the simulator pauses and resumes per §5.2.11/§5.2.12 + the §5.3 Budget guard row + the §5.4 Budget-guard continuation row. `continue` → `Developer approved continuation`. `stop` aborts the pipeline.
+
+If a step's increment crosses the threshold but no `budget_guard_response` is supplied, flag a CLARITY ISSUE.
+
+### Per-Step Log Construction
+
+After computing the state mutation for a step, construct the log lines by:
+1. Selecting the §5.2 template that matches the step's outcome (e.g., implementation FAIL → §5.2.5; security review FAIL → §5.2.7).
+2. Substituting placeholders from `simulated_response` (e.g., `<n>` from iteration counter, `<issue summary>` from `simulated_response.issue_summary`).
+3. If the step's outcome triggers an escalation per the phase files, append §5.2.11 with the matching §5.3 reason row (substitute free-form fragments from `simulated_response`), pause, then on resume append §5.2.12 with the matching §5.4 row from `human_response.choice`.
+4. If `invocation_count > 30` and a `budget_guard_response` is present, follow the same §5.2.11 → §5.2.12 pattern with the Budget guard / Budget-guard continuation rows.
+
+Do not restate templates in this file — defer to CONTRACTS.md §5 for every literal string.
 
 ## VALIDATION PROTOCOL
 
@@ -113,7 +206,13 @@ Record each check as PASS or FAIL in the report's Step-by-Step Trace.
 After all steps are processed:
 1. **Monotonicity checks** across all snapshots — `invocation_count` never decreases, chunk `status` never goes backward, `sec_issues` never decreases for any chunk, `total_chunks` never changes once set.
 2. **Final state comparison** — Compare the final state.json field-by-field against the scenario's Expected Final State section. Flag any mismatches with expected vs. actual values.
-3. **Validation focus points** — Cross-reference the scenario's Validation Focus Points section and confirm each point is satisfied.
+3. **Pipeline execution log comparison** — Compare the simulator's generated `log.md` byte-for-byte against the scenario's `Expected Pipeline Execution Log` section. The scenario uses `<iso-timestamp>` placeholders for the deterministic timestamps the simulator stamps in the H1 `# Started:` and H2 `## Completed:` lines; treat any `<iso-timestamp>` token in the expected log as matching the deterministic timestamp the simulator wrote at that line. All other content must match exactly. Record PASS or FAIL with the first mismatching line number and a unified diff of the differing region.
+4. **Validation focus points** — Cross-reference the scenario's Validation Focus Points section and confirm each point is satisfied.
+5. **Per-spec artifact file checks** — Parse the scenario's `Expected Per-Spec Artifact Files` section and, for each of `plan.md`, `review.md`, and `integration-report.md`:
+   - Verify the file exists in the run directory whenever the scenario's flow reaches the corresponding step.
+   - Compare the section header count against the scenario's expected count.
+   - Compare the section header text (chunk id, iteration, verdict, run number) against the scenario's expected sequence, in order.
+   - Record PASS / FAIL / N/A. N/A applies when the scenario's flow never reaches the relevant step (e.g., the scenario produces no `integration-report.md` because integration validation never runs).
 
 ## SIMULATION REPORT FORMAT
 
@@ -187,9 +286,21 @@ Derive the specific checks below from CONTRACTS.md and the phase files. The cate
 - sec_issues never decreases: <PASS|FAIL>
 - total_chunks stable after architecture: <PASS|FAIL>
 
+### Per-Spec Artifact File Checks
+- plan.md exists and contains the expected PLAN block: <PASS|FAIL|N/A>
+- review.md section header count matches scenario expectation: <PASS|FAIL|N/A>
+- review.md section headers match scenario's expected sequence: <PASS|FAIL|N/A>
+- integration-report.md section header count matches scenario expectation: <PASS|FAIL|N/A>
+- integration-report.md section headers match scenario's expected sequence: <PASS|FAIL|N/A>
+
 ### Final State Comparison
 - Matches scenario's Expected Final State: <PASS|FAIL>
 - Mismatches (if any): <details>
+
+### Execution Log Comparison
+- Matches scenario's Expected Pipeline Execution Log: <PASS|FAIL>
+- First mismatching line (if any): <line number>
+- Diff (if any): <unified diff of the differing region>
 
 ## Phase File Clarity Notes
 

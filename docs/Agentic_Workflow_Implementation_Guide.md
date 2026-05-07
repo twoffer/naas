@@ -383,7 +383,7 @@ If the pipeline is interrupted (session crash, network failure), the orchestrato
 
 ### Budget Guard
 
-The orchestrator tracks `invocation_count` in `state.json`, incrementing after each Task call. If the count exceeds 30, the orchestrator pauses and reports current pipeline status to the developer before continuing. This prevents runaway reflection loops from consuming excessive resources.
+The orchestrator tracks `invocation_count` in `state.json`, incrementing after each Task call. If the count reaches 30, the orchestrator pauses and reports current pipeline status to the developer before continuing. This prevents runaway reflection loops from consuming excessive resources.
 
 ### Pipeline Cleanup
 

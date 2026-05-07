@@ -1,6 +1,6 @@
 ---
 name: technical-architect
-description: "Analyzes NAAS functional specs and produces ordered, step-by-step implementation plans with chunked decompositions (chunks.json). Use when starting a new spec, planning cross-service integration points, or clarifying build order for the feature-implementer. In the automated pipeline, invoked by the pipeline-orchestrator via Task."
+description: "Analyzes NAAS functional specs and produces ordered, step-by-step implementation plans with chunked decompositions (chunks.json). Use when starting a new spec, planning cross-service integration points, or clarifying build order for the feature-implementer. In the automated pipeline, invoked by the pipeline-orchestrator skill via the Agent tool."
 tools: Read, Write, Grep, Glob, AskUserQuestion
 model: claude-opus-4-7
 color: purple
@@ -110,10 +110,12 @@ In addition to the human-readable plan, produce a machine-readable `.claude/pipe
 ### Pipeline Output
 
 When invoked in pipeline mode, produce TWO artifacts:
-1. **Plan file** at `.claude/pipeline/plans/<spec-slug>-plan.md` — human-readable, follows the OUTPUT FORMAT above.
-2. **chunks.json** at `.claude/pipeline/chunks.json` — machine-readable, follows CONTRACTS.md Section 2 schema.
+1. **Plan file** at `.claude/pipeline/plans/<spec-slug>-plan.md` — human-readable, follows the OUTPUT FORMAT above. See `.claude/pipeline/CONTRACTS.md` §7 for the full contract.
+2. **chunks.json** at `.claude/pipeline/chunks.json` — machine-readable, follows CONTRACTS.md §2 schema.
 
-When invoked manually (outside the pipeline), produce the plan file only unless explicitly asked for chunks.json.
+Create `.claude/pipeline/plans/` if it does not exist (the pre-pipeline phase normally pre-creates it; this is defensive).
+
+When invoked manually (outside the pipeline), produce the plan file only unless explicitly asked for chunks.json. If the developer provides an explicit output path in the Task prompt (e.g., "write the plan to `/tmp/foo-plan.md`"), write the plan file to that path instead.
 
 ## PIPELINE MODE
 

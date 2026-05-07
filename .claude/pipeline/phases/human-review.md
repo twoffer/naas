@@ -14,8 +14,8 @@ Escalate when:
 
 ## Escalation Steps
 
-1. Update `state.json`: set the **top-level** `phase: "human_review"`. Leave the **chunk-level** phase at its current value (e.g., `"implementation"`, `"security_review"`) — this is how the orchestrator knows where to resume.
-2. Append to the pipeline log: `- ⏸ AWAITING INPUT: <reason>` (see reason formats below).
+1. Update state.json: set top-level `phase: "human_review"`. Leave the chunk-level `phase` at its current value (e.g., `"implementation"`, `"security_review"`) — this is how the orchestrator knows where to resume.
+2. Append the bullet line defined in CONTRACTS.md §5.2.11 (`AWAITING INPUT`), substituting the `<reason>` from the §5.3 row that matches the current phase.
 3. Use `AskUserQuestion` to present the issue to the developer. Always include:
    - What was attempted
    - What failed (specific errors, test names, security issues)
@@ -37,32 +37,27 @@ The options vary by phase:
 
 ## Resume Steps
 
+Each resolution appends a §5.2.12 (`RESUMED`) bullet to the log, substituting the `<decision>` from the matching §5.4 row. The "Accept risk" resolution additionally writes a §5.2.8 line immediately after.
+
 Based on the developer's choice:
 
 **Retry with guidance:**
-- Append to log: `- ▶ RESUMED: Developer provided guidance, retrying`.
-- Reset the relevant iteration counter if applicable (`impl_iterations` or `sec_iterations` to 0).
-- Restore `state.json` top-level `phase` to its pre-escalation value (e.g., `"implementing"`, `"architecture"`, `"integration_validation"`).
+- Append the §5.2.12 line with the `Retry with guidance` decision text from §5.4.
+- Update state.json based on which sub-phase escalated:
+  - if escalation came from the Implementation sub-phase: reset current chunk `impl_iterations` to 0
+  - if escalation came from the Security Review sub-phase: reset current chunk `sec_iterations` to 0
+  - if escalation came from the Architecture, Test Generation, Security Fix, or Integration phase: no counter reset
+- Update state.json: set top-level `phase` to its pre-escalation value (e.g., `"implementing"`, `"architecture"`, `"integration_validation"`).
 - Re-invoke the relevant worker agent with the developer's guidance included as additional context in the Task prompt.
 
 **Accept risk** (security review or security fix):
-- Append to log: `- ▶ RESUMED: Developer accepted risk, proceeding`, then `- Security Review: ACCEPTED BY DEVELOPER`.
+- Append the §5.2.12 line with the `Accept risk` decision text from §5.4, immediately followed by the §5.2.8 line (`Security Review: ACCEPTED BY DEVELOPER`).
 - Proceed to the commit sub-phase for this chunk.
-- Restore `state.json` top-level `phase: "implementing"`.
+- Update state.json: set top-level `phase: "implementing"`.
 
 **Abort pipeline:**
-- Append to log: `- ▶ RESUMED: Developer aborted pipeline`.
-- If in a per-chunk phase: update the chunk's `status: "failed"`.
-- Update `state.json` top-level `phase: "failed"`.
+- Append the §5.2.12 line with the `Abort pipeline` decision text from §5.4.
+- If in a per-chunk phase, update state.json: set current chunk `status: "failed"`.
+- Update state.json: set top-level `phase: "failed"`.
 - STOP execution.
 
-## Escalation Reason Formats
-
-| Phase | Reason Format |
-|-------|---------------|
-| Architecture | `Architecture analysis flagged ambiguity — <summary of concern>` |
-| Test generation | `Test generation failed — <summary of failure>` |
-| Implementation | `Implementation failed — <N> tests still failing after 3 iterations` |
-| Security review | `Security review failed — unresolved issues after 3 iterations` |
-| Security fix | `Security fix failed — implementer could not resolve issues: <failure summary>` |
-| Integration | `Integration validation failed` |

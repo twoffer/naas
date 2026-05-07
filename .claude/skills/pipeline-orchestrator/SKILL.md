@@ -19,7 +19,7 @@ You run in the main Claude Code session, not as a subagent. This placement is re
 Read these files:
 1. `CLAUDE.md` — project context and conventions
 2. `docs/AI-AGENT-PRINCIPLES.md` — behavioral guidelines
-3. `.claude/pipeline/CONTRACTS.md` — inter-agent data format contracts (including the quality report schema)
+3. `.claude/pipeline/CONTRACTS.md` — inter-agent data format contracts
 
 ## THREE ENTRY MODES
 
@@ -37,7 +37,7 @@ Do NOT recreate the branch or reinitialize state. Do NOT re-execute completed ch
 
 ### 3. Cleanup: `/pipeline-orchestrator cleanup <spec>`
 
-Read `.claude/pipeline/state.json` to confirm identity. Delete transient files: `state.json`, `chunks.json`, plan files, review files. Ask for confirmation before: discarding uncommitted changes (`git checkout -- .`), deleting the feature branch (`git branch -D`).
+Read `.claude/pipeline/state.json` to confirm identity. Delete the working files for this spec: `.claude/pipeline/state.json`, `.claude/pipeline/chunks.json`, and any **uncommitted** files matching the spec slug under `.claude/pipeline/plans/`, `.claude/pipeline/reviews/`, and `.claude/pipeline/reports/` (CONTRACTS.md §§6–9). Files already committed by a finalization commit (CONTRACTS.md §4.2) are NOT deleted by cleanup — those require a manual revert. Ask for confirmation before: discarding uncommitted changes (`git checkout -- .`), deleting the feature branch (`git branch -D`).
 
 ## PHASE-TO-FILE MAPPING
 
@@ -62,13 +62,15 @@ When entering a phase (or resuming into one), read the corresponding instruction
 
 4. **Workers receive context via Task prompts only.** Workers never read `state.json` or `chunks.json`. For each worker invocation, extract the relevant chunk's fields from `chunks.json` and include them in the Task prompt so the worker has everything it needs without reading pipeline state files. Per-phase prompt contents are defined in the corresponding phase file (e.g., `phases/per-chunk.md`).
 
-5. **Budget guard.** Increment `invocation_count` in `state.json` after every `Agent` tool call. If the count reaches 30, pause and report status to the developer via `AskUserQuestion` before continuing. (Note: the API beta `task_budget` feature is not exposed in terminal Claude Code; the manual invocation count is the canonical guard.)
+5. **Budget guard.** Increment `invocation_count` in `state.json` after every `Agent` tool call. If the count reaches 30, pause and report status to the developer via `AskUserQuestion` before continuing. Append a §5.2.11 (`AWAITING INPUT`) bullet using the `Budget guard` reason from CONTRACTS.md §5.3, and on resume append a §5.2.12 (`RESUMED`) bullet using the `Budget-guard continuation` decision from §5.4.
 
 6. **HUMAN_REVIEW escalation.** Follow the protocol in `.claude/pipeline/phases/human-review.md`. Every escalation via `AskUserQuestion` must include: what was attempted, what failed (specific errors, test names, security issues), suggested next steps, and the available options. A vague escalation is a failed escalation — the developer cannot make a good decision without specifics.
 
 7. **Quality report generation.** At the end of the post-pipeline phase, after the draft PR is created, generate `.claude/pipeline/reports/<spec-slug>-quality-report.md` per the CONTRACTS.md Section 6 schema. The report is required for every pipeline run, including escalated and partially-failed runs.
 
 8. **Visual progress tracking.** Use `TaskCreate`, `TaskUpdate`, and `TaskList` to surface per-chunk progress in the Claude Code task UI. One task per chunk, status updates as each chunk advances through test_generation → implementation → security_review → passed.
+
+9. **Execution log lines come exclusively from CONTRACTS.md §5.** Every section header you write must be one of §5.1's nine entries. Every bullet line must be one of §5.2's twelve entries, with `<reason>` / `<decision>` substitutions sourced from §5.3 / §5.4. Do not invent new lines, abbreviate existing ones, or compose hybrid forms. If a real situation seems to need a line that §5 does not define, treat that as a contract gap: stop, escalate via `AskUserQuestion` describing what you need to log, and let the developer extend §5 before resuming.
 
 ## STATE MACHINE OVERVIEW
 

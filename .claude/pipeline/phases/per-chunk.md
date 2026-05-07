@@ -8,7 +8,14 @@ Process each chunk sequentially through test generation, implementation, securit
 
 **On resume:** Skip chunks with `status: "passed"` or `status: "failed"`. For the current in-progress chunk, read its `phase` value and enter at the corresponding sub-phase below (e.g., if chunk phase is `"security_review"`, skip directly to the Security Review sub-phase).
 
-For each chunk from 1 to `total_chunks`, execute the sub-phases below in order. On entry to a new chunk, update `state.json`: set `current_chunk` to the chunk ID, set the chunk's `status: "in_progress"`, set the chunk's `phase: "test_generation"`.
+On loop entry (before chunk 1), append the `## Implementation` section header per CONTRACTS.md §5.1 row 4 (idempotent — only on first entry). All chunk H3 headings below are nested under this section.
+
+For each chunk from 1 to `total_chunks`, execute the sub-phases below in order. On entry to a new chunk:
+- Update state.json:
+  - set top-level `current_chunk` to the chunk ID
+  - set current chunk `status: "in_progress"`
+  - set current chunk `phase: "test_generation"`
+- Append the `### Chunk <id>: <title>` heading per CONTRACTS.md §5.1 row 5 (idempotent). Subsequent log lines for this chunk (from any sub-phase, including escalations) are appended under this heading.
 
 ---
 
@@ -18,17 +25,23 @@ For each chunk from 1 to `total_chunks`, execute the sub-phases below in order. 
 
 Chunk phase shows `"test_generation"`.
 
-Invoke `test-suite-generator` via Task with a prompt that includes:
+Invoke `test-suite-generator` via the `Agent` tool with a prompt that includes:
 - The chunk's `title`, `validation_criteria`, `scope_boundary`, and `shared_files` (extracted from `chunks.json`)
 - Instruction to write tests to the `tests/` directory mirroring the scope_boundary paths
 - Instruction to run the tests and verify they ALL FAIL
 - The pipeline mode instruction
 
-After the Task completes, determine whether test generation succeeded (tests were written and all fail as expected). Increment `invocation_count`.
+After the `Agent` invocation completes, determine whether test generation succeeded (tests were written and all fail as expected).
 
-**If succeeded:** Record the test count in the chunk's `tests` field. Update chunk `phase: "implementation"`. Append to log: `### Chunk <id>: <title>` heading, then `- Tests Written: <n> tests (all failing)`.
+- Update state.json: increment top-level `invocation_count`.
+- If succeeded, update state.json:
+  - set current chunk `tests` to the test count reported by test-suite-generator
+  - set current chunk `phase: "implementation"`
+- Append to the pipeline execution log:
+  - If succeeded: the line defined in CONTRACTS.md §5.2.3 (`Tests Written`).
+  - If failed (no tests written, compilation errors, or agent could not interpret validation criteria): do not append a success summary. Escalation per `human-review.md` appends the §5.2.11 (`AWAITING INPUT`) and §5.2.12 (`RESUMED`) bullets under the chunk heading.
 
-**If failed** (no tests written, compilation errors, or agent could not interpret validation criteria): Escalate per `human-review.md`. The developer can provide guidance and retry test generation, or abort the pipeline. If retrying, re-invoke test-suite-generator with the developer's guidance as additional context.
+**If failed:** escalate per `human-review.md`. The developer can provide guidance and retry test generation, or abort the pipeline. If retrying, re-invoke test-suite-generator with the developer's guidance as additional context.
 
 ---
 
@@ -38,7 +51,7 @@ After the Task completes, determine whether test generation succeeded (tests wer
 
 Chunk phase shows `"implementation"`.
 
-Invoke `feature-implementer` via Task with a prompt that includes:
+Invoke `feature-implementer` via the `Agent` tool with a prompt that includes:
 - The chunk's `implementation_instructions`, `scope_boundary`, and `shared_files` (extracted from `chunks.json`)
 - The test file paths from test generation
 - The current iteration number (1, 2, or 3) and max of 3
@@ -46,13 +59,21 @@ Invoke `feature-implementer` via Task with a prompt that includes:
 - Instructions to run `ruff check` + `ruff format --check` on all modified Python files and fix any issues
 - The pipeline mode instruction
 
-After the Task completes, determine whether tests pass and lint is clean. Increment `invocation_count`. Increment the chunk's `impl_iterations`.
+After the `Agent` invocation completes, determine whether tests pass and lint is clean.
 
-**If tests pass + lint clean:** Update chunk `phase: "security_review"`. Append to log: `- Implementer: COMPLETE (<n> iterations, <passing>/<total> tests passing)`. Proceed to security review.
+- Update state.json:
+  - increment top-level `invocation_count`
+  - increment current chunk `impl_iterations`
+  - If tests pass + lint clean: set current chunk `phase: "security_review"`.
+- Append to the pipeline execution log:
+  - If tests pass + lint clean: the line defined in CONTRACTS.md §5.2.4 (`Implementer: COMPLETE`).
+  - If tests fail or lint fails (any iteration, including the third): the line defined in CONTRACTS.md §5.2.5 (`Implementer: FAIL`).
 
-**If tests fail and `impl_iterations` < 3:** Append to log: `- Implementer: FAIL (iteration <n>)`. Retry implementation with failure context from this attempt.
+**If tests pass + lint clean:** proceed to security review.
 
-**If tests fail and `impl_iterations` >= 3:** Escalate per `human-review.md`. Present the summary of failing tests and attempted approaches. The developer can provide guidance and retry (which resets `impl_iterations` to 0), or abort. If retrying, re-invoke with the developer's guidance as additional context.
+**If tests fail and `impl_iterations` < 3:** retry implementation with failure context from this attempt.
+
+**If tests fail and `impl_iterations` >= 3:** escalate per `human-review.md`. Present the summary of failing tests and attempted approaches. The developer can provide guidance and retry (which resets `impl_iterations` to 0), or abort. If retrying, re-invoke with the developer's guidance as additional context.
 
 ---
 
@@ -62,25 +83,43 @@ After the Task completes, determine whether tests pass and lint is clean. Increm
 
 Chunk phase shows `"security_review"`.
 
-Invoke `code-security-reviewer` via Task with a prompt that includes:
+Invoke `code-security-reviewer` via the `Agent` tool with a prompt that includes:
 - The files to review: chunk's `scope_boundary` + `shared_files`
 - The `do_not_touch` boundaries (flag any modifications as violations)
-- Context about which chunk and spec this is
+- Context about which chunk and spec this is — include the `spec_slug` and the `chunk_id` so the reviewer can ground its findings
 - The pipeline mode instruction
 
-After the Task completes, determine PASS or FAIL from the reviewer's verdict. Increment `invocation_count`. Increment the chunk's `sec_iterations`. Update the chunk's `sec_issues` with the count of issues found by the reviewer (cumulative across iterations).
+After the `Agent` invocation completes, determine PASS or FAIL from the reviewer's verdict.
 
-**If PASS:** Append to log: `- Security Review: PASS`. Proceed to commit.
+- Append a section to `.claude/pipeline/reviews/<spec-slug>-review.md` per CONTRACTS.md §8: write the canonical section header (substituting `<id>` = current `chunk_id`, `<n>` = the post-update value of `state.json` → `chunks[id].sec_iterations`, `<VERDICT>` = the reviewer's overall verdict, `<ISO 8601 UTC timestamp>` = current UTC time), followed by the reviewer's findings as captured in its `Agent` response. Body format under the header is at the orchestrator's discretion (CONTRACTS.md §8) — verbatim copy is the simplest approach. Create `.claude/pipeline/reviews/` if missing. Append both PASS and FAIL outcomes. The orchestrator does not parse this file; it is staged at the finalization commit (CONTRACTS.md §4.2).
 
-**If FAIL and `sec_iterations` < 3:**
-1. Append to log: `- Security Review: FAIL (iteration <n>) — <issue summary>`.
-2. Update chunk `phase: "security_fix"`.
-3. Re-invoke `feature-implementer` via Task with the specific security issues (file paths, line numbers, descriptions) and instructions to fix them, re-run the full test suite to verify no regressions, and run lint checks. This is a targeted fix invocation — not a return to the Implementation sub-phase. Do not apply the Implementation sub-phase's iteration logic or update `impl_iterations`.
-4. After the fix Task completes, increment `invocation_count`. Determine whether the fix succeeded (tests pass and lint is clean).
-5. **If fix succeeded:** Append to log: `- Implementer: FIX APPLIED (regression check: <passing>/<total> tests still passing)`. Update chunk `phase: "security_review"` and loop back to invoke the security reviewer again.
-6. **If fix failed** (tests failing, lint errors, or agent reports failure): Append to log: `- Implementer: FIX FAILED — <failure summary>`. Escalate per `human-review.md`. Present the original security issues, what the implementer attempted, and why it failed.
+- Update state.json:
+  - increment top-level `invocation_count`
+  - increment current chunk `sec_iterations`
+  - set current chunk `sec_issues` to the cumulative count of issues found by the reviewer across all iterations of this chunk
+  - If FAIL and `sec_iterations` < 3: set current chunk `phase: "security_fix"`.
+- Append to the pipeline execution log:
+  - If PASS: the line defined in CONTRACTS.md §5.2.6 (`Security Review: PASS`).
+  - If FAIL (any iteration, including the third): the line defined in CONTRACTS.md §5.2.7 (`Security Review: FAIL`).
 
-**If FAIL and `sec_iterations` >= 3:** Escalate per `human-review.md`. Present the unresolved security issues. The developer can: provide guidance and retry (which resets `sec_iterations` to 0), accept the risk and proceed to commit as-is, or abort the pipeline. If retrying, loop back to the security reviewer with the developer's guidance.
+**If PASS:** proceed to commit.
+
+**If FAIL and `sec_iterations` < 3:** Re-invoke `feature-implementer` via the `Agent` tool with the specific security issues (file paths, line numbers, descriptions) and instructions to fix them, re-run the full test suite to verify no regressions, and run lint checks. This is a targeted fix invocation — not a return to the Implementation sub-phase. Do not apply the Implementation sub-phase's iteration logic or update `impl_iterations`.
+
+After the fix `Agent` invocation completes, determine whether the fix succeeded (tests pass and lint is clean).
+
+- Update state.json:
+  - increment top-level `invocation_count`
+  - If fix succeeded: set current chunk `phase: "security_review"`.
+- Append to the pipeline execution log:
+  - If fix succeeded: the line defined in CONTRACTS.md §5.2.9 (`Implementer: FIX APPLIED`).
+  - If fix failed (tests failing, lint errors, or agent reports failure): the line defined in CONTRACTS.md §5.2.10 (`Implementer: FIX FAILED`).
+
+**If fix succeeded:** loop back to invoke the security reviewer again.
+
+**If fix failed:** escalate per `human-review.md`. Present the original security issues, what the implementer attempted, and why it failed.
+
+**If FAIL and `sec_iterations` >= 3:** escalate per `human-review.md`. Present the unresolved security issues. The developer can: provide guidance and retry (which resets `sec_iterations` to 0), accept the risk and proceed to commit as-is, or abort the pipeline. If retrying, loop back to the security reviewer with the developer's guidance.
 
 ---
 
@@ -95,10 +134,12 @@ Stage files using targeted `git add` (NEVER `git add -A` or `git add .`):
 
 Commit with the structured message template from CONTRACTS.md Section 4.
 
-Update `state.json`: chunk `status: "passed"`, chunk `phase: "passed"`.
+Update state.json:
+- set current chunk `status: "passed"`
+- set current chunk `phase: "passed"`
 
 ---
 
 ## Loop Continuation
 
-After committing a chunk, check if there are more chunks to process. If yes, advance to the next chunk and start from the test generation sub-phase. If all chunks are complete, update `state.json`: `phase: "integration_validation"`. Proceed by reading `.claude/pipeline/phases/integration.md`.
+After committing a chunk, check if there are more chunks to process. If yes, advance to the next chunk and start from the test generation sub-phase. If all chunks are complete, update state.json: set top-level `phase: "integration_validation"`. Proceed by reading `.claude/pipeline/phases/integration.md`.

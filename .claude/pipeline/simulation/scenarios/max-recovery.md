@@ -5,7 +5,7 @@ Agents fail up to but not exceeding iteration thresholds, maximizing automatic r
 ## Metadata
 
 - **Description:** Validates impl_iterations incrementing, sec_iterations incrementing, sec_issues accumulation, security fix → regression check → re-review loop, and log entries for FAIL/FIX APPLIED. No human escalation occurs.
-- **Expected invocations:** 20 (see breakdown per step)
+- **Expected invocations:** 20
 - **Expected final phase:** `complete`
 - **Expected human escalations:** 0
 
@@ -70,455 +70,237 @@ Agents fail up to but not exceeding iteration thresholds, maximizing automatic r
 
 ## Step Sequence
 
-### Step 1: architecture — technical-architect
+### Step 1: technical-architect
 
 - **agent:** technical-architect
 - **chunk:** —
-- **outcome:** success
-- **details:**
+- **simulated_response:**
+  - outcome: success
   - plan_summary: "12-step implementation plan for sim-test service"
   - chunks_produced: 3
-- **state changes:**
-  - invocation_count: 0 → 1
-  - phase: "architecture" → "implementing"
-  - total_chunks: 0 → 3
-  - chunks array populated with 3 pending entries
-- **log entry:**
-  ```
-  ## Architecture
-  - Plan: 12-step implementation plan for sim-test service
-  - Chunks: 3
-  ```
 
 ---
 
 ## Chunk 1: Maximum implementation retries + maximum security review retries
 
-### Step 2: test_generation — test-suite-generator (chunk 1)
+### Step 2: test-suite-generator (chunk 1)
 
 - **agent:** test-suite-generator
 - **chunk:** 1
-- **outcome:** success
-- **details:**
-  - tests_written: 8
-  - all_failing: true
-- **state changes:**
-  - invocation_count: 1 → 2
-  - current_chunk: 0 → 1
-  - chunk[1].status: "pending" → "in_progress"
-  - chunk[1].phase: "pending" → "test_generation" → "implementation"
-  - chunk[1].tests: 0 → 8
-- **log entry:**
-  ```
-  ### Chunk 1: Service scaffold and stream setup
-  - Tests Written: 8 tests (all failing)
-  ```
+- **simulated_response:**
+  - outcome: success
+  - tests_count: 8
 
 ---
 
-### Step 3: implementation iteration 1 — feature-implementer (chunk 1) — FAIL
+### Step 3: feature-implementer (chunk 1, implementation iteration 1)
 
 - **agent:** feature-implementer
 - **chunk:** 1
-- **outcome:** failure
-- **details:**
+- **simulated_response:**
+  - outcome: failure
   - tests_passing: 4
   - tests_total: 8
   - lint_clean: false
-  - iteration: 1
-- **state changes:**
-  - invocation_count: 2 → 3
-  - chunk[1].impl_iterations: 0 → 1
-  - chunk[1].phase: "implementation" (unchanged — retry)
-- **log entry:**
-  ```
-  - Implementer: FAIL (iteration 1)
-  ```
-- **note:** impl_iterations < 3, so automatic retry. No escalation.
 
 ---
 
-### Step 4: implementation iteration 2 — feature-implementer (chunk 1) — FAIL
+### Step 4: feature-implementer (chunk 1, implementation iteration 2)
 
 - **agent:** feature-implementer
 - **chunk:** 1
-- **outcome:** failure
-- **details:**
+- **simulated_response:**
+  - outcome: failure
   - tests_passing: 6
   - tests_total: 8
   - lint_clean: true
-  - iteration: 2
-- **state changes:**
-  - invocation_count: 3 → 4
-  - chunk[1].impl_iterations: 1 → 2
-  - chunk[1].phase: "implementation" (unchanged — retry)
-- **log entry:**
-  ```
-  - Implementer: FAIL (iteration 2)
-  ```
-- **note:** impl_iterations < 3, one more try before escalation.
 
 ---
 
-### Step 5: implementation iteration 3 — feature-implementer (chunk 1) — SUCCESS
+### Step 5: feature-implementer (chunk 1, implementation iteration 3)
 
 - **agent:** feature-implementer
 - **chunk:** 1
-- **outcome:** success
-- **details:**
+- **simulated_response:**
+  - outcome: success
   - tests_passing: 8
   - tests_total: 8
   - lint_clean: true
-  - iteration: 3
-- **state changes:**
-  - invocation_count: 4 → 5
-  - chunk[1].impl_iterations: 2 → 3
-  - chunk[1].phase: "implementation" → "security_review"
-- **log entry:**
-  ```
-  - Implementer: COMPLETE (3 iterations, 8/8 tests passing)
-  ```
-- **note:** Passes on the last allowed attempt before escalation threshold.
+
+Passes on the last allowed attempt before the escalation threshold.
 
 ---
 
-### Step 6: security_review iteration 1 — code-security-reviewer (chunk 1) — FAIL
+### Step 6: code-security-reviewer (chunk 1, iteration 1)
 
 - **agent:** code-security-reviewer
 - **chunk:** 1
-- **outcome:** failure
-- **details:**
-  - verdict: "NEEDS CHANGES"
-  - issues_found: 2
+- **simulated_response:**
+  - verdict: NEEDS CHANGES
+  - new_sec_issues: 2
   - issue_summary: "SQL injection in query builder, missing input validation on user_id parameter"
-- **state changes:**
-  - invocation_count: 5 → 6
-  - chunk[1].sec_iterations: 0 → 1
-  - chunk[1].sec_issues: 0 → 2
-  - chunk[1].phase: "security_review" → "security_fix"
-- **log entry:**
-  ```
-  - Security Review: FAIL (iteration 1) — SQL injection in query builder, missing input validation on user_id parameter
-  ```
-- **note:** sec_iterations < 3. Triggers security fix by feature-implementer.
 
 ---
 
-### Step 7: security_fix — feature-implementer (chunk 1) — FIX SUCCESS
+### Step 7: feature-implementer (chunk 1, security_fix)
 
 - **agent:** feature-implementer
 - **chunk:** 1
-- **outcome:** success
-- **details:**
+- **simulated_response:**
   - fix_applied: true
   - tests_passing: 8
   - tests_total: 8
   - regression_free: true
-- **state changes:**
-  - invocation_count: 6 → 7
-  - chunk[1].phase: "security_fix" → "security_review"
-- **log entry:**
-  ```
-  - Implementer: FIX APPLIED (regression check: 8/8 tests still passing)
-  ```
-- **note:** Fix succeeds without regression. Loop back to security review. impl_iterations NOT incremented (this is a security fix, not an implementation iteration).
+
+Loops back to security review. `impl_iterations` is NOT incremented (per per-chunk.md, only the implementation sub-phase increments it).
 
 ---
 
-### Step 8: security_review iteration 2 — code-security-reviewer (chunk 1) — FAIL
+### Step 8: code-security-reviewer (chunk 1, iteration 2)
 
 - **agent:** code-security-reviewer
 - **chunk:** 1
-- **outcome:** failure
-- **details:**
-  - verdict: "NEEDS CHANGES"
-  - issues_found: 1
+- **simulated_response:**
+  - verdict: NEEDS CHANGES
+  - new_sec_issues: 1
   - issue_summary: "Hardcoded secret in config initialization"
-- **state changes:**
-  - invocation_count: 7 → 8
-  - chunk[1].sec_iterations: 1 → 2
-  - chunk[1].sec_issues: 2 → 3
-  - chunk[1].phase: "security_review" → "security_fix"
-- **log entry:**
-  ```
-  - Security Review: FAIL (iteration 2) — Hardcoded secret in config initialization
-  ```
 
 ---
 
-### Step 9: security_fix — feature-implementer (chunk 1) — FIX SUCCESS
+### Step 9: feature-implementer (chunk 1, security_fix)
 
 - **agent:** feature-implementer
 - **chunk:** 1
-- **outcome:** success
-- **details:**
+- **simulated_response:**
   - fix_applied: true
   - tests_passing: 8
   - tests_total: 8
   - regression_free: true
-- **state changes:**
-  - invocation_count: 8 → 9
-  - chunk[1].phase: "security_fix" → "security_review"
-- **log entry:**
-  ```
-  - Implementer: FIX APPLIED (regression check: 8/8 tests still passing)
-  ```
 
 ---
 
-### Step 10: security_review iteration 3 — code-security-reviewer (chunk 1) — PASS
+### Step 10: code-security-reviewer (chunk 1, iteration 3)
 
 - **agent:** code-security-reviewer
 - **chunk:** 1
-- **outcome:** success
-- **details:**
-  - verdict: "PASS"
-  - issues_found: 0
-- **state changes:**
-  - invocation_count: 9 → 10
-  - chunk[1].sec_iterations: 2 → 3
-  - chunk[1].sec_issues: 3 (unchanged — 0 new issues)
-  - chunk[1].status: "in_progress" → "passed"
-  - chunk[1].phase: "security_review" → "passed"
-- **log entry:**
-  ```
-  - Security Review: PASS
-  ```
-- **note:** Passes on the last allowed attempt. Chunk 1 committed (simulated). sec_issues=3 cumulative.
+- **simulated_response:**
+  - verdict: PASS
+
+Passes on the last allowed attempt. Cumulative `sec_issues` = 3.
 
 ---
 
 ## Chunk 2: Clean pass (variety — not every chunk needs to fail)
 
-### Step 11: test_generation — test-suite-generator (chunk 2)
+### Step 11: test-suite-generator (chunk 2)
 
 - **agent:** test-suite-generator
 - **chunk:** 2
-- **outcome:** success
-- **details:**
-  - tests_written: 12
-  - all_failing: true
-- **state changes:**
-  - invocation_count: 10 → 11
-  - current_chunk: 1 → 2
-  - chunk[2].status: "pending" → "in_progress"
-  - chunk[2].phase: "pending" → "test_generation" → "implementation"
-  - chunk[2].tests: 0 → 12
-- **log entry:**
-  ```
-  ### Chunk 2: Core processing logic
-  - Tests Written: 12 tests (all failing)
-  ```
+- **simulated_response:**
+  - outcome: success
+  - tests_count: 12
 
 ---
 
-### Step 12: implementation — feature-implementer (chunk 2) — SUCCESS
+### Step 12: feature-implementer (chunk 2, implementation)
 
 - **agent:** feature-implementer
 - **chunk:** 2
-- **outcome:** success
-- **details:**
+- **simulated_response:**
+  - outcome: success
   - tests_passing: 12
   - tests_total: 12
   - lint_clean: true
-  - iteration: 1
-- **state changes:**
-  - invocation_count: 11 → 12
-  - chunk[2].impl_iterations: 0 → 1
-  - chunk[2].phase: "implementation" → "security_review"
-- **log entry:**
-  ```
-  - Implementer: COMPLETE (1 iteration, 12/12 tests passing)
-  ```
 
 ---
 
-### Step 13: security_review — code-security-reviewer (chunk 2) — PASS
+### Step 13: code-security-reviewer (chunk 2)
 
 - **agent:** code-security-reviewer
 - **chunk:** 2
-- **outcome:** success
-- **details:**
-  - verdict: "PASS"
-  - issues_found: 0
-- **state changes:**
-  - invocation_count: 12 → 13
-  - chunk[2].sec_iterations: 0 → 1
-  - chunk[2].sec_issues: 0 (unchanged)
-  - chunk[2].status: "in_progress" → "passed"
-  - chunk[2].phase: "security_review" → "passed"
-- **log entry:**
-  ```
-  - Security Review: PASS
-  ```
-- **note:** Chunk 2 committed (simulated). Clean pass provides variety.
+- **simulated_response:**
+  - verdict: PASS
 
 ---
 
 ## Chunk 3: Moderate retries (implementation 2 attempts, security 2 iterations)
 
-### Step 14: test_generation — test-suite-generator (chunk 3)
+### Step 14: test-suite-generator (chunk 3)
 
 - **agent:** test-suite-generator
 - **chunk:** 3
-- **outcome:** success
-- **details:**
-  - tests_written: 10
-  - all_failing: true
-- **state changes:**
-  - invocation_count: 13 → 14
-  - current_chunk: 2 → 3
-  - chunk[3].status: "pending" → "in_progress"
-  - chunk[3].phase: "pending" → "test_generation" → "implementation"
-  - chunk[3].tests: 0 → 10
-- **log entry:**
-  ```
-  ### Chunk 3: Integration with upstream services
-  - Tests Written: 10 tests (all failing)
-  ```
+- **simulated_response:**
+  - outcome: success
+  - tests_count: 10
 
 ---
 
-### Step 15: implementation iteration 1 — feature-implementer (chunk 3) — FAIL
+### Step 15: feature-implementer (chunk 3, implementation iteration 1)
 
 - **agent:** feature-implementer
 - **chunk:** 3
-- **outcome:** failure
-- **details:**
+- **simulated_response:**
+  - outcome: failure
   - tests_passing: 7
   - tests_total: 10
   - lint_clean: true
-  - iteration: 1
-- **state changes:**
-  - invocation_count: 14 → 15
-  - chunk[3].impl_iterations: 0 → 1
-  - chunk[3].phase: "implementation" (unchanged)
-- **log entry:**
-  ```
-  - Implementer: FAIL (iteration 1)
-  ```
 
 ---
 
-### Step 16: implementation iteration 2 — feature-implementer (chunk 3) — SUCCESS
+### Step 16: feature-implementer (chunk 3, implementation iteration 2)
 
 - **agent:** feature-implementer
 - **chunk:** 3
-- **outcome:** success
-- **details:**
+- **simulated_response:**
+  - outcome: success
   - tests_passing: 10
   - tests_total: 10
   - lint_clean: true
-  - iteration: 2
-- **state changes:**
-  - invocation_count: 15 → 16
-  - chunk[3].impl_iterations: 1 → 2
-  - chunk[3].phase: "implementation" → "security_review"
-- **log entry:**
-  ```
-  - Implementer: COMPLETE (2 iterations, 10/10 tests passing)
-  ```
 
 ---
 
-### Step 17: security_review iteration 1 — code-security-reviewer (chunk 3) — FAIL
+### Step 17: code-security-reviewer (chunk 3, iteration 1)
 
 - **agent:** code-security-reviewer
 - **chunk:** 3
-- **outcome:** failure
-- **details:**
-  - verdict: "NEEDS CHANGES"
-  - issues_found: 1
+- **simulated_response:**
+  - verdict: NEEDS CHANGES
+  - new_sec_issues: 1
   - issue_summary: "Unsanitized cache key derived from user input"
-- **state changes:**
-  - invocation_count: 16 → 17
-  - chunk[3].sec_iterations: 0 → 1
-  - chunk[3].sec_issues: 0 → 1
-  - chunk[3].phase: "security_review" → "security_fix"
-- **log entry:**
-  ```
-  - Security Review: FAIL (iteration 1) — Unsanitized cache key derived from user input
-  ```
 
 ---
 
-### Step 18: security_fix — feature-implementer (chunk 3) — FIX SUCCESS
+### Step 18: feature-implementer (chunk 3, security_fix)
 
 - **agent:** feature-implementer
 - **chunk:** 3
-- **outcome:** success
-- **details:**
+- **simulated_response:**
   - fix_applied: true
   - tests_passing: 10
   - tests_total: 10
   - regression_free: true
-- **state changes:**
-  - invocation_count: 17 → 18
-  - chunk[3].phase: "security_fix" → "security_review"
-- **log entry:**
-  ```
-  - Implementer: FIX APPLIED (regression check: 10/10 tests still passing)
-  ```
 
 ---
 
-### Step 19: security_review iteration 2 — code-security-reviewer (chunk 3) — PASS
+### Step 19: code-security-reviewer (chunk 3, iteration 2)
 
 - **agent:** code-security-reviewer
 - **chunk:** 3
-- **outcome:** success
-- **details:**
-  - verdict: "PASS"
-  - issues_found: 0
-- **state changes:**
-  - invocation_count: 18 → 19
-  - chunk[3].sec_iterations: 1 → 2
-  - chunk[3].sec_issues: 1 (unchanged)
-  - chunk[3].status: "in_progress" → "passed"
-  - chunk[3].phase: "security_review" → "passed"
-- **log entry:**
-  ```
-  - Security Review: PASS
-  ```
-- **note:** Chunk 3 committed (simulated). All chunks complete → phase transitions to integration_validation.
+- **simulated_response:**
+  - verdict: PASS
 
 ---
 
-### Step 20: integration_validation — integration-validator
+### Step 20: integration-validator
 
 - **agent:** integration-validator
 - **chunk:** —
-- **outcome:** success
-- **details:**
-  - verdict: "PASS"
-- **state changes:**
-  - invocation_count: 19 → 20
-  - phase: "implementing" → "integration_validation" → "post_pipeline"
-- **log entry:**
-  ```
-  ## Integration Validation: PASS
-  ```
+- **simulated_response:**
+  - verdict: PASS
 
 ---
 
-### Step 21: post_pipeline (simulated)
-
-- **agent:** — (orchestrator finalization)
-- **chunk:** —
-- **outcome:** success
-- **details:**
-  - pr_created: true (simulated)
-- **state changes:**
-  - phase: "post_pipeline" → "complete"
-  - completed_at: set to simulation timestamp
-- **log entry:**
-  ```
-  ## Completed: <iso-timestamp>
-  ## Total Implementation Iterations: 6 (across all chunks)
-  ## Total Security Issues Caught: 4
-  ```
-
-## Expected Final State
+## Expected Final state.json
 
 ```json
 {
@@ -540,13 +322,70 @@ Agents fail up to but not exceeding iteration thresholds, maximizing automatic r
 }
 ```
 
+## Expected Pipeline Execution Log
+
+```markdown
+# Pipeline Run: Spec 99: Simulation Test
+# Started: <iso-timestamp>
+
+## Architecture
+- Plan: 12-step implementation plan for sim-test service
+- Chunks: 3
+
+## Implementation
+
+### Chunk 1: Service scaffold and stream setup
+- Tests Written: 8 tests (all failing)
+- Implementer: FAIL (iteration 1)
+- Implementer: FAIL (iteration 2)
+- Implementer: COMPLETE (3 iterations, 8/8 tests passing)
+- Security Review: FAIL (iteration 1) — SQL injection in query builder, missing input validation on user_id parameter
+- Implementer: FIX APPLIED (regression check: 8/8 tests still passing)
+- Security Review: FAIL (iteration 2) — Hardcoded secret in config initialization
+- Implementer: FIX APPLIED (regression check: 8/8 tests still passing)
+- Security Review: PASS
+
+### Chunk 2: Core processing logic
+- Tests Written: 12 tests (all failing)
+- Implementer: COMPLETE (1 iteration, 12/12 tests passing)
+- Security Review: PASS
+
+### Chunk 3: Integration with upstream services
+- Tests Written: 10 tests (all failing)
+- Implementer: FAIL (iteration 1)
+- Implementer: COMPLETE (2 iterations, 10/10 tests passing)
+- Security Review: FAIL (iteration 1) — Unsanitized cache key derived from user input
+- Implementer: FIX APPLIED (regression check: 10/10 tests still passing)
+- Security Review: PASS
+
+## Integration Validation: PASS
+## Completed: <iso-timestamp>
+## Total Implementation Iterations: 6 (across all chunks)
+## Total Security Issues Caught: 4
+```
+
+## Expected Per-Spec Artifact Files
+
+These are the per-spec artifact files mirroring CONTRACTS.md §§7–9. The simulator should verify file existence and section-header counts.
+
+- `plan.md` — written once by the technical-architect (Step 1). Single PLAN block.
+- `review.md` — appended by the orchestrator after every code-security-reviewer invocation. Six `## Chunk <id> — Iteration <n> — <VERDICT> — <iso-timestamp>` headers expected, in this order:
+  - `## Chunk 1 — Iteration 1 — NEEDS CHANGES — <iso>` (Step 6)
+  - `## Chunk 1 — Iteration 2 — NEEDS CHANGES — <iso>` (Step 8)
+  - `## Chunk 1 — Iteration 3 — PASS — <iso>` (Step 10)
+  - `## Chunk 2 — Iteration 1 — PASS — <iso>` (Step 13)
+  - `## Chunk 3 — Iteration 1 — NEEDS CHANGES — <iso>` (Step 17)
+  - `## Chunk 3 — Iteration 2 — PASS — <iso>` (Step 19)
+- `integration-report.md` — appended by the orchestrator after every integration-validator invocation. One `## Validation Run <n> — <VERDICT> — <iso-timestamp>` header expected:
+  - `## Validation Run 1 — PASS — <iso>` (Step 20)
+
 ## Validation Focus Points
 
-1. **impl_iterations reaches 3 on chunk 1** — maximum before escalation, but succeeds on the threshold
-2. **sec_iterations reaches 3 on chunk 1** — maximum security review cycles with fix passes
-3. **sec_issues accumulates correctly** — 2 from iteration 1 + 1 from iteration 2 = 3 for chunk 1
-4. **Security fix does NOT increment impl_iterations** — only the implementation sub-phase does
-5. **Security fix transitions phase** — security_review → security_fix → security_review
-6. **No human_review transitions** — phase never becomes "human_review" in any snapshot
-7. **Chunk 2 is clean** — verifies the pipeline handles mixed failure/success across chunks
-8. **invocation_count = 20** — each simulated agent call increments exactly once
+1. **impl_iterations reaches 3 on chunk 1** — maximum before escalation, but succeeds on the threshold.
+2. **sec_iterations reaches 3 on chunk 1** — maximum security review cycles with fix passes.
+3. **sec_issues accumulates correctly** — 2 from iteration 1 + 1 from iteration 2 = 3 for chunk 1.
+4. **Security fix does NOT increment impl_iterations** — only the implementation sub-phase does.
+5. **Security fix transitions phase** — security_review → security_fix → security_review.
+6. **No human_review transitions** — phase never becomes `human_review` in any snapshot.
+7. **Chunk 2 is clean** — verifies the pipeline handles mixed failure/success across chunks.
+8. **invocation_count = 20** — each simulated agent call increments exactly once.
