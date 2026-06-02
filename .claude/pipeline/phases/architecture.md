@@ -23,11 +23,12 @@ If the architect succeeded, read `.claude/pipeline/chunks.json` and verify it ha
 ## State Updates
 
 After the architect `Agent` invocation completes:
-- Update state.json: increment top-level `invocation_count`.
-- If successful, update state.json:
-  - set top-level `phase: "implementing"`
-  - set top-level `total_chunks` to the value from chunks.json
-  - set top-level `chunks` to an array with one entry per chunk from chunks.json. For each entry, set `id` from chunks.json, `status: "pending"`, `phase: "pending"`. All counter fields take their zero defaults defined by the chunk-entry schema in CONTRACTS.md Section 3.
+- Update state.json:
+  - increment top-level `invocation_count`
+  - If successful:
+    - set top-level `phase: "implementing"`
+    - set top-level `total_chunks` to the value from chunks.json
+    - set top-level `chunks` to an array with one entry per chunk from chunks.json. For each entry, set `id` from chunks.json, `status: "pending"`, `phase: "pending"`. All counter fields take their zero defaults defined by the chunk-entry schema in CONTRACTS.md Section 3.
 - Append to the pipeline execution log:
   - If successful: the lines defined in CONTRACTS.md §5.2.1 (`Plan`) and §5.2.2 (`Chunks`).
   - If failed (architect flagged ambiguity): do not append a success summary. Escalation per `human-review.md` appends the §5.2.11 (`AWAITING INPUT`) and §5.2.12 (`RESUMED`) bullets under the `## Architecture` heading.

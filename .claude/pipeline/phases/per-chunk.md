@@ -33,10 +33,11 @@ Invoke `test-suite-generator` via the `Agent` tool with a prompt that includes:
 
 After the `Agent` invocation completes, determine whether test generation succeeded (tests were written and all fail as expected).
 
-- Update state.json: increment top-level `invocation_count`.
-- If succeeded, update state.json:
-  - set current chunk `tests` to the test count reported by test-suite-generator
-  - set current chunk `phase: "implementation"`
+- Update state.json:
+  - increment top-level `invocation_count`
+  - If succeeded:
+    - set current chunk `tests` to the test count reported by test-suite-generator
+    - set current chunk `phase: "implementation"`
 - Append to the pipeline execution log:
   - If succeeded: the line defined in CONTRACTS.md §5.2.3 (`Tests Written`).
   - If failed (no tests written, compilation errors, or agent could not interpret validation criteria): do not append a success summary. Escalation per `human-review.md` appends the §5.2.11 (`AWAITING INPUT`) and §5.2.12 (`RESUMED`) bullets under the chunk heading.
@@ -147,6 +148,8 @@ Commit with the structured message template from CONTRACTS.md Section 4.
 Update state.json:
 - set current chunk `status: "passed"`
 - set current chunk `phase: "passed"`
+
+The commit is not an `Agent` invocation, so `invocation_count` is unchanged (see CONTRACTS.md §3).
 
 ---
 

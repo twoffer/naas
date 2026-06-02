@@ -179,7 +179,7 @@ Each element in `chunks`:
 | `phase` | string | Current pipeline phase. See Phase Values below. |
 | `current_chunk` | integer | ID of chunk being processed. `0` = not yet in per-chunk loop. |
 | `total_chunks` | integer | Total chunks from `chunks.json`. `0` until architecture completes. |
-| `invocation_count` | integer | Count of `Agent` invocations. Orchestrator increments after each worker invocation. Used for budget monitoring. |
+| `invocation_count` | integer | Count of `Agent` invocations. Orchestrator increments after each worker `Agent` invocation only; non-`Agent` steps (chunk entry, commit, post-pipeline finalization) do not increment it. Used for budget monitoring. |
 | `budget_guard_triggered` | boolean | `false` until the budget guard fires. The orchestrator pauses for the budget guard exactly once — the first time `invocation_count` reaches the threshold (`>= 30`) while this flag is `false` — then sets it `true` so the guard does not re-fire as the count keeps climbing. |
 | `chunks` | array | Per-chunk status records. Empty until per-chunk loop starts. |
 | `started_at` | string | ISO 8601 UTC timestamp of pipeline start. |
