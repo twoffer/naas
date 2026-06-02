@@ -24,7 +24,7 @@ Five worker subagents exist in `.claude/agents/`:
 
 ### Target State
 
-An automated pipeline where a single invocation (e.g., "Implement Spec 3") to a dedicated `pipeline-orchestrator` agent triggers the full chain: SCM initialization → architecture + plan decomposition → per-chunk TDD implementation with quality gate loops → final integration validation → SCM finalization (branch push, draft PR). Human intervention only required for escalated issues and the final PR merge.
+An automated pipeline where a single invocation (e.g., "Implement Spec 3") to a dedicated `pipeline-orchestrator` skill triggers the full chain: SCM initialization → architecture + plan decomposition → per-chunk TDD implementation with quality gate loops → final integration validation → SCM finalization (branch push, draft PR). Human intervention only required for escalated issues and the final PR merge.
 
 ### Agent Roster
 
@@ -36,14 +36,15 @@ An automated pipeline where a single invocation (e.g., "Implement Spec 3") to a 
 | `code-security-reviewer` | Reviews code for security and quality | Worker | Subagent (`.claude/agents/`) |
 | `test-suite-generator` | Generates test suites (TDD-first and post-implementation) | Worker | Subagent (`.claude/agents/`) |
 | `integration-validator` | Tests cross-service integration | Worker | Subagent (`.claude/agents/`) |
+| `pipeline-simulator` | Validates the orchestrator state machine by simulating runs without invoking real workers | Validation | Subagent (`.claude/agents/`) |
 
-The `pipeline-orchestrator` is invoked directly by the developer (via `/pipeline-orchestrator <spec>`) and runs in the main Claude Code session. All five worker agents are invoked by the orchestrator via the `Agent` tool, never by the developer. The orchestrator MUST run in the main session because subagents cannot themselves invoke other subagents — placing the orchestrator in `.claude/agents/` would prevent it from delegating to the worker pool.
+The `pipeline-orchestrator` is invoked directly by the developer (via `/pipeline-orchestrator <spec>`) and runs in the main Claude Code session. All five worker agents are invoked by the orchestrator via the `Agent` tool, never by the developer. (The `pipeline-simulator` is a separate validation harness — see "Pipeline Simulation Harness" under Observability — and is not part of a production pipeline run; it is invoked via the `/pipeline-simulator-run` skill.) The orchestrator MUST run in the main session because subagents cannot themselves invoke other subagents — placing the orchestrator in `.claude/agents/` would prevent it from delegating to the worker pool.
 
 ### Architecture: Thick Orchestrator with Phase Decomposition
 
 The orchestrator manages the **entire pipeline execution loop** — not just pre/post phases. It invokes each worker via the `Agent` tool, reads results from `Agent` tool responses and artifact files, updates pipeline state (`state.json`) and the execution log, and decides the next step.
 
-Workers are stateless specialists. They receive their context via the orchestrator's Task prompt, do their work, produce artifact files, and return a summary. They never read or write pipeline state files (`state.json`, `chunks.json`).
+Workers are stateless specialists. They receive their context via the orchestrator's Agent prompt, do their work, produce artifact files, and return a summary. They never read or write pipeline state files (`state.json`, `chunks.json`).
 
 **Phase decomposition:** Rather than encoding all pipeline logic in a single monolithic system prompt, the orchestrator's detailed per-phase instructions live in separate files under `.claude/pipeline/phases/`. The orchestrator prompt defines the phase sequence and maps each `state.json` phase value to an instruction file. When entering a phase, the orchestrator reads the corresponding file for detailed guidance.
 
@@ -65,13 +66,13 @@ This design:
 
 ### Design Philosophy: Defense in Depth for Increased Rigor
 
-The pipeline incorporates several layers of guardrails — iteration caps on the implementer (3 attempts to make tests pass), iteration caps on the security review reflection loop (3 attempts before escalation), an invocation-count budget guard (pause at 30 invocations), regression checks after every security fix, and explicit HUMAN_REVIEW escalation paths. With current-generation frontier models (Claude Opus 4.7, Claude Sonnet 4.6), some of this scaffolding is heavier than what is strictly required for the pipeline to produce correct output. Modern models exhibit stronger task persistence, better self-verification, and more reliable tool use than earlier generations, and many runs would succeed without any of these guardrails firing.
+The pipeline incorporates several layers of guardrails — iteration caps on the implementer (3 attempts to make tests pass), iteration caps on the security review reflection loop (3 attempts before escalation), an invocation-count budget guard (pause at 30 invocations), regression checks after every security fix, and explicit HUMAN_REVIEW escalation paths. With current-generation frontier models (Claude Opus 4.8, Claude Sonnet 4.6), some of this scaffolding is heavier than what is strictly required for the pipeline to produce correct output. Modern models exhibit stronger task persistence, better self-verification, and more reliable tool use than earlier generations, and many runs would succeed without any of these guardrails firing.
 
 These layers are retained deliberately for three reasons:
 
 1. **Demonstration value.** A pipeline that includes explicit quality gates, escalation paths, and budget controls visibly demonstrates agentic engineering discipline — exactly the discipline that distinguishes a production-ready agentic system from a prototype. The receipts (iteration counts, security fixes, escalations) tell a verifiable story.
 
-2. **Robustness across model generations.** The pipeline is designed to remain reliable if a less capable model is substituted for cost reasons (e.g., Sonnet 4.6 in place of Opus 4.7), or if a future model exhibits regression on a particular workflow. The guardrails are calibrated for the *minimum* trustworthy behavior, not the typical case.
+2. **Robustness across model generations.** The pipeline is designed to remain reliable if a less capable model is substituted for cost reasons (e.g., Sonnet 4.6 in place of Opus 4.8), or if a future model exhibits regression on a particular workflow. The guardrails are calibrated for the *minimum* trustworthy behavior, not the typical case.
 
 3. **Catching the long tail.** Even with a well-behaved model, edge cases — flaky test environments, ambiguous spec requirements, intricate security findings — can produce a runaway loop or a confidently wrong output. The guardrails catch these without requiring the developer to babysit every run.
 
@@ -83,7 +84,7 @@ The cost of this defense-in-depth is mostly cognitive surface area, not runtime 
 
 ### Objective
 
-Update all five existing worker subagent files and create the new `pipeline-orchestrator` agent using the current Claude Code agent format with YAML frontmatter fields for tool scoping, model selection, and memory.
+Update all five existing worker subagent files and create the new `pipeline-orchestrator` skill using the current Claude Code formats — subagents with YAML frontmatter fields for tool scoping, model selection, and memory; the orchestrator skill with its own frontmatter (`allowed-tools`, `model`, `effort`).
 
 ### Create the Pipeline Orchestrator Skill
 
@@ -115,8 +116,8 @@ After **every `Agent` tool completion**, the orchestrator performs a three-step 
 | `argument-hint` | `[spec-id]` | Autocomplete hint when typing the slash command |
 | `disable-model-invocation` | `true` | Pipeline runs are explicit developer actions, never auto-triggered by Claude pattern-matching chat |
 | `allowed-tools` | `Bash Read Write Edit Agent Grep Glob AskUserQuestion TaskCreate TaskGet TaskList TaskUpdate` | Pre-approves the toolset the orchestrator needs, eliminating per-call permission prompts during a run |
-| `model` | `claude-opus-4-7` | Complex multi-step coordination with significant accumulated context. Benefits from 1M context window, improved long-horizon focus, and stronger file-system-based memory |
-| `effort` | `xhigh` | Recommended for coding and agentic use cases on Opus 4.7 |
+| `model` | `claude-opus-4-8[1m]` | Complex multi-step coordination with significant accumulated context. Benefits from 1M context window, improved long-horizon focus, and stronger file-system-based memory |
+| `effort` | `xhigh` | Recommended for coding and agentic use cases on Opus 4.8 |
 
 **System prompt structure (skill body):**
 
@@ -131,7 +132,7 @@ The skill body is intentionally concise (~70 lines). It defines:
 
 Detailed per-phase instructions remain at `.claude/pipeline/phases/*.md` (unchanged from prior layout). The skill reads the relevant phase file when entering each phase. This keeps the skill body focused on structure and constraints while phase files provide natural-language guidance for execution. Phase files remain at `.claude/pipeline/` rather than moving inside the skill directory in order to keep their pipeline-aligned behavior more generally consumable.
 
-**Token budget guard note:** The Anthropic API beta `task_budget` feature (introduced with Opus 4.7) is set via API headers and is not exposed in terminal Claude Code. The pipeline therefore retains its existing `invocation_count` field in `state.json` as the budget control mechanism. If the orchestrator is ever migrated to the Agent SDK, `task_budget` becomes available as a refinement.
+**Token budget guard note:** The Anthropic API beta `task_budget` feature is set via API headers and is not exposed in terminal Claude Code. The pipeline therefore retains its existing `invocation_count` field in `state.json` as the budget control mechanism. If the orchestrator is ever migrated to the Agent SDK, `task_budget` becomes available as a refinement.
 
 ### Update the Technical Architect Agent
 
@@ -155,8 +156,8 @@ The `technical-architect` absorbs the plan decomposition responsibility that was
 
 | Field | Value | Rationale |
 |-------|-------|-----------|
-| `tools` | `Read`, `Write`, `Grep`, `Glob`, `AskUserQuestion` | `Write` for plan files and chunks.json. `AskUserQuestion` for manual invocation mode. No `Bash` (doesn't run code). No `Task` (doesn't invoke other agents — the orchestrator invokes it). |
-| `model` | `claude-opus-4-6` | Deep reasoning for architectural analysis and plan decomposition. |
+| `tools` | `Read`, `Write`, `Grep`, `Glob`, `AskUserQuestion` | `Write` for plan files and chunks.json. `AskUserQuestion` for manual invocation mode. No `Bash` (doesn't run code). No `Agent` (doesn't invoke other agents — the orchestrator invokes it). |
+| `model` | `claude-opus-4-8[1m]` | Deep reasoning for architectural analysis and plan decomposition. |
 | `memory` | `project` | Remembers architectural decisions across spec implementations. |
 
 **Delete the chunking skill:** Remove `.claude/skills/chunk-plans/SKILL.md` — its functionality is now part of the architect's standard responsibilities.
@@ -184,9 +185,9 @@ No worker subagent has access to `Bash` for git operations. The `feature-impleme
 
 **2. Verify `model:` field.**
 
-Use `claude-opus-4-7` for components that benefit from deeper reasoning (`pipeline-orchestrator`, `technical-architect`, `code-security-reviewer`, `integration-validator`). Use `claude-sonnet-4-6` for components that benefit from speed (`feature-implementer`, `test-suite-generator`).
+Use `claude-opus-4-8[1m]` for components that benefit from deeper reasoning (`pipeline-orchestrator`, `technical-architect`, `code-security-reviewer`, `integration-validator`). Use `claude-sonnet-4-6` for components that benefit from speed (`feature-implementer`, `test-suite-generator`).
 
-Opus 4.7 brings three improvements that disproportionately benefit the orchestration and review roles: stronger long-horizon task persistence (relevant to multi-chunk pipeline runs), better file-system-based memory (relevant to the orchestrator's `state.json` and execution-log discipline), and proactive output self-verification (relevant to architect chunks.json validation and security reviewer verdicts). The same context window (1M tokens) and standard Opus pricing apply.
+Opus 4.8 brings three improvements that disproportionately benefit the orchestration and review roles: stronger long-horizon task persistence (relevant to multi-chunk pipeline runs), better file-system-based memory (relevant to the orchestrator's `state.json` and execution-log discipline), and proactive output self-verification (relevant to architect chunks.json validation and security reviewer verdicts). The `[1m]` model id selects the 1M-token context window, and standard Opus pricing applies.
 
 **3. Refactor system prompts to remove duplicated project context.**
 
@@ -195,7 +196,7 @@ Agents automatically load `CLAUDE.md` context. For architectural details, agents
 **4. Add pipeline mode instructions.**
 
 Each worker's system prompt should include instructions for two operating modes:
-- **Pipeline mode** (invoked via Task by orchestrator): Do not use `AskUserQuestion`. If encountering an issue requiring human input, clearly state the problem and what is needed in the response. The orchestrator handles escalation.
+- **Pipeline mode** (invoked via the Agent tool by orchestrator): Do not use `AskUserQuestion`. If encountering an issue requiring human input, clearly state the problem and what is needed in the response. The orchestrator handles escalation.
 - **Manual mode** (invoked directly by developer): Use `AskUserQuestion` freely for ambiguities.
 
 **5. Add lint/format gate to the feature-implementer.**
@@ -215,7 +216,7 @@ In TDD mode, the test-suite-generator must run its generated tests and verify th
 
 **7. Workers do NOT interact with pipeline state files.**
 
-Workers never read or write `state.json` or `chunks.json`. They receive their context from the orchestrator's Task prompt and communicate results through their Task response and artifact files. The orchestrator is the sole writer of `state.json`.
+Workers never read or write `state.json` or `chunks.json`. They receive their context from the orchestrator's Agent prompt and communicate results through their Agent response and artifact files. The orchestrator is the sole writer of `state.json`.
 
 ### Document Loading Convention
 
@@ -232,7 +233,7 @@ The standard reading order for agents is:
 ### Validation
 
 After modernization, verify that:
-- The `pipeline-orchestrator` can create a branch, initialize state, and invoke the `technical-architect` via Task.
+- The `pipeline-orchestrator` can create a branch, initialize state, and invoke the `technical-architect` via the Agent tool.
 - The `technical-architect` can read a spec and produce both a plan file and a valid `chunks.json`.
 - Each worker agent can still be invoked manually via `/agents` and performs its role correctly.
 - Tool restrictions are working (e.g., `code-security-reviewer` cannot write files, worker agents cannot run git commands).
@@ -245,7 +246,7 @@ After modernization, verify that:
 
 ### Objective
 
-Implement the orchestrator's state machine so that completing one phase automatically proceeds to the next, with the orchestrator managing the entire execution loop via explicit Task invocations.
+Implement the orchestrator's state machine so that completing one phase automatically proceeds to the next, with the orchestrator managing the entire execution loop via explicit Agent-tool invocations.
 
 ### Pipeline Architecture
 
@@ -262,38 +263,38 @@ Implement the orchestrator's state machine so that completing one phase automati
 │                           │  - Create feature branch
 │                           │  - Initialize state.json
 │                           │  - Create pipeline log
-│                           │  - Invoke technical-architect via Task
+│                           │  - Invoke technical-architect via the Agent tool
 └────────────┬─────────────┘
              │
              ▼
 ┌──────────────────────────┐
 │  technical-architect      │  Analyze spec, produce plan + chunks.json
-│  (invoked via Task)       │
+│  (invoked via Agent)      │
 └────────────┬─────────────┘
-             │ Task returns to orchestrator
+             │ Agent call returns to orchestrator
              │ Orchestrator reads chunks.json, updates state.json
              ▼
 ┌──────────────────────────────────────────────────────────────────┐
 │          PER-CHUNK LOOP (Priority 3)                             │
-│          Orchestrator invokes each worker via Task               │
+│          Orchestrator invokes each worker via Agent              │
 │                                                                   │
 │  ┌───────────────────┐                                           │
 │  │test-suite-generator│  Write failing tests FIRST               │
-│  │ (invoked via Task) │                                          │
+│  │ (invoked via Agent)│                                          │
 │  └─────────┬─────────┘                                           │
-│            │ Task returns, orchestrator updates state             │
+│            │ Agent call returns, orchestrator updates state       │
 │            ▼                                                      │
 │  ┌───────────────────┐                                           │
 │  │ feature-implementer│◄──── fix instructions (from orchestrator)│
-│  │ (invoked via Task, │         │                                │
+│  │ (invoked via Agent,│         │                                │
 │  │  iterates until    │         │                                │
 │  │  tests pass)       │         │                                │
 │  └─────────┬─────────┘         │                                │
-│            │ Task returns       │                                │
+│            │ Agent call returns │                                │
 │            ▼                    │                                │
 │  ┌────────────────────────┐    │                                │
 │  │code-security-reviewer  │────┘                                │
-│  │ (invoked via Task)     │  FAIL → orchestrator re-invokes     │
+│  │ (invoked via Agent)    │  FAIL → orchestrator re-invokes     │
 │  │                        │         implementer with fixes       │
 │  │  PASS → orchestrator   │                                      │
 │  │  commits chunk,        │                                      │
@@ -304,9 +305,9 @@ Implement the orchestrator's state machine so that completing one phase automati
              ▼
 ┌──────────────────────────┐
 │  integration-validator    │  Full integration validation
-│  (invoked via Task)       │
+│  (invoked via Agent)      │
 └────────────┬─────────────┘
-             │ Task returns to orchestrator
+             │ Agent call returns to orchestrator
              ▼
 ┌──────────────────────────┐
 │  pipeline-orchestrator    │  POST-PIPELINE PHASE:
@@ -340,21 +341,23 @@ PRE-PIPELINE → ARCHITECTURE → PER-CHUNK LOOP → INTEGRATION → POST-PIPELI
 | `post_pipeline`            | `phases/post-pipeline.md`                     | Push branch, create draft PR, finalize |
 | `human_review`             | `phases/human-review.md`                      | Shared escalation/resume protocol |
 
+The terminal phases `complete` (the "DONE" state above — a successful run) and `failed` (a run the developer aborted from `human_review`) have no instruction file and so do not appear in the table; they are recorded in `state.json` only. See CONTRACTS.md Section 3 for the full set of phase values.
+
 Phase files use natural language guidance anchored by formal constraints (retry limits, state.json field names, phase values). They define entry conditions, execution guidance, state updates, success criteria, and escalation paths.
 
 ### Context Window Management
 
-The orchestrator accumulates worker outputs in its conversation context — each Task response returns to the orchestrator. Over a full pipeline run:
+The orchestrator accumulates worker outputs in its conversation context — each Agent response returns to the orchestrator. Over a full pipeline run:
 
-- Each Task response: ~1-5K tokens
+- Each Agent response: ~1-5K tokens
 - 15-25 invocations (5 chunks × 3+ agents, with some reflection loops): ~15-125K tokens
-- Plus orchestrator reasoning, Task prompt construction, state/log reads: ~30-60K tokens
+- Plus orchestrator reasoning, Agent prompt construction, state/log reads: ~30-60K tokens
 - **Total estimated: ~50-200K tokens**
 
-This is why the orchestrator uses `claude-opus-4-6` (1M context) — the accumulated context fits comfortably. Two mechanisms prevent context pressure:
+This is why the orchestrator uses `claude-opus-4-8[1m]` (1M context) — the accumulated context fits comfortably. Two mechanisms prevent context pressure:
 
-1. **Claude Code's automatic context compression.** Older messages are compressed as context fills. The orchestrator only needs detailed access to the most recent Task response.
-2. **Persistent ground truth files.** After each Task, the orchestrator writes state.json and appends to the execution log. If older context is compressed, these files serve as ground truth for any data the orchestrator needs later.
+1. **Claude Code's automatic context compression.** Older messages are compressed as context fills. The orchestrator only needs detailed access to the most recent Agent response.
+2. **Persistent ground truth files.** After each Agent call, the orchestrator writes state.json and appends to the execution log. If older context is compressed, these files serve as ground truth for any data the orchestrator needs later.
 
 ### Inter-Agent State Communication
 
@@ -363,14 +366,14 @@ For detailed schemas of `state.json`, `chunks.json`, commit messages, and the ex
 **Key design principle: The orchestrator is the sole writer of `state.json`.** Workers never read or write it. This eliminates dual-write bugs, simplifies workers, and ensures state consistency.
 
 **How workers communicate results to the orchestrator:**
-1. **Task response text** — natural language summary of what was done
+1. **Agent response text** — natural language summary of what was done
 2. **Artifact files** — plan files, chunks.json, test files, review reports
-3. **Test/lint results** — pass/fail counts reported in the Task response
+3. **Test/lint results** — pass/fail counts reported in the Agent response
 
 The orchestrator synthesizes these into state.json updates and log entries.
 
 **How the orchestrator passes context to workers:**
-The orchestrator reads `chunks.json` and extracts the relevant chunk's fields into each worker's Task prompt. Workers receive self-contained, unambiguous prompts — they don't need to know about pipeline state files, chunk IDs, or the broader pipeline context.
+The orchestrator reads `chunks.json` and extracts the relevant chunk's fields into each worker's Agent prompt. Workers receive self-contained, unambiguous prompts — they don't need to know about pipeline state files, chunk IDs, or the broader pipeline context.
 
 ### Pipeline Recovery / Resume
 
@@ -383,7 +386,7 @@ If the pipeline is interrupted (session crash, network failure), the orchestrato
 
 ### Budget Guard
 
-The orchestrator tracks `invocation_count` in `state.json`, incrementing after each Task call. The first time `invocation_count` reaches the threshold (`>= 30`) while `budget_guard_triggered` is `false`, the orchestrator pauses, reports current pipeline status to the developer, and sets `budget_guard_triggered = true`. The guard fires exactly once per run — the flag prevents it from re-pausing as the count keeps climbing past 30. This prevents runaway reflection loops from consuming excessive resources.
+The orchestrator tracks `invocation_count` in `state.json`, incrementing after each Agent call. The first time `invocation_count` reaches the threshold (`>= 30`) while `budget_guard_triggered` is `false`, the orchestrator pauses, reports current pipeline status to the developer, and sets `budget_guard_triggered = true`. The guard fires exactly once per run — the flag prevents it from re-pausing as the count keeps climbing past 30. This prevents runaway reflection loops from consuming excessive resources.
 
 ### Pipeline Cleanup
 
@@ -395,10 +398,10 @@ The orchestrator supports a cleanup command: "Clean up pipeline for Spec X"
 ### Validation
 
 - Invoke the `pipeline-orchestrator` with a small spec (Spec 1: Event Ingestion — simplest, most self-contained).
-- Verify the orchestrator creates the branch, initializes state, invokes the architect via Task, reads chunks.json, and begins the per-chunk loop.
-- Verify that each worker is invoked via Task with appropriate context extracted from chunks.json.
-- Verify that `state.json` updates correctly after every Task completion.
-- Verify that the execution log is appended after every Task completion.
+- Verify the orchestrator creates the branch, initializes state, invokes the architect via the Agent tool, reads chunks.json, and begins the per-chunk loop.
+- Verify that each worker is invoked via the Agent tool with appropriate context extracted from chunks.json.
+- Verify that `state.json` updates correctly after every Agent completion.
+- Verify that the execution log is appended after every Agent completion.
 - Verify that the orchestrator commits chunks with targeted staging (not `git add -A`).
 - Verify that HUMAN_REVIEW escalation works (e.g., architect flags an ambiguity).
 - Verify that the orchestrator pushes the branch and creates a draft PR after all chunks pass integration.
@@ -413,13 +416,13 @@ The per-chunk loop includes conditional feedback loops so that if the `code-secu
 
 ### Mechanism
 
-The orchestrator reads the code-security-reviewer's Task response to determine PASS or FAIL. On FAIL, the orchestrator constructs a new Task prompt for the feature-implementer that includes the specific issues found, file paths, line numbers, and fix instructions.
+The orchestrator reads the code-security-reviewer's Agent response to determine PASS or FAIL. On FAIL, the orchestrator constructs a new Agent prompt for the feature-implementer that includes the specific issues found, file paths, line numbers, and fix instructions.
 
 ### Reflection Loop Rules
 
 1. **Maximum iterations per chunk:** 3 attempts at the security review stage. If the quality gate still fails after 3 iterations, the orchestrator escalates to HUMAN_REVIEW with a summary of all issues found.
 
-2. **Iteration context:** Each reflection loop pass, the orchestrator includes in the implementer's Task prompt:
+2. **Iteration context:** Each reflection loop pass, the orchestrator includes in the implementer's Agent prompt:
    - The original chunk implementation instructions
    - The specific issues found by the reviewer
    - The iteration count (so the implementer knows urgency increases)
@@ -497,6 +500,8 @@ feat(spec-3-enrichment/chunk-1): Redis Stream consumer setup
 
 ## Priority 4: Agent Teams for Parallel Test Generation (Optional)
 
+> **Status: not yet implemented.** Priorities 1–3 are fully built; Priority 4 remains a forward-looking design. There is no Agent Teams configuration in the repository (no `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS` flag, no teammate spawn templates). The section below is retained as the intended approach should this optimization be pursued.
+
 ### Objective
 
 Use Claude Code Agent Teams to parallelize test generation for a single module, spawning teammates for unit tests, integration tests, and security tests simultaneously.
@@ -542,13 +547,13 @@ Agent Teams run at approximately 15x standard token usage. Only use this for:
 
 **Estimated effort:** 3-4 hours
 
-1. Create the `pipeline-orchestrator` agent with `tools:`, `model:`, and `memory:` frontmatter, and a system prompt defining the full state machine, Task prompt templates, commit logic, resume logic, cleanup logic, and budget guard.
+1. Create the `pipeline-orchestrator` skill with `allowed-tools`, `model`, and `effort` frontmatter (plus `name`, `description`, `argument-hint`, `disable-model-invocation`), and a skill body defining the state machine, phase-to-file mapping, the three entry modes, Agent-tool prompt templates, commit logic, resume logic, cleanup logic, and budget guard.
 2. Update the `technical-architect` agent to absorb plan decomposition: add chunks.json production, chunking rules, update tool list (`Read, Write, Grep, Glob, AskUserQuestion`), add pipeline mode instructions.
 3. Remove the old `chunking` skill (`.claude/skills/chunk-plans/`) — its responsibilities are now owned by the `technical-architect`.
 4. Update all five existing worker agent `.md` files: verify tool lists, add pipeline mode instructions (workers do not interact with state.json/chunks.json), add lint gate to implementer, add TDD verification to test-suite-generator.
 5. Audit worker agent system prompts and remove duplicated project context. Ensure each agent's first-action instructions follow the Document Loading Convention.
 6. Update `.gitignore` to track `.claude/pipeline/` (except `state.json` and `chunks.json`).
-7. Verify the `pipeline-orchestrator` can create a branch, initialize state, and invoke the `technical-architect` via Task.
+7. Verify the `pipeline-orchestrator` can create a branch, initialize state, and invoke the `technical-architect` via the Agent tool.
 8. Verify the `technical-architect` can read a spec and produce both a plan file and a valid `chunks.json`.
 9. Verify each worker agent still works correctly via manual invocation.
 
@@ -557,7 +562,7 @@ Agent Teams run at approximately 15x standard token usage. Only use this for:
 **Estimated effort:** 3-4 hours
 
 1. Implement the orchestrator's full state machine loop (pre-pipeline → architecture → per-chunk → integration → post-pipeline).
-2. Implement the three-step post-Task update pattern (extract data → update state.json → append to log).
+2. Implement the three-step post-Agent-call update pattern (extract data → update state.json → append to log).
 3. Implement per-chunk commit logic with targeted staging.
 4. Implement resume logic (read state.json, determine position, re-enter loop).
 5. Implement budget guard (pause at 30 invocations).
@@ -712,7 +717,7 @@ EOF
 
 ### Pipeline Execution Log
 
-Each pipeline run produces a human-readable summary in `.claude/pipeline/logs/`. The orchestrator appends to this log after every Task completion — see CONTRACTS.md Section 5 for the format and the specific entries written at each phase.
+Each pipeline run produces a human-readable summary in `.claude/pipeline/logs/`. The orchestrator appends to this log after every Agent completion — see CONTRACTS.md Section 5 for the format and the specific entries written at each phase.
 
 This log is a demonstration artifact. It shows that the pipeline ran, caught real issues, and resolved them autonomously. The orchestrator includes it in the PR description during the post-pipeline phase.
 
@@ -738,10 +743,24 @@ The report is a durable, version-controlled artifact that records:
 
 The report serves three audiences: (a) the developer, who can scan it to confirm a clean run; (b) the code reviewer on the resulting PR, who can verify quality without reading the full execution log; (c) any future portfolio reviewer evaluating the agentic engineering discipline of the project. Schema details are in CONTRACTS.md Section 6.
 
+### Pipeline Simulation Harness
+
+The orchestrator's state machine is validated without invoking real worker agents (and without running shell commands, performing git operations, or modifying any code) by the `pipeline-simulator` agent. It stands in for the orchestrator, reads CONTRACTS.md and the phase files, and applies the same state-transition and log-formatting rules deterministically against predetermined agent outcomes — producing the full set of real state artifacts (`state.json`, `chunks.json`, the execution log, per-step state snapshots, and the various report files) under `.claude/pipeline/simulation/runs/<scenario>/`.
+
+Three scenarios live in `.claude/pipeline/simulation/scenarios/`:
+
+| Scenario | Exercises |
+|----------|-----------|
+| `happy-path` | Every agent succeeds on the first attempt across all chunks — no retries or escalations. Validates basic phase progression, chunk sequencing, log formatting, and invocation counting. |
+| `max-recovery` | Agents fail up to but not exceeding their iteration thresholds, maximizing automatic retries without triggering human escalation. Exercises every non-escalating retry path (impl/security iterations, the security-fix → regression-check → re-review loop). |
+| `all-failures` | Every failure mode fires with human escalation at every step, plus the budget guard. Validates `human_review` transitions, chunk-phase retention during escalation, iteration resets on guidance, and the accept-risk commit path. |
+
+The `pipeline-simulator-run` skill (`/pipeline-simulator-run <scenario>`, or `all` to run the three sequentially) is a thin wrapper: it invokes the `pipeline-simulator` agent for each requested scenario and persists the agent's final report to `report.md` in that scenario's run directory. All other simulation artifacts are written by the agent itself.
+
 ### README Section
 
 Add a section to the NAAS README describing the agentic development methodology:
-- Link to `.claude/agents/` with brief descriptions of each agent's role, highlighting the `pipeline-orchestrator` as the entry point
+- Link to `.claude/skills/pipeline-orchestrator/` as the developer-facing entry point, and to `.claude/agents/` with brief descriptions of each worker agent's role
 - Link to `.claude/pipeline/CONTRACTS.md` for the inter-agent communication protocols
 - Link to a sample pipeline execution log showing the reflection loop in action
 
@@ -749,7 +768,7 @@ Add a section to the NAAS README describing the agentic development methodology:
 
 ## Key Design Principles
 
-1. **The orchestrator manages the loop, workers do the work.** All pipeline control flow lives in the orchestrator's state machine. Workers are stateless specialists invoked via Task — they receive context, do their job, and return results.
+1. **The orchestrator manages the loop, workers do the work.** All pipeline control flow lives in the orchestrator's state machine. Workers are stateless specialists invoked via the Agent tool — they receive context, do their job, and return results.
 
 2. **State is orchestrator-owned and inspectable.** The `state.json` file has a single writer (the orchestrator), is always consistent, and enables resume after interruptions. A developer can `cat state.json` at any time to see exactly where the pipeline stands.
 
@@ -759,6 +778,6 @@ Add a section to the NAAS README describing the agentic development methodology:
 
 5. **Each enhancement is independently valuable.** If time runs out after Priority 2, you still have a working automated pipeline. Priority 3 makes it smarter. Priority 4 makes one part faster.
 
-6. **Workers are self-contained.** Workers receive everything they need in their Task prompt — they don't read pipeline state files, parse other agents' output, or know about the broader pipeline context. This makes them independently testable and reusable outside the pipeline.
+6. **Workers are self-contained.** Workers receive everything they need in their Agent prompt — they don't read pipeline state files, parse other agents' output, or know about the broader pipeline context. This makes them independently testable and reusable outside the pipeline.
 
 7. **Let the artifacts tell the story.** Structured commit messages, rich PR descriptions auto-generated from pipeline logs, and the execution logs themselves provide all the project management visibility a demonstration project needs.
