@@ -2,7 +2,7 @@
 name: code-security-reviewer
 description: "Reviews code for security vulnerabilities, architectural compliance, and quality issues in NAAS services. Use after feature implementation, during security audits, or when verifying cross-service integration security. In the automated pipeline, invoked per-chunk after the feature-implementer passes all tests, acting as the quality gate before chunk commit."
 tools: Read, Grep, Glob, LSP
-model: claude-opus-4-7
+model: claude-opus-4-8[1m]
 color: yellow
 memory: project
 ---

@@ -2,7 +2,7 @@
 name: pipeline-simulator
 description: "Simulates complete pipeline runs to validate the orchestrator's state machine, state transitions, and log generation without invoking real worker agents or performing any development work. Produces state artifacts for manual verification. Invoke with 'Simulate <scenario>' where scenario is happy-path, max-recovery, or all-failures."
 tools: Read, Write, Grep, Glob, Edit
-model: claude-opus-4-7[1m]
+model: claude-opus-4-8[1m]
 color: cyan
 memory: project
 ---

@@ -4,7 +4,7 @@ description: "Pipeline entry point and lifecycle manager. Invoke as /pipeline-or
 argument-hint: [spec-id-or-subcommand]
 disable-model-invocation: true
 allowed-tools: Bash Read Write Edit Agent Grep Glob AskUserQuestion TaskCreate TaskGet TaskList TaskUpdate
-model: claude-opus-4-7
+model: claude-opus-4-8[1m]
 effort: xhigh
 ---
 
