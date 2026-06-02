@@ -12,7 +12,7 @@ Escalate when:
 - Feature-implementer fails to fix security issues (tests failing, lint errors, or agent reports failure)
 - Integration validation fails
 
-**Scope:** This protocol covers *failure-driven* escalations only. The budget guard is a separate, orchestrator-level pause (it does not enter the `human_review` phase and does not use the options/resume matrix below) — its behavior is defined in the `pipeline-orchestrator` skill's Budget-guard rule and CONTRACTS.md §5.2.11/§5.2.12/§5.3/§5.4.
+**Scope:** This protocol covers *failure-driven* escalations only. The budget guard is a separate, orchestrator-level pause (it does not enter the `human_review` phase and does not use the options/resume matrix below) — its behavior is defined in the `pipeline-orchestrator` skill's Budget-guard rule and CONTRACTS.md §5.2.11/§5.2.12/§5.3/§5.4. When a budget-guard pause and a failure-driven escalation arise from the same invocation, the budget-guard pause is handled first (see the skill's Budget-guard rule).
 
 ## Escalation Steps
 

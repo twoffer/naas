@@ -654,7 +654,7 @@ Each invocation appends a new section to the same file. The section header is ca
 
 Where:
 - `<id>` is the integer chunk ID from `chunks.json`.
-- `<n>` is the security-review iteration for that chunk; matches `state.json` → `chunks[id].sec_iterations` after this invocation.
+- `<n>` is the security-review iteration for that chunk; matches `state.json` → `chunks[id].sec_iterations` after this invocation. Because `sec_iterations` resets to 0 when the developer retries with guidance after max iterations (per `human-review.md`), `<n>` can restart at `1` for a chunk that already has higher-numbered sections earlier in the file. The resulting duplicate `Iteration <n>` header is expected — the append-only chronological order (Generation Rule 1) disambiguates it.
 - `<VERDICT>` is one of `PASS`, `PASS WITH NOTES`, `NEEDS CHANGES`, `SECURITY CONCERN` — the reviewer's overall verdict for this invocation.
 - `<ISO 8601 UTC timestamp>` is the time the review completed (e.g., `2026-05-06T14:23:11Z`).
 

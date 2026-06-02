@@ -6,7 +6,7 @@ Process each chunk sequentially through test generation, implementation, securit
 
 `state.json` shows `phase: "implementing"`. The `chunks` array is populated with entries from `chunks.json`.
 
-**On resume:** Skip chunks with `status: "passed"` or `status: "failed"`. For the current in-progress chunk, read its `phase` value and enter at the corresponding sub-phase below (e.g., if chunk phase is `"security_review"`, skip directly to the Security Review sub-phase).
+**On resume:** Skip chunks with `status: "passed"` or `status: "failed"`. For the current in-progress chunk, read its `phase` value and enter at the corresponding sub-phase below — each chunk-phase value maps 1:1 to a sub-phase header (e.g., `"security_review"` → Security Review sub-phase; `"security_fix"` → Security Fix sub-phase, which re-invokes the `feature-implementer` fix, NOT the reviewer).
 
 On loop entry (before chunk 1), append the `## Implementation` section header per CONTRACTS.md §5.1 row 4 (idempotent — only on first entry). All chunk H3 headings below are nested under this section.
 
@@ -104,7 +104,19 @@ After the `Agent` invocation completes, determine PASS or FAIL from the reviewer
 
 **If PASS:** proceed to commit.
 
-**If FAIL and `sec_iterations` < 3:** Re-invoke `feature-implementer` via the `Agent` tool with the specific security issues (file paths, line numbers, descriptions) and instructions to fix them, re-run the full test suite to verify no regressions, and run lint checks. This is a targeted fix invocation — not a return to the Implementation sub-phase. Do not apply the Implementation sub-phase's iteration logic or update `impl_iterations`.
+**If FAIL and `sec_iterations` < 3:** proceed to the Security Fix sub-phase below (the chunk `phase` was set to `"security_fix"` in the state update above).
+
+**If FAIL and `sec_iterations` >= 3:** escalate per `human-review.md`. Present the unresolved security issues. The developer can: provide guidance and retry (which resets `sec_iterations` to 0), accept the risk and proceed to commit as-is, or abort the pipeline. If retrying, loop back to the security reviewer with the developer's guidance.
+
+---
+
+## Sub-Phase: Security Fix
+
+**Goal:** Resolve the issues found by security review so the chunk can pass its quality gate.
+
+Chunk phase shows `"security_fix"`.
+
+Re-invoke `feature-implementer` via the `Agent` tool with the specific security issues (file paths, line numbers, descriptions) and instructions to fix them, re-run the full test suite to verify no regressions, and run lint checks. This is a targeted fix invocation — not a return to the Implementation sub-phase. Do not apply the Implementation sub-phase's iteration logic or update `impl_iterations`.
 
 After the fix `Agent` invocation completes, determine whether the fix succeeded (tests pass and lint is clean).
 
@@ -115,11 +127,9 @@ After the fix `Agent` invocation completes, determine whether the fix succeeded 
   - If fix succeeded: the line defined in CONTRACTS.md §5.2.9 (`Implementer: FIX APPLIED`).
   - If fix failed (tests failing, lint errors, or agent reports failure): the line defined in CONTRACTS.md §5.2.10 (`Implementer: FIX FAILED`).
 
-**If fix succeeded:** loop back to invoke the security reviewer again.
+**If fix succeeded:** loop back to the Security Review sub-phase to re-invoke the security reviewer.
 
-**If fix failed:** escalate per `human-review.md`. Present the original security issues, what the implementer attempted, and why it failed.
-
-**If FAIL and `sec_iterations` >= 3:** escalate per `human-review.md`. Present the unresolved security issues. The developer can: provide guidance and retry (which resets `sec_iterations` to 0), accept the risk and proceed to commit as-is, or abort the pipeline. If retrying, loop back to the security reviewer with the developer's guidance.
+**If fix failed:** escalate per `human-review.md`. Present the original security issues, what the implementer attempted, and why it failed. The developer can: provide guidance and retry the fix (which does NOT reset `sec_iterations`), accept the risk and proceed to commit as-is, or abort the pipeline. If retrying, the chunk phase remains `"security_fix"`, so re-invoke the feature-implementer fix with the developer's guidance — do not return to the reviewer.
 
 ---
 
