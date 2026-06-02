@@ -19,7 +19,7 @@ This is the first phase of a fresh pipeline run. No state.json exists yet.
    - `phase: "architecture"`
    - `started_at` to the current ISO 8601 UTC timestamp
 
-   All other required top-level fields take their zero/empty defaults defined by the schema (`current_chunk`, `total_chunks`, `invocation_count`, `chunks`, `completed_at`).
+   All other required top-level fields take their zero/empty defaults defined by the schema (`current_chunk`, `total_chunks`, `invocation_count`, `budget_guard_triggered`, `chunks`, `completed_at`).
 5. Create `.claude/pipeline/logs/<spec-slug>.md` with the headers defined in CONTRACTS.md §5.1 rows 1–2 (`# Pipeline Run` and `# Started`).
 6. Ensure the per-spec artifact directories exist (created if absent — no-op if already present):
    - `.claude/pipeline/plans/` — destination for the implementation plan file written by the technical-architect (CONTRACTS.md §7).

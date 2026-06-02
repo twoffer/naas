@@ -143,6 +143,7 @@ Workers never read or write this file. The orchestrator extracts data from worke
   "current_chunk": 2,                               // Chunk being processed (0 = not started)
   "total_chunks": 5,                                // From chunks.json (0 until architecture completes)
   "invocation_count": 8,                            // Total `Agent` invocations for budget tracking
+  "budget_guard_triggered": false,                  // Set true the first time the budget guard fires; prevents re-firing
   "chunks": [ /* ... */ ],                          // Per-chunk status records
   "started_at": "2026-03-17T10:00:00Z",             // ISO 8601 UTC
   "completed_at": null                              // ISO 8601 UTC, null until done
@@ -179,6 +180,7 @@ Each element in `chunks`:
 | `current_chunk` | integer | ID of chunk being processed. `0` = not yet in per-chunk loop. |
 | `total_chunks` | integer | Total chunks from `chunks.json`. `0` until architecture completes. |
 | `invocation_count` | integer | Count of `Agent` invocations. Orchestrator increments after each worker invocation. Used for budget monitoring. |
+| `budget_guard_triggered` | boolean | `false` until the budget guard fires. The orchestrator pauses for the budget guard exactly once — the first time `invocation_count` reaches the threshold (`>= 30`) while this flag is `false` — then sets it `true` so the guard does not re-fire as the count keeps climbing. |
 | `chunks` | array | Per-chunk status records. Empty until per-chunk loop starts. |
 | `started_at` | string | ISO 8601 UTC timestamp of pipeline start. |
 | `completed_at` | string \| null | ISO 8601 UTC timestamp of pipeline completion. `null` until done. |
@@ -236,6 +238,7 @@ Note: When the pipeline pauses for human review, the top-level `phase` is set to
   "current_chunk": 2,
   "total_chunks": 3,
   "invocation_count": 8,
+  "budget_guard_triggered": false,
   "chunks": [
     {
       "id": 1,

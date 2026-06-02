@@ -383,7 +383,7 @@ If the pipeline is interrupted (session crash, network failure), the orchestrato
 
 ### Budget Guard
 
-The orchestrator tracks `invocation_count` in `state.json`, incrementing after each Task call. If the count reaches 30, the orchestrator pauses and reports current pipeline status to the developer before continuing. This prevents runaway reflection loops from consuming excessive resources.
+The orchestrator tracks `invocation_count` in `state.json`, incrementing after each Task call. The first time `invocation_count` reaches the threshold (`>= 30`) while `budget_guard_triggered` is `false`, the orchestrator pauses, reports current pipeline status to the developer, and sets `budget_guard_triggered = true`. The guard fires exactly once per run — the flag prevents it from re-pausing as the count keeps climbing past 30. This prevents runaway reflection loops from consuming excessive resources.
 
 ### Pipeline Cleanup
 
@@ -620,6 +620,7 @@ cat > .claude/pipeline/state.json << EOF
   "current_chunk": 0,
   "total_chunks": 0,
   "invocation_count": 0,
+  "budget_guard_triggered": false,
   "chunks": [],
   "started_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
   "completed_at": null

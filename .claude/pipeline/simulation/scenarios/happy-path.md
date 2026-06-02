@@ -207,6 +207,7 @@ Every agent succeeds on first attempt across all 3 chunks. No escalations, no re
   "current_chunk": 3,
   "total_chunks": 3,
   "invocation_count": 11,
+  "budget_guard_triggered": false,
   "chunks": [
     { "id": 1, "status": "passed", "phase": "passed", "tests": 8,  "impl_iterations": 1, "sec_iterations": 1, "sec_issues": 0 },
     { "id": 2, "status": "passed", "phase": "passed", "tests": 12, "impl_iterations": 1, "sec_iterations": 1, "sec_issues": 0 },

@@ -66,7 +66,7 @@ You follow the same state machine as the real orchestrator, with these substitut
 | Append a section to `.claude/pipeline/reports/<spec-slug>-integration-report.md` | Append to `.claude/pipeline/simulation/runs/<scenario>/integration-report.md` |
 | Run git operations (branch, commit, push) | Log "committed (simulated)" — no real git operations |
 | Use `AskUserQuestion` for escalations | Read the scenario's human response and decision for that step |
-| Use `AskUserQuestion` for budget guard | Read the scenario's budget guard response |
+| Use `AskUserQuestion` for budget guard | Read the scenario-level budget guard response from Metadata |
 | Create a PR via `gh` | Log "PR created (simulated)" — no real PR |
 
 After each simulated step, write a numbered snapshot to the `snapshots/` subdirectory.
@@ -135,14 +135,13 @@ A scenario file is the simulation's only source of *simulated data*. It must NOT
 
 ### Inputs the simulator reads from a scenario
 
-1. **Metadata** — `description`, `expected_invocations`, `final_phase`, `expected_human_escalations`, optional `failure_modes_exercised`.
+1. **Metadata** — `description`, `expected_invocations`, `final_phase`, `expected_human_escalations`, optional `failure_modes_exercised`, optional scenario-level `budget_guard_response` (developer reply used when the budget guard fires — `continue` or `stop`).
 2. **Simulated Spec** — `spec`, `spec_slug`, `branch`.
 3. **Simulated Chunks** — JSON block; copy verbatim into `chunks.json`.
 4. **Step Sequence** — for each step:
    - `agent` (one of the six worker types) and `chunk` (id or `—`).
    - `simulated_response` — the structured fields the agent would have returned (see catalog below).
    - `human_response` (optional) — developer reply when the step's outcome triggers an escalation per the phase files.
-   - `budget_guard_response` (optional) — developer reply when this step's `invocation_count` increment crosses the §5.3 Budget guard threshold.
 5. **Expected Final state.json** — used only at end-of-run for diffing.
 6. **Expected Pipeline Execution Log** — used only at end-of-run for diffing.
 7. **Expected Per-Spec Artifact Files** — used only at end-of-run for header-sequence comparison (`plan.md`, `review.md`, `integration-report.md`).
@@ -182,16 +181,18 @@ The simulator selects the §5.4 decision row by `choice`:
 
 `guidance` is preserved in the scenario for human readability and would be the input to the next agent invocation in a real run; the simulator does not pass it to anything (it is a simulation), and the literal guidance text never appears in the log per §5.4.
 
-### budget_guard_response shape
+### budget_guard_response shape (scenario-level)
+
+The scenario carries a single, run-level budget guard response in its Metadata:
 
 ```yaml
 budget_guard_response:
   choice: continue | stop
 ```
 
-The simulator checks the budget guard threshold after every increment of `invocation_count`. If `invocation_count > 30` (per §5.3 Budget guard) and the step carries a `budget_guard_response`, the simulator pauses and resumes per §5.2.11/§5.2.12 + the §5.3 Budget guard row + the §5.4 Budget-guard continuation row. `continue` → `Developer approved continuation`. `stop` aborts the pipeline.
+The simulator tracks `budget_guard_triggered` in the simulated `state.json` (per CONTRACTS.md §3 state schema), initialized to `false`. After every increment of `invocation_count`, if `invocation_count >= 30` and `budget_guard_triggered` is `false`, the simulator fires the budget guard exactly once: it pauses and resumes per §5.2.11/§5.2.12 + the §5.3 Budget guard row + the §5.4 Budget-guard continuation row, then sets `budget_guard_triggered = true`. `continue` → `Developer approved continuation`. `stop` aborts the pipeline. The firing step is derived from `invocation_count`, not from where a response is placed in the scenario; because the flag is set on the first fire, the guard never re-fires as `invocation_count` keeps climbing.
 
-If a step's increment crosses the threshold but no `budget_guard_response` is supplied, flag a CLARITY ISSUE.
+If the run reaches `invocation_count >= 30` but the scenario supplies no scenario-level `budget_guard_response`, flag a CLARITY ISSUE.
 
 ### Per-Step Log Construction
 
@@ -199,7 +200,7 @@ After computing the state mutation for a step, construct the log lines by:
 1. Selecting the §5.2 template that matches the step's outcome (e.g., implementation FAIL → §5.2.5; security review FAIL → §5.2.7).
 2. Substituting placeholders from `simulated_response` (e.g., `<n>` from iteration counter, `<issue summary>` from `simulated_response.issue_summary`).
 3. If the step's outcome triggers an escalation per the phase files, append §5.2.11 with the matching §5.3 reason row (substitute free-form fragments from `simulated_response`), pause, then on resume append §5.2.12 with the matching §5.4 row from `human_response.choice`.
-4. If `invocation_count > 30` and a `budget_guard_response` is present, follow the same §5.2.11 → §5.2.12 pattern with the Budget guard / Budget-guard continuation rows.
+4. If `invocation_count >= 30` and `budget_guard_triggered` is still `false`, follow the same §5.2.11 → §5.2.12 pattern with the Budget guard / Budget-guard continuation rows, then set `budget_guard_triggered = true`.
 
 Do not restate templates in this file — defer to CONTRACTS.md §5 for every literal string.
 
@@ -286,7 +287,7 @@ Brief running commentary BEFORE the H1 line is tolerated (it may naturally appea
 - [ ] (FM5a) Security fix failure → retry with guidance
 - [ ] (FM5b) Security fix failure → accept risk
 - [ ] (FM6) Integration validation failure
-- [ ] (FM7) Budget guard threshold exceeded
+- [ ] (FM7) Budget guard threshold reached (invocation_count >= 30, fires once)
 
 (Check boxes for modes exercised in this scenario)
 

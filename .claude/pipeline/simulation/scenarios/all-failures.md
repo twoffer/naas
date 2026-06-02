@@ -8,6 +8,7 @@ Every agent fails in every way possible. Human escalation at every step. Develop
 - **Expected invocations:** 31
 - **Expected final phase:** `complete`
 - **Expected human escalations:** 10 (7 failure modes trigger at least once; FM4 and FM5 each trigger twice with different developer decisions; FM6 triggers twice; budget guard triggers once)
+- **Budget guard response:** `continue` — developer reply when the budget guard fires (the first step where `invocation_count >= 30`)
 
 ## Failure Modes Exercised
 
@@ -447,13 +448,11 @@ After resume, chunk 3 is committed via accept-risk path. `chunk[3].sec_iteration
 - **simulated_response:**
   - verdict: FAIL
   - failure_summary: "Partial failure — OIDC flow works but SAML adapter returns 500"
-- **budget_guard_response:**
-  - choice: continue
 - **human_response:**
   - choice: retry-with-guidance
   - guidance: "SAML adapter needs config update — retry"
 
-This step's `invocation_count` increment (29 → 30) reaches the §5.3 Budget guard threshold. The simulator pauses for budget guard, resumes on the developer's continue choice, then processes the validator's FAIL verdict and pauses again for FM6 retry-with-guidance. The budget-guard ⏸/▶ pair and the FM6 ⏸/▶ pair are emitted in that order in `log.md`.
+This step's `invocation_count` increment (29 → 30) is the first to reach the §5.3 Budget guard threshold while `budget_guard_triggered` is `false`, so the simulator fires the guard exactly once: it pauses, resumes on the scenario-level `continue` response, and sets `budget_guard_triggered = true`. It then processes the validator's FAIL verdict and pauses again for FM6 retry-with-guidance. The budget-guard ⏸/▶ pair and the FM6 ⏸/▶ pair are emitted in that order in `log.md`.
 
 ---
 
@@ -464,7 +463,7 @@ This step's `invocation_count` increment (29 → 30) reaches the §5.3 Budget gu
 - **simulated_response:**
   - verdict: PASS
 
-The validator's PASS verdict is processed and `## Integration Validation: PASS` is emitted in `log.md`. No budget guard fire — `invocation_count` was already past the threshold on Step 30.
+The validator's PASS verdict is processed and `## Integration Validation: PASS` is emitted in `log.md`. No budget guard fire — `budget_guard_triggered` was set `true` on Step 30, so the guard does not re-fire even though `invocation_count` is now 31.
 
 ---
 
@@ -480,6 +479,7 @@ The validator's PASS verdict is processed and `## Integration Validation: PASS` 
   "current_chunk": 3,
   "total_chunks": 3,
   "invocation_count": 31,
+  "budget_guard_triggered": true,
   "chunks": [
     { "id": 1, "status": "passed", "phase": "passed", "tests": 8,  "impl_iterations": 1, "sec_iterations": 2, "sec_issues": 2 },
     { "id": 2, "status": "passed", "phase": "passed", "tests": 12, "impl_iterations": 1, "sec_iterations": 1, "sec_issues": 5 },
@@ -560,11 +560,11 @@ The validator's PASS verdict is processed and `## Integration Validation: PASS` 
 ## Integration Validation: FAIL
 - ⏸ AWAITING INPUT: Integration validation failed
 - ▶ RESUMED: Developer provided guidance, retrying
+- ⏸ AWAITING INPUT: Budget guard — invocation count reached 30, threshold is 30
+- ▶ RESUMED: Developer approved continuation
 ## Integration Validation: FAIL
 - ⏸ AWAITING INPUT: Integration validation failed
 - ▶ RESUMED: Developer provided guidance, retrying
-- ⏸ AWAITING INPUT: Budget guard — invocation count reached 31, threshold is 30
-- ▶ RESUMED: Developer approved continuation
 ## Integration Validation: PASS
 ## Completed: <iso-timestamp>
 ## Total Implementation Iterations: 3 (across all chunks)
@@ -608,7 +608,7 @@ Two iteration-numbering subtleties show up in this scenario and the simulator sh
 6. **FM4b — Sec review max iterations (accept risk):** sec_iterations reaches 3, escalation, NOT reset, chunk committed with `Security Review: ACCEPTED BY DEVELOPER` log line. Key contrast with FM4a (chunk 2) where developer chose retry-with-guidance.
 7. **FM5a — Security fix failure (retry):** Fix breaks tests → escalation → guidance → retry fix succeeds → sec_iterations NOT reset.
 8. **FM6 — Integration failure:** Multiple retries with escalation at each failure.
-9. **FM7 — Budget guard:** Triggers on Step 31's increment to 31, pauses, developer approves continuation, then verdict is processed.
+9. **FM7 — Budget guard:** Triggers on Step 30's increment to 30, pauses, developer approves continuation, then the FAIL verdict (and its FM6 escalation) is processed.
 10. **Counter reset asymmetry:** impl_iterations resets on guidance (FM3). sec_iterations resets on guidance at sec-review escalation (FM4a), but does NOT reset on: security fix retry guidance (FM5a), security fix accept-risk (FM5b), or sec-review accept-risk (FM4b).
 11. **Accept-risk from two different escalation points:** FM5b triggers accept-risk from a failed security fix, while FM4b triggers accept-risk from max security review iterations. Both produce the same `Security Review: ACCEPTED BY DEVELOPER` log line but from different chunk phases (`security_fix` vs. `security_review`).
 12. **Chunk phase retention:** During every human_review pause, chunk-level phase retains its pre-escalation value.

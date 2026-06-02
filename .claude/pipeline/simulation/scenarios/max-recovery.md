@@ -312,6 +312,7 @@ Passes on the last allowed attempt. Cumulative `sec_issues` = 3.
   "current_chunk": 3,
   "total_chunks": 3,
   "invocation_count": 20,
+  "budget_guard_triggered": false,
   "chunks": [
     { "id": 1, "status": "passed", "phase": "passed", "tests": 8,  "impl_iterations": 3, "sec_iterations": 3, "sec_issues": 3 },
     { "id": 2, "status": "passed", "phase": "passed", "tests": 12, "impl_iterations": 1, "sec_iterations": 1, "sec_issues": 0 },
