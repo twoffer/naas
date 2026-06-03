@@ -117,7 +117,7 @@ After **every `Agent` tool completion**, the orchestrator performs a three-step 
 | `disable-model-invocation` | `true` | Pipeline runs are explicit developer actions, never auto-triggered by Claude pattern-matching chat |
 | `allowed-tools` | `Bash Read Write Edit Agent Grep Glob AskUserQuestion TaskCreate TaskGet TaskList TaskUpdate` | Pre-approves the toolset the orchestrator needs, eliminating per-call permission prompts during a run |
 | `model` | `claude-opus-4-8[1m]` | Complex multi-step coordination with significant accumulated context. Benefits from 1M context window, improved long-horizon focus, and stronger file-system-based memory |
-| `effort` | `xhigh` | Recommended for coding and agentic use cases on Opus 4.8 |
+| `effort` | `high` | The orchestrator is a coordinator, not a reasoner — it dispatches workers, extracts their results, and applies deterministic state-machine and contract rules (phase-to-file mapping, CONTRACTS.md §5 log lines, the three-step `state.json` update). The deep cognitive work (architecture, implementation, security review) is delegated to worker subagents, each of which gets its own reasoning budget when invoked. `high` gives enough headroom for the careful state/sequencing work (resume logic, budget-guard-before-escalation ordering) while avoiding the per-turn cost `xhigh` would impose across the dozens of coordinator turns in a full run |
 
 **System prompt structure (skill body):**
 
@@ -158,6 +158,7 @@ The `technical-architect` absorbs the plan decomposition responsibility that was
 |-------|-------|-----------|
 | `tools` | `Read`, `Write`, `Grep`, `Glob`, `AskUserQuestion` | `Write` for plan files and chunks.json. `AskUserQuestion` for manual invocation mode. No `Bash` (doesn't run code). No `Agent` (doesn't invoke other agents — the orchestrator invokes it). |
 | `model` | `claude-opus-4-8[1m]` | Deep reasoning for architectural analysis and plan decomposition. |
+| `effort` | `xhigh` | Most reasoning-intensive role; decomposition quality scales with reasoning depth, and a decomposition error cascades through every downstream chunk. Deviates from the `high` default — see "Effort levels" below. |
 | `memory` | `project` | Remembers architectural decisions across spec implementations. |
 
 **Delete the chunking skill:** Remove `.claude/skills/chunk-plans/SKILL.md` — its functionality is now part of the architect's standard responsibilities.
@@ -183,11 +184,26 @@ No worker subagent has access to `Bash` for git operations. The `feature-impleme
 
 **Frontmatter field naming:** Skill frontmatter uses `allowed-tools` (hyphenated, space-separated) while subagent frontmatter uses `tools` (comma-separated). The set of valid tool names is identical between the two surfaces.
 
-**2. Verify `model:` field.**
+**2. Verify `model:` and `effort:` fields.**
 
 Use `claude-opus-4-8[1m]` for components that benefit from deeper reasoning (`pipeline-orchestrator`, `technical-architect`, `code-security-reviewer`, `integration-validator`). Use `claude-sonnet-4-6` for components that benefit from speed (`feature-implementer`, `test-suite-generator`).
 
 Opus 4.8 brings three improvements that disproportionately benefit the orchestration and review roles: stronger long-horizon task persistence (relevant to multi-chunk pipeline runs), better file-system-based memory (relevant to the orchestrator's `state.json` and execution-log discipline), and proactive output self-verification (relevant to architect chunks.json validation and security reviewer verdicts). The `[1m]` model id selects the 1M-token context window, and standard Opus pricing applies.
+
+**Effort levels.** Reasoning effort is configurable per agent via the `effort:` frontmatter field. Both subagents (`.claude/agents/*.md`) and skills (`.claude/skills/*/SKILL.md`) support it; it overrides the session effort level and otherwise inherits. Valid values are `low`, `medium`, `high`, `xhigh`, `max`, with the available set depending on the model: **Opus 4.8 supports up to `xhigh`/`max`, while Sonnet 4.6 tops out at `high` (below `max`) and does not support `xhigh`.** The session default effort is already `high` on both Opus 4.8 and Sonnet 4.6, so an agent with no `effort` field runs at `high`.
+
+**Policy: set `effort` explicitly only where the role deviates from the `high` default.** Redundant `effort: high` lines are avoided so the config reads as a list of intentional exceptions. Rationale that cannot live in the frontmatter is captured here.
+
+| Component | Model | Effort | Rationale |
+|-----------|-------|--------|-----------|
+| `pipeline-orchestrator` | Opus 4.8 | `high` (explicit) | Coordinator/dispatcher — the deep cognitive work is delegated to workers, each of which gets its own reasoning budget. The explicit line records the deliberate decision *not* to use `xhigh` here despite the long-horizon role, and avoids paying the `xhigh` premium across the dozens of coordinator turns in a full run. |
+| `technical-architect` | Opus 4.8 | `xhigh` | Most reasoning-intensive role; decomposition quality scales with reasoning depth, and a decomposition error cascades through every downstream chunk. Low invocation count per run, so the cost is bounded. |
+| `code-security-reviewer` | Opus 4.8 | `xhigh` | Subtle vulnerability detection in IAM code benefits from maximum reasoning depth — a missed flaw is a product failure. Also fires only a few times per run. |
+| `integration-validator` | Opus 4.8 | `high` (inherited) | Mostly execution and diagnosis against running services; the `high` default is sufficient. |
+| `feature-implementer` | Sonnet 4.6 | `high` (inherited) | Chosen for speed; `high` is both the default and the practical ceiling (Sonnet 4.6 does not offer `xhigh`). |
+| `test-suite-generator` | Sonnet 4.6 | `high` (inherited) | Chosen for speed; test generation is well-served by the default. |
+
+Only `technical-architect` and `code-security-reviewer` carry an explicit `effort` line above the default; every other worker inherits `high`. The `pipeline-orchestrator` skill keeps an explicit `effort: high` as a deliberate, documented hold against `xhigh` rather than silent inheritance.
 
 **3. Refactor system prompts to remove duplicated project context.**
 

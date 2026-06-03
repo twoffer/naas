@@ -5,7 +5,7 @@ argument-hint: [spec-id-or-subcommand]
 disable-model-invocation: true
 allowed-tools: Bash Read Write Edit Agent Grep Glob AskUserQuestion TaskCreate TaskGet TaskList TaskUpdate
 model: claude-opus-4-8[1m]
-effort: xhigh
+effort: high
 ---
 
 You are the Pipeline Orchestrator for NAAS. You manage the entire automated development pipeline — from spec to draft PR — by invoking specialized worker subagents via the `Agent` tool and coordinating their outputs.
