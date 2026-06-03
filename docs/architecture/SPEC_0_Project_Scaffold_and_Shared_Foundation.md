@@ -32,6 +32,7 @@ naas/
 │   ├── keycloak/
 │   │   └── naas-realm-export.json    # Realm import file (realm, client, users)
 │   └── openldap/
+│       ├── Dockerfile                # Bakes bootstrap.ldif into a custom osixia image
 │       └── bootstrap.ldif            # OU structure + test users
 ├── scripts/
 │   └── train_bootstrap_model.py      # ML model bootstrap — generates random_forest.pkl (script content created by Spec 3)
@@ -884,7 +885,10 @@ services:
       start_period: 60s
 
   openldap:
-    image: osixia/openldap:1.5.0
+    # Custom image bakes bootstrap.ldif into the osixia custom-bootstrap dir at
+    # build time. The LDIF is NOT bind-mounted (see ⚠️ note below).
+    build: ./infrastructure/openldap
+    image: naas-openldap:local
     container_name: naas-openldap
     environment:
       LDAP_ORGANISATION: ${LDAP_ORGANISATION:-Corp Inc}
@@ -896,7 +900,6 @@ services:
     volumes:
       - ldap-data:/var/lib/ldap
       - ldap-config:/etc/ldap/slapd.d
-      - ./infrastructure/openldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
     networks:
       - naas-network
     healthcheck:
@@ -920,6 +923,26 @@ volumes:
   ldap-data:
   ldap-config:
 ```
+
+**⚠️ CRITICAL — OpenLDAP Bootstrap LDIF must be BAKED INTO THE IMAGE, not bind-mounted:**
+
+`bootstrap.ldif` is delivered via a custom image (`build: ./infrastructure/openldap`) whose `Dockerfile` copies it into the osixia custom-bootstrap directory:
+
+```dockerfile
+# infrastructure/openldap/Dockerfile
+FROM osixia/openldap:1.5.0
+COPY bootstrap.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
+```
+
+**Do NOT bind-mount the LDIF into `.../bootstrap/ldif/custom/`.** The osixia entrypoint mutates its own assets tree on startup, and every operation reaches back through a bind mount to damage the host file:
+
+- **`chown -R openldap:openldap .../slapd`** (`startup.sh`, runs on every start unless `DISABLE_CHOWN=true`, which also breaks slapd/TLS — not usable) recurses into the mounted dir and flips the host `bootstrap.ldif` to uid 911.
+- **`sed -i`** in the `ldap_add_or_modify` helper (env-var template substitution) can't rename its temp file over a single-file bind-mount inode → `Device or resource busy` → `exit 1`.
+- **`rm -rf .../assets/config`** (post-seed cleanup, default on) can't remove a mounted directory AND deletes the host LDIF through the mount before failing — silently emptying `infrastructure/openldap/`.
+
+Baking the file into the image confines all of this to the container's own layer: the host file is never touched, no osixia workaround env vars are needed, and the default post-seed `rm` succeeds because it operates on the image-layer copy.
+
+**Trade-off:** editing `bootstrap.ldif` requires a rebuild — `docker compose build openldap` (or `docker compose up --build`) — to take effect, not just a container restart. openldap is consequently the only infrastructure service that builds rather than pulling a stock image.
 
 **⚠️ CRITICAL — Keycloak Healthcheck:**
 
@@ -1016,6 +1039,14 @@ The JSON file must conform to Keycloak's realm representation format. The key st
 If using approach 2, verify the format against Keycloak's documentation. Key pitfall: Keycloak `--import-realm` expects the file in `/opt/keycloak/data/import/`. The `command: start-dev --import-realm` flag tells Keycloak to import on startup.
 
 ### 5.3 OpenLDAP Bootstrap Data
+
+This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted):
+
+```dockerfile
+# infrastructure/openldap/Dockerfile
+FROM osixia/openldap:1.5.0
+COPY bootstrap.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
+```
 
 ```ldif
 # infrastructure/openldap/bootstrap.ldif
@@ -1175,8 +1206,10 @@ Run these checks after implementation to verify success.
 ### 6.1 Docker Compose Starts Clean
 
 ```bash
-# From the naas/ root directory:
-docker-compose up -d
+# From the naas/ root directory.
+# --build is required: the openldap service builds a custom image (bakes the
+# bootstrap LDIF). All other infra services pull stock images.
+docker-compose up -d --build
 
 # Wait for all services to be healthy (may take 60-90s for Keycloak):
 docker-compose ps
@@ -1317,6 +1350,15 @@ The shared library needs ORM table definitions for services that do database wri
 
 **Gap 6: OpenLDAP LDIF format sensitivity.**
 The `osixia/openldap` image has specific requirements for custom LDIF files. The file must NOT include the base DN entry (`dc=corp,dc=com`) — the image creates it automatically from `LDAP_DOMAIN`. Including it causes a "Already exists" error that silently skips the rest of the file. **Resolution:** LDIF in this spec starts at `ou=users` level.
+
+**Gap 7: OpenLDAP custom-bootstrap LDIF must be baked into a custom image, not bind-mounted.**
+The original docker-compose bind-mounted `bootstrap.ldif` as a single file into the osixia custom-bootstrap directory. Integration validation on Spec 0 caught the resulting startup failure (all per-chunk gates passed; only the OpenLDAP container failed to start, `exit 1`). Investigation found the osixia entrypoint mutates its own assets tree on startup in three ways, each of which damages a bind-mounted host file:
+
+- **`sed -i`** (`ldap_add_or_modify`, env-var template substitution) can't rename its temp file over a single-file bind-mount inode → `Device or resource busy` → `exit 1`.
+- **`rm -rf .../assets/config`** (post-seed cleanup, default on) can't remove a mounted directory AND deletes the host LDIF through the mount before failing, silently emptying `infrastructure/openldap/`.
+- **`chown -R openldap:openldap .../slapd`** (every start, unless `DISABLE_CHOWN=true`, which also breaks slapd/TLS) recurses into the mount and flips the host file's ownership to uid 911.
+
+A bind-mount fix (parent-directory mount + `LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"`) clears the first two faults but cannot avoid the third — the chown is intrinsic and has no targeted off-switch. **Resolution:** deliver the LDIF via a custom image (`infrastructure/openldap/Dockerfile` copies it into the custom-bootstrap dir; compose uses `build:` instead of `image:`). All osixia mutations then act on the container's own image layer; the host file is never touched and no workaround env vars are needed. Trade-off: editing the LDIF requires `docker compose build openldap` to take effect. Verified end-to-end: container reports healthy, §6.5's user-count check returns 5, and the host LDIF is untouched. See the ⚠️ note in §5.1.
 
 ### Areas Requiring Extra Care
 

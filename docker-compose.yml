@@ -63,7 +63,12 @@ services:
       start_period: 60s
 
   openldap:
-    image: osixia/openldap:1.5.0
+    # Custom image that bakes bootstrap.ldif into the osixia custom-bootstrap dir.
+    # The LDIF is NOT bind-mounted: osixia chown/sed/rm operations over its assets
+    # tree would otherwise mutate the host file (ownership → uid 911) or fail with
+    # "Device or resource busy". See infrastructure/openldap/Dockerfile.
+    build: ./infrastructure/openldap
+    image: naas-openldap:local
     container_name: naas-openldap
     environment:
       LDAP_ORGANISATION: ${LDAP_ORGANISATION:-Corp Inc}
@@ -75,7 +80,6 @@ services:
     volumes:
       - ldap-data:/var/lib/ldap
       - ldap-config:/etc/ldap/slapd.d
-      - ./infrastructure/openldap/bootstrap.ldif:/container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
     networks:
       - naas-network
     healthcheck:
