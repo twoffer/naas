@@ -83,9 +83,15 @@ Dashboard     ◄── [decisions Pub/Sub] ◄───────────
 ```bash
 docker-compose up              # Start all services
 docker-compose up -d           # Start detached
+docker-compose up -d --build   # Start detached, rebuilding local images (see note)
 docker-compose logs -f <svc>   # Tail service logs
 docker-compose ps              # Check service health
 ```
+
+> **`--build`:** The `openldap` service runs a locally-built image (`naas-openldap:local`)
+> that bakes `bootstrap.ldif` into the image. Pass `--build` the first time and after any
+> change to `infrastructure/openldap/`; otherwise a plain `up` reuses the cached image and
+> won't pick up the changes. Other services pull pre-built images and don't need it.
 
 ## Python Virtual Environment
 

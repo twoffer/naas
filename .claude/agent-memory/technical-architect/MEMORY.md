@@ -7,6 +7,9 @@
 - **OpenLDAP LDIF:** Do NOT include base DN (`dc=corp,dc=com`) -- image creates it from `LDAP_DOMAIN`. OUs before users (order-sensitive).
 - **Shared library mount pattern:** `./shared:/app/shared` in docker-compose volumes, `pip install -e /app/shared/` in Dockerfiles.
 - **schemas.py:** Placeholder only in Spec 0. ORM models deferred to Spec 1.
+- **ml_features.py / simulation_tools.py:** In §1 file tree but §3 defines no content and §6.6 doesn't import them. Decision: create as importable placeholder modules (deferral comment only), like schemas.py. Real content owned by Spec 3 (ml_features) and persona-simulator track (simulation_tools P0 defs). Surface as a flagged decision, not a silent guess.
+- **config.py transcription bug:** Spec §3.8 snippet uses `Field`/`Optional` (LLM fields) but its import block omits them. Implementer MUST add `from pydantic import Field` and `from typing import Optional` or §6.6 import test fails.
+- **Pre-existing root files:** `.gitignore`, `README.md`, root `CLAUDE.md` already exist in repo despite §1 listing them as "created." Augment/verify, do NOT overwrite (root CLAUDE.md = the agent reference; gitignore already superset of §5.5).
 
 ## Chunking Strategy
 
@@ -19,7 +22,6 @@
 ## Key File Paths
 
 - Spec docs: `docs/architecture/SPEC_*.md`
-- Implementation plans: `docs/implementation-plans/plan_SPEC_*_chunk*.md`
 - Shared library: `shared/naas_shared/` (7 modules + `__init__.py`)
 - Infrastructure configs: `infrastructure/{postgres,redis,keycloak,openldap}/`
 - Docker compose: `docker-compose.yml` (root)
