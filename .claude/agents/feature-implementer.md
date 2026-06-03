@@ -75,6 +75,7 @@ When your Task prompt includes "You are running in pipeline mode":
 - Never implement features from the spec's "What NOT to Build" section.
 - Never add dependencies not in the plan without flagging.
 - Never refactor code outside your task scope.
+- If a chunk creates or modifies an installable package (e.g. `shared/`), `pip install -e` it before running that chunk's tests.
 
 ## HANDLING AMBIGUITY
 

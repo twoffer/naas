@@ -25,10 +25,21 @@ This is the first phase of a fresh pipeline run. No state.json exists yet.
    - `.claude/pipeline/plans/` — destination for the implementation plan file written by the technical-architect (CONTRACTS.md §7).
    - `.claude/pipeline/reviews/` — destination for the code security review file appended by the orchestrator after each code-security-reviewer invocation (CONTRACTS.md §8).
    - `.claude/pipeline/reports/` — destination for the per-spec quality report (CONTRACTS.md §6) and the integration validation report appended by the orchestrator after each integration-validator invocation (CONTRACTS.md §9).
+7. Bootstrap the Python dev/test toolchain into the active environment. Run these as a single shell invocation so the optional `source` persists across the installs:
+
+   ```bash
+   [ -d .venv ] && source .venv/bin/activate
+   pip install -r requirements-dev.txt
+   [ -f shared/pyproject.toml ] && pip install -e shared/
+   ```
+
+   - If `.venv/` exists it is activated first (matching the convention in `CLAUDE.md`); if it does not, the installs run against the active interpreter, so developers who do not use a virtualenv are still supported.
+   - The dev tools always install. The editable `shared/` install is guarded on `shared/pyproject.toml` existing: it no-ops before that file is created and installs the package plus its runtime dependencies once it exists.
+   - Idempotent on resume: the exact version pins make re-running a no-op.
 
 ## Success → Architecture Phase
 
-All of the above artifacts exist. `state.json` shows `phase: "architecture"`. Proceed by reading `.claude/pipeline/phases/architecture.md`.
+All of the above artifacts exist and the dev/test toolchain is installed in the active environment. `state.json` shows `phase: "architecture"`. Proceed by reading `.claude/pipeline/phases/architecture.md`.
 
 ## Failure → Escalation
 
