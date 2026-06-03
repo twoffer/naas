@@ -1,0 +1,61 @@
+# infrastructure/openldap/bootstrap.ldif
+# NOTE: The osixia/openldap image auto-creates dc=corp,dc=com from LDAP_DOMAIN.
+# This file adds the OU and users underneath.
+
+dn: ou=users,dc=corp,dc=com
+objectClass: organizationalUnit
+ou: users
+
+dn: ou=groups,dc=corp,dc=com
+objectClass: organizationalUnit
+ou: groups
+
+dn: uid=alice,ou=users,dc=corp,dc=com
+objectClass: inetOrgPerson
+cn: Alice Smith
+sn: Smith
+mail: alice@corp.com
+uid: alice
+userPassword: password123
+departmentNumber: Engineering
+employeeType: FTE
+
+dn: uid=bob,ou=users,dc=corp,dc=com
+objectClass: inetOrgPerson
+cn: Bob Jones
+sn: Jones
+mail: bob@corp.com
+uid: bob
+userPassword: password123
+departmentNumber: Product
+employeeType: FTE
+
+dn: uid=charlie,ou=users,dc=corp,dc=com
+objectClass: inetOrgPerson
+cn: Charlie Brown
+sn: Brown
+mail: charlie@corp.com
+uid: charlie
+userPassword: password123
+departmentNumber: Security
+employeeType: contractor
+
+dn: uid=diana,ou=users,dc=corp,dc=com
+objectClass: inetOrgPerson
+cn: Diana Prince
+sn: Prince
+mail: diana@corp.com
+uid: diana
+userPassword: password123
+departmentNumber: Engineering
+employeeType: vendor
+
+dn: uid=eve,ou=users,dc=corp,dc=com
+objectClass: inetOrgPerson
+cn: Eve Torres
+sn: Torres
+mail: eve@partner.com
+uid: eve
+userPassword: password123
+departmentNumber: External
+employeeType: contractor

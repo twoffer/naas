@@ -1,0 +1,104 @@
+services:
+  # ─── INFRASTRUCTURE ────────────────────────────────────
+  postgres:
+    image: postgres:17-alpine
+    container_name: naas-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-naas}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-naas_dev_password}
+      POSTGRES_DB: ${POSTGRES_DB:-naas}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init.sql:/docker-entrypoint-initdb.d/01-init.sql
+    networks:
+      - naas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-naas}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: naas-redis
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis-data:/data
+      - ./infrastructure/redis/redis.conf:/usr/local/etc/redis/redis.conf
+    command: ["redis-server", "/usr/local/etc/redis/redis.conf"]
+    networks:
+      - naas-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: naas-keycloak
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+    # No KC_DB* vars — use built-in H2 dev database (see Architect's Note §3.1)
+    command: >
+      start-dev --import-realm
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./infrastructure/keycloak/naas-realm-export.json:/opt/keycloak/data/import/naas-realm-export.json
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - naas-network
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200\\|UP'"]
+      interval: 30s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  openldap:
+    # Custom image that bakes bootstrap.ldif into the osixia custom-bootstrap dir.
+    # The LDIF is NOT bind-mounted: osixia chown/sed/rm operations over its assets
+    # tree would otherwise mutate the host file (ownership → uid 911) or fail with
+    # "Device or resource busy". See infrastructure/openldap/Dockerfile.
+    build: ./infrastructure/openldap
+    image: naas-openldap:local
+    container_name: naas-openldap
+    environment:
+      LDAP_ORGANISATION: ${LDAP_ORGANISATION:-Corp Inc}
+      LDAP_DOMAIN: ${LDAP_DOMAIN:-corp.com}
+      LDAP_ADMIN_PASSWORD: ${LDAP_ADMIN_PASSWORD:-admin}
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ldap-data:/var/lib/ldap
+      - ldap-config:/etc/ldap/slapd.d
+    networks:
+      - naas-network
+    healthcheck:
+      test: ["CMD", "ldapsearch", "-x", "-H", "ldap://localhost", "-b", "dc=corp,dc=com", "-D", "cn=admin,dc=corp,dc=com", "-w", "admin", "(objectClass=organization)"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  # ─── APPLICATION SERVICES ──────────────────────────────
+  # Placeholder comments — each Spec (1-6) adds its own services here.
+  # DO NOT add service containers in this spec.
+
+networks:
+  naas-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  ldap-data:
+  ldap-config:
