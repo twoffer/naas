@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Environment
+.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker
+postgres-data/
+redis-data/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Obsidian
+.obsidian/
+.trash/
+
+# Node (dashboard)
+node_modules/
+dashboard/dist/
+
+# ML models
+*.pkl
+*.joblib
+
+# Logs
+*.log
+
+# Claude Code
+.claude/*
+!.claude/agents/
+!.claude/skills/
+!.claude/agent-memory/
+!.claude/pipeline/
+.claude/pipeline/state.json
+.claude/pipeline/chunks.json
+.claude/pipeline/simulation/runs/
+CLAUDE.local.md
