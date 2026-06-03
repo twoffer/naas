@@ -865,6 +865,10 @@ services:
     environment:
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      # Health endpoints (/health/*) are only served when explicitly enabled,
+      # on the management port 9000 — not the main 8080. Required for the
+      # healthcheck below to ever report "healthy".
+      KC_HEALTH_ENABLED: "true"
     # No KC_DB* vars — use built-in H2 dev database (see Architect's Note §3.1)
     command: >
       start-dev --import-realm
@@ -878,7 +882,7 @@ services:
     networks:
       - naas-network
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200\\|UP'"]
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000 && echo -e 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && cat <&3 | grep -q '200\\|UP'"]
       interval: 30s
       timeout: 10s
       retries: 15
@@ -946,20 +950,14 @@ Baking the file into the image confines all of this to the container's own layer
 
 **⚠️ CRITICAL — Keycloak Healthcheck:**
 
-The Keycloak healthcheck above uses a raw TCP approach. If this proves flaky, an acceptable alternative is:
+The Keycloak healthcheck above uses a raw bash `/dev/tcp` probe (no `curl` needed — the `quay.io/keycloak/keycloak:26.0` UBI image does not ship curl). Two details make it work, and getting either wrong leaves the container stuck in `starting` forever even though Keycloak is fully functional:
 
-```yaml
-healthcheck:
-  test: ["CMD-SHELL", "curl -sf http://localhost:8080/health/ready || exit 1"]
-  interval: 30s
-  timeout: 10s
-  retries: 15
-  start_period: 60s
-```
+1. **`KC_HEALTH_ENABLED: "true"` is required.** Keycloak 26 does not serve the `/health/*` endpoints at all unless health is explicitly enabled. Without this env var, the probe gets a 404 and never passes.
+2. **Health is served on the management port `9000`, not the main `8080`.** The probe must target `localhost:9000/health/ready`. Pointing it at 8080 (which only serves the realm/OIDC traffic) returns 404 → the `grep -q '200\|UP'` fails → the check never goes green.
 
-This requires `curl` to be available in the Keycloak image. The `quay.io/keycloak/keycloak:26.0` image is based on UBI (Red Hat Universal Base Image) and does NOT include curl by default. If the TCP-based healthcheck fails, use `start_period: 90s` with no `test` (rely on startup delay) or switch to `depends_on` without `condition: service_healthy` and add a retry loop in downstream services.
+This is the corrected configuration after an earlier revision mis-targeted port 8080 and was diagnosed (incorrectly) as a missing-curl problem; the real cause was the missing `KC_HEALTH_ENABLED` flag plus the wrong port.
 
-**Recommendation for Claude Code:** Start with the TCP healthcheck. If `docker-compose up` hangs waiting for Keycloak healthy, fall back to removing the healthcheck and using `start_period` only. Do NOT spend more than 20 minutes debugging Keycloak healthchecks.
+**Fallback:** if the management endpoint is somehow unreachable for a given image tag, a plain TCP-liveness probe on `localhost:8080` (connection success only, drop the `GET /health/ready`) is acceptable — it flips to `healthy` when the port is listening, which is strictly better than the always-`starting` state, even though it signals "listening" rather than "ready." Note in the file which form is in use.
 
 ### 5.2 Keycloak Realm Configuration
 
