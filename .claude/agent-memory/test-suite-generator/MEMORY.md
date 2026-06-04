@@ -12,3 +12,7 @@
 ## Fixtures
 
 - [fixtures_repo_root.md](fixtures_repo_root.md) — Robust repo-root discovery pattern used in spec_0 tests
+
+## Service Tests
+
+- [patterns_service_tdd.md](patterns_service_tdd.md) — Spec 1 Chunk 1 patterns: sys.path injection for app.main, mock patching for FastAPI health endpoint tests, ORM column-type assertions (INET/JSONB), negative requirements.txt assertions
