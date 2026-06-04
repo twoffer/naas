@@ -299,7 +299,7 @@ events (
   raw_attributes JSONB,         -- protocol-specific raw data
   normalized_attributes JSONB,  -- unified schema output
   enriched_signals JSONB,       -- IP rep, geo, device, etc.
-  created_at TIMESTAMP
+  created_at TIMESTAMPTZ          -- timezone-aware (UTC instant)
 )
 
 policies (

@@ -43,4 +43,6 @@ class EventORM(Base):
     raw_attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     normalized_attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     enriched_signals: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )

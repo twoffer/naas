@@ -284,9 +284,7 @@ class TestConstants:
         """CHANNEL_ALERTS must equal 'alerts'."""
         from naas_shared.constants import CHANNEL_ALERTS
 
-        assert CHANNEL_ALERTS == "alerts", (
-            f"Expected 'alerts', got {CHANNEL_ALERTS!r}"
-        )
+        assert CHANNEL_ALERTS == "alerts", f"Expected 'alerts', got {CHANNEL_ALERTS!r}"
 
     # --- Consumer group names ---
 
@@ -639,6 +637,218 @@ class TestLoginEventIngestValidation:
             )
 
 
+class TestLoginEventTimestampValidator:
+    """LoginEventBase.timestamp must always be normalized to an aware UTC instant.
+
+    The field_validator on LoginEventBase runs for both LoginEventIngest and
+    LoginEventRecord (via inheritance), so a single class covers the contract
+    for all inbound event timestamps before they reach any pipeline stage.
+    """
+
+    def test_naive_datetime_becomes_aware_utc(self) -> None:
+        """A naive datetime (no tzinfo) must be returned as UTC-aware.
+
+        WHY: Naive timestamps submitted without a timezone offset would otherwise
+        be interpreted according to the PostgreSQL session timezone, which could
+        silently shift the stored instant.  The validator pins naive inputs to UTC.
+        """
+        from naas_shared.models import LoginEventIngest
+
+        naive_ts = datetime(2026, 6, 3, 14, 5, 0)  # no tzinfo
+        event = LoginEventIngest(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp=naive_ts,
+        )
+        assert event.timestamp.tzinfo is not None, (
+            "Naive timestamp must be given UTC tzinfo by the validator."
+        )
+        # Wall-clock must be unchanged (not shifted)
+        assert event.timestamp.replace(tzinfo=None) == naive_ts, (
+            "Validator must not shift the wall-clock value of a naive timestamp."
+        )
+
+    def test_offset_aware_timestamp_normalized_to_utc(self) -> None:
+        """An offset-aware timestamp from a non-UTC zone must be converted to UTC.
+
+        WHY: A +05:00 timestamp at 19:05 represents UTC 14:05. The pipeline must
+        store the UTC instant so that impossible-travel and recency calculations
+        are deterministic across all submitting clients.
+        """
+        from naas_shared.models import LoginEventIngest
+
+        event = LoginEventIngest(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp="2026-06-03T19:05:00+05:00",
+        )
+        assert event.timestamp.tzinfo is not None, (
+            "Offset-aware timestamp must remain aware after normalization."
+        )
+        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=timezone.utc)
+        assert event.timestamp == expected_utc, (
+            f"Expected UTC equivalent {expected_utc!r}, got {event.timestamp!r}."
+        )
+
+    def test_z_suffix_timestamp_stays_utc_aware(self) -> None:
+        """A 'Z' suffix timestamp must remain an aware UTC datetime.
+
+        WHY: The Z suffix is the most common form submitted by API clients and the
+        persona simulator.  The validator must accept it without error and leave the
+        UTC value unchanged.
+        """
+        from naas_shared.models import LoginEventIngest
+
+        event = LoginEventIngest(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp="2026-06-03T14:05:00Z",
+        )
+        assert event.timestamp.tzinfo is not None, (
+            "'Z' timestamp must be UTC-aware after validation."
+        )
+        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=timezone.utc)
+        assert event.timestamp == expected_utc, (
+            f"Expected {expected_utc!r}, got {event.timestamp!r}."
+        )
+
+    def test_login_event_record_created_at_default_is_aware(self) -> None:
+        """LoginEventRecord().created_at must be timezone-aware by default.
+
+        WHY: The aware default (datetime.now(timezone.utc)) replaces the legacy
+        datetime.utcnow() which returned a naive datetime.  A naive created_at
+        could be misinterpreted by downstream consumers that compare it against
+        aware timestamps from the DB (TIMESTAMPTZ columns return aware datetimes
+        via asyncpg), causing comparison errors or silent offsets.
+        """
+        from naas_shared.models import LoginEventRecord
+
+        record = LoginEventRecord(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp=VALID_TIMESTAMP,
+        )
+        assert record.created_at.tzinfo is not None, (
+            "LoginEventRecord.created_at default must be timezone-aware (UTC)."
+        )
+
+    def test_explicit_naive_created_at_is_normalized_to_utc(self) -> None:
+        """An explicitly-supplied naive created_at must be normalized to aware UTC.
+
+        WHY: Pydantic lets callers override the aware default by passing created_at
+        explicitly (e.g. reconstructing a record from a serialized stream payload).
+        Without a validator on the field, a naive value would be stored unnormalized
+        — the same ambiguity the timestamp validator eliminates.  This locks
+        created_at to be safe-by-construction, not just by the default factory.
+        """
+        from naas_shared.models import LoginEventRecord
+
+        naive_created = datetime(2026, 6, 3, 14, 5, 0)  # no tzinfo
+        record = LoginEventRecord(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp=VALID_TIMESTAMP,
+            created_at=naive_created,
+        )
+        assert record.created_at.tzinfo is not None, (
+            "Explicit naive created_at must be given UTC tzinfo by the validator."
+        )
+        assert record.created_at.replace(tzinfo=None) == naive_created, (
+            "Validator must not shift the wall-clock value of a naive created_at."
+        )
+
+    def test_explicit_offset_created_at_normalized_to_utc_instant(self) -> None:
+        """An explicit offset-aware created_at must be converted to the UTC instant."""
+        from naas_shared.models import LoginEventRecord
+
+        record = LoginEventRecord(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp=VALID_TIMESTAMP,
+            created_at="2026-06-03T19:05:00+05:00",
+        )
+        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=timezone.utc)
+        assert record.created_at == expected_utc, (
+            f"Expected UTC equivalent {expected_utc!r}, got {record.created_at!r}."
+        )
+
+    def test_json_serialized_timestamp_carries_utc_offset(self) -> None:
+        """The JSON-serialized timestamp must carry an explicit UTC offset.
+
+        WHY: The login event is dual-written to PostgreSQL and the Redis stream.
+        The Redis payload is record.model_dump(mode="json").  If the serialized
+        timestamp dropped its offset, the stream and the DB could disagree about
+        the instant.  This locks the textual representation at the serialization
+        boundary even for a naive submission.
+        """
+        from naas_shared.models import LoginEventRecord
+
+        record = LoginEventRecord(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp=datetime(2026, 6, 3, 14, 5, 0),  # naive submission
+        )
+        dumped = record.model_dump(mode="json")["timestamp"]
+        assert dumped.endswith("+00:00") or dumped.endswith("Z"), (
+            f"Serialized timestamp must carry an explicit UTC offset, got {dumped!r}."
+        )
+
+    def test_json_serialized_created_at_carries_utc_offset(self) -> None:
+        """The JSON-serialized created_at must carry an explicit UTC offset.
+
+        WHY: created_at is part of the Redis stream payload too
+        (record.model_dump(mode="json")).  Even when supplied explicitly as a
+        naive value, the serialized form must carry an offset so the stream and
+        any consumer agree on the instant — symmetric with the timestamp guarantee.
+        """
+        from naas_shared.models import LoginEventRecord
+
+        record = LoginEventRecord(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp=VALID_TIMESTAMP,
+            created_at=datetime(2026, 6, 3, 14, 5, 0),  # explicit naive
+        )
+        dumped = record.model_dump(mode="json")["created_at"]
+        assert dumped.endswith("+00:00") or dumped.endswith("Z"), (
+            f"Serialized created_at must carry an explicit UTC offset, got {dumped!r}."
+        )
+
+    def test_naive_and_equivalent_offset_yield_same_instant(self) -> None:
+        """A naive UTC submission and its equivalent offset form must store the same instant.
+
+        WHY: End-to-end guarantee that there is no ambiguity in how timestamps are
+        normalized — submitting "14:05" (treated as UTC) and "19:05+05:00" must
+        produce the identical stored UTC instant in both sinks.
+        """
+        from naas_shared.models import LoginEventIngest
+
+        naive_event = LoginEventIngest(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp="2026-06-03T14:05:00",  # naive -> treated as UTC
+        )
+        offset_event = LoginEventIngest(
+            user_id="alice",
+            client_ip=VALID_CLIENT_IP,
+            protocol="oidc",
+            timestamp="2026-06-03T19:05:00+05:00",  # same instant as 14:05 UTC
+        )
+        assert naive_event.timestamp == offset_event.timestamp, (
+            "Naive-as-UTC and equivalent offset submissions must normalize to the "
+            "same UTC instant."
+        )
+
+
 class TestRiskDecisionValidation:
     """
     RiskDecision is published to the decisions Pub/Sub channel.
@@ -776,9 +986,7 @@ class TestNormalizedAttributesValidation:
 
         with pytest.raises(ValidationError):
             NormalizedAttributes(
-                enrichment=EnrichmentSkipped(
-                    applied=False, skip_reason="ldap_event"
-                )
+                enrichment=EnrichmentSkipped(applied=False, skip_reason="ldap_event")
                 # missing source_protocol
             )
 
@@ -904,9 +1112,7 @@ class TestNormalizedAttributesValidation:
             source_protocol="oidc",
             enrichment=EnrichmentSkipped(applied=False, skip_reason="ldap_disabled"),
         )
-        assert attrs.groups == [], (
-            f"Expected groups=[], got {attrs.groups!r}"
-        )
+        assert attrs.groups == [], f"Expected groups=[], got {attrs.groups!r}"
 
 
 class TestAlertMessageValidation:
@@ -1010,9 +1216,7 @@ class TestHealthResponseValidation:
         from naas_shared.models import HealthResponse
 
         h = HealthResponse(status="healthy", service="test-service")
-        assert h.version == "2.0.0", (
-            f"Expected version='2.0.0', got {h.version!r}"
-        )
+        assert h.version == "2.0.0", f"Expected version='2.0.0', got {h.version!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -1060,9 +1264,7 @@ class TestSchemasPyPlaceholder:
         import naas_shared.schemas
 
         public_names = [
-            name
-            for name in dir(naas_shared.schemas)
-            if not name.startswith("_")
+            name for name in dir(naas_shared.schemas) if not name.startswith("_")
         ]
         assert public_names == [], (
             f"schemas.py must define no public names, but found: {public_names}"
@@ -1219,9 +1421,7 @@ class TestSettingsDefaults:
         from naas_shared.config import Settings
 
         s = Settings()
-        assert s.redis_port == 6379, (
-            f"Expected redis_port=6379, got {s.redis_port!r}"
-        )
+        assert s.redis_port == 6379, f"Expected redis_port=6379, got {s.redis_port!r}"
 
     def test_keycloak_realm_default_is_naas_demo(self):
         """
@@ -1369,7 +1569,7 @@ class TestPyprojectToml:
 
     def test_pyproject_toml_requires_python_312(self, pyproject_content):
         """requires-python must specify >=3.12 per the project tech stack."""
-        assert '>=3.12' in pyproject_content, (
+        assert ">=3.12" in pyproject_content, (
             "pyproject.toml must contain 'requires-python = \">=3.12\"'"
         )
 
@@ -1379,7 +1579,9 @@ class TestPyprojectToml:
             "pyproject.toml must declare 'pydantic>=' in dependencies"
         )
 
-    def test_pyproject_toml_declares_pydantic_settings_dependency(self, pyproject_content):
+    def test_pyproject_toml_declares_pydantic_settings_dependency(
+        self, pyproject_content
+    ):
         """pydantic-settings is required for Settings class — must be declared."""
         assert "pydantic-settings>=" in pyproject_content, (
             "pyproject.toml must declare 'pydantic-settings>=' in dependencies"

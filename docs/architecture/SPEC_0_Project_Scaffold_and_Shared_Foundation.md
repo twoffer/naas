@@ -185,7 +185,7 @@ CREATE TABLE IF NOT EXISTS events (
     raw_attributes JSONB,
     normalized_attributes JSONB,
     enriched_signals JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_events_user_id ON events(user_id);
@@ -409,7 +409,7 @@ class LoginEventRecord(LoginEventBase):
     id: UUID = Field(default_factory=uuid4)
     normalized_attributes: Optional[Dict[str, Any]] = None
     enriched_signals: Optional[Dict[str, Any]] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ============================================================

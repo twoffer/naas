@@ -19,6 +19,12 @@ def get_engine():
             echo=False,
             pool_size=5,
             max_overflow=10,
+            # asyncpg forwards server_settings as Postgres connection params; this
+            # pins every pooled session's TZ to UTC so TIMESTAMPTZ round-trips are
+            # deterministic regardless of host/image timezone. Do NOT flatten to
+            # connect_args={"timezone": "UTC"} — asyncpg-under-SQLAlchemy rejects
+            # that as a connect kwarg and raises on first connection.
+            connect_args={"server_settings": {"timezone": "UTC"}},
         )
     return _engine
 

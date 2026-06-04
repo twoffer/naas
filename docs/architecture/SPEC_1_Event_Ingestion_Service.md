@@ -49,7 +49,7 @@ Request body is the canonical `LoginEventIngest` model from `naas_shared.models`
 | `user_id` | string (1–255) | yes | Identity subject. |
 | `client_ip` | string | yes | **IPv4 only.** Validated against the shared model's octet-bounded regex (each octet 0–255). Non-IPv4 or malformed values are rejected with HTTP 422. |
 | `protocol` | `"oidc" \| "saml" \| "ldap"` | yes | Drives downstream normalization routing. |
-| `timestamp` | datetime (ISO 8601) | yes | Event time. Stored in `events.timestamp` (`TIMESTAMPTZ`, the UTC instant). Submit UTC (e.g. `"...Z"`); timezone-aware values are accepted. |
+| `timestamp` | datetime (ISO 8601) | yes | Event time. Stored in `events.timestamp` (`TIMESTAMPTZ`, the UTC instant). Submit UTC (e.g. `"...Z"`); timezone-aware values are converted to UTC. Naive (zone-less) submissions are interpreted as UTC by the model validator. |
 | `user_agent` | string | no | Pass-through; used downstream for device fingerprinting. |
 | `source` | `"user" \| "simulator" \| "api"` | no | Defaults to `"user"`. |
 | `is_synthetic` | bool | no | Defaults to `false`. |
@@ -105,7 +105,7 @@ Each accepted event becomes exactly one row in the existing `events` table (DDL 
 | `id` (UUID PK) | **assigned by ingestion** | The single event identity. Generated app-side (UUID v4) and inserted explicitly. This is the value every downstream stage correlates on. |
 | `user_id`, `protocol`, `client_ip`, `user_agent`, `timestamp`, `source`, `is_synthetic`, `is_historical`, `raw_attributes` | from the request | Direct mapping. `client_ip` (a string) is stored in the `INET` column. |
 | `normalized_attributes`, `enriched_signals` | **NULL at ingestion** | Populated by Identity Normalization and Signal Enrichment respectively. Ingestion must leave them NULL. |
-| `created_at` | DB default (`CURRENT_TIMESTAMP`) | Ingestion timestamp. Do not set it from the app. |
+| `created_at` | DB default (`CURRENT_TIMESTAMP`) | Ingestion timestamp stored as `TIMESTAMPTZ` (the UTC instant). Do not set it from the app. |
 
 ### 3.2 Redis Stream — publish to `login_events`
 
@@ -118,7 +118,7 @@ XADD login_events * data '{"id": "f3c1...e9", "user_id": "alice", "protocol": "o
   "client_ip": "203.0.113.42", "timestamp": "2026-06-03T14:05:00", "user_agent": "...",
   "source": "user", "is_synthetic": false, "is_historical": false,
   "raw_attributes": {...}, "normalized_attributes": null, "enriched_signals": null,
-  "created_at": "2026-06-03T14:05:01"}'
+  "created_at": "2026-06-03T14:05:01Z"}'
 ```
 
 `normalized_attributes` and `enriched_signals` are present-but-null at this stage; downstream stages ignore them on the `login_events` stream. Consumers parse the `data` field as JSON and validate it with `LoginEventRecord`.
@@ -199,7 +199,7 @@ class EventORM(Base):
     raw_attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     normalized_attributes: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     enriched_signals: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 ```
 
 > ⚠️ **CRITICAL — the database schema is owned by the infrastructure init script.** Do NOT call `Base.metadata.create_all(...)`, do NOT add Alembic migrations, and do NOT alter the table. `EventORM` is a read/write mapping over a table that already exists.

@@ -37,6 +37,7 @@ import pytest
 # Repo-root discovery and sys.path injection
 # ---------------------------------------------------------------------------
 
+
 def _find_repo_root() -> Path:
     """Walk up from this file until we find the directory containing
     docs/architecture/ — the canonical repo root marker. Capped at 10 levels."""
@@ -298,6 +299,47 @@ class TestEventORMColumnTypes:
             f"got {type(col.type).__name__!r}."
         )
 
+    def test_timestamp_column_is_timezone_aware(self) -> None:
+        """events.timestamp column must be DateTime(timezone=True).
+
+        WHY: TIMESTAMPTZ in the DDL maps to DateTime(timezone=True) in SQLAlchemy.
+        A naive DateTime would silently strip zone information on round-trip,
+        allowing a session-timezone-shifted value to corrupt the stored UTC instant
+        that downstream risk logic depends on.
+        """
+        from sqlalchemy import DateTime
+
+        from naas_shared.schemas import EventORM
+
+        col = EventORM.__table__.columns["timestamp"]
+        assert isinstance(col.type, DateTime), (
+            f"timestamp column type must be DateTime, got {type(col.type).__name__!r}."
+        )
+        assert col.type.timezone is True, (
+            "timestamp column must be DateTime(timezone=True) to match TIMESTAMPTZ DDL."
+        )
+
+    def test_created_at_column_is_timezone_aware(self) -> None:
+        """events.created_at column must be DateTime(timezone=True).
+
+        WHY: created_at was changed from TIMESTAMP to TIMESTAMPTZ in the DDL so that
+        the ingestion instant is always a deterministic UTC value regardless of the
+        PostgreSQL session timezone.  The ORM mapping must agree; a naive DateTime
+        here would cause asyncpg to return a naive datetime on read, losing the UTC
+        anchor and potentially shifting the value in a non-UTC session.
+        """
+        from sqlalchemy import DateTime
+
+        from naas_shared.schemas import EventORM
+
+        col = EventORM.__table__.columns["created_at"]
+        assert isinstance(col.type, DateTime), (
+            f"created_at column type must be DateTime, got {type(col.type).__name__!r}."
+        )
+        assert col.type.timezone is True, (
+            "created_at column must be DateTime(timezone=True) to match TIMESTAMPTZ DDL."
+        )
+
 
 # ===========================================================================
 # CLASS 5 — Nullability contracts (columns left NULL by ingestion)
@@ -383,7 +425,7 @@ class TestNoCreateAllAtImportTime:
         zero calls even after a forced reload.
         """
         import importlib
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import patch
 
         # Reload to force module-level code to re-execute.
         # If create_all is called at module level, it will be captured here.

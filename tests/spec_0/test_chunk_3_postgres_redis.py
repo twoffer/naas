@@ -88,7 +88,9 @@ def init_sql_text() -> str:
     obscuring it.
     """
     if not INIT_SQL_PATH.exists():
-        pytest.skip("infrastructure/postgres/init.sql does not exist yet — expected TDD failure")
+        pytest.skip(
+            "infrastructure/postgres/init.sql does not exist yet — expected TDD failure"
+        )
     return INIT_SQL_PATH.read_text(encoding="utf-8")
 
 
@@ -102,7 +104,9 @@ def init_sql_upper(init_sql_text: str) -> str:
 def redis_conf_text() -> str:
     """Read redis.conf content once for the whole module."""
     if not REDIS_CONF_PATH.exists():
-        pytest.skip("infrastructure/redis/redis.conf does not exist yet — expected TDD failure")
+        pytest.skip(
+            "infrastructure/redis/redis.conf does not exist yet — expected TDD failure"
+        )
     return REDIS_CONF_PATH.read_text(encoding="utf-8")
 
 
@@ -120,7 +124,9 @@ class TestInitSqlExists:
         Missing directory means the entire Postgres init path is absent.
         """
         pg_dir = REPO_ROOT / "infrastructure" / "postgres"
-        assert pg_dir.exists(), f"infrastructure/postgres/ directory not found at {pg_dir}"
+        assert pg_dir.exists(), (
+            f"infrastructure/postgres/ directory not found at {pg_dir}"
+        )
         assert pg_dir.is_dir(), f"{pg_dir} exists but is not a directory"
 
     def test_init_sql_file_exists(self):
@@ -170,8 +176,7 @@ class TestInitSqlParses:
         )
         # Every non-whitespace statement should have at least one token
         non_empty = [
-            s for s in statements
-            if s.get_type() is not None or str(s).strip()
+            s for s in statements if s.get_type() is not None or str(s).strip()
         ]
         assert len(non_empty) > 0, (
             "sqlparse found no meaningful SQL statements in init.sql"
@@ -193,7 +198,7 @@ class TestInitSqlExtension:
         Without it, every INSERT that relies on gen_random_uuid() fails.
         """
         assert 'CREATE EXTENSION IF NOT EXISTS "pgcrypto"' in init_sql_text, (
-            'Expected \'CREATE EXTENSION IF NOT EXISTS "pgcrypto"\' in init.sql. '
+            "Expected 'CREATE EXTENSION IF NOT EXISTS \"pgcrypto\"' in init.sql. "
             "Without this, gen_random_uuid() is unavailable and all INSERTs fail."
         )
 
@@ -309,6 +314,35 @@ class TestInitSqlEventsTable:
             "in init.sql. All three values must be present in the constraint."
         )
 
+    def test_events_table_created_at_is_timestamptz(self, init_sql_text: str) -> None:
+        """events.created_at must be declared TIMESTAMPTZ in init.sql.
+
+        WHY: TIMESTAMPTZ stores a UTC instant regardless of the PostgreSQL session
+        timezone, making the ingestion timestamp deterministic across deployments.
+        The plain TIMESTAMP type would store a wall-clock value that is ambiguous
+        when the session timezone differs from UTC — a silent data-corruption risk
+        for downstream risk and alert services that compare timestamps.
+        We scope the check to the events table block to avoid a false positive from
+        the other four tables whose created_at columns remain TIMESTAMP.
+        """
+        # Extract just the events table CREATE TABLE block so we do not match
+        # TIMESTAMPTZ occurrences that belong to other tables or comments.
+        events_block_match = re.search(
+            r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+events\s*\(.*?\);",
+            init_sql_text,
+            re.IGNORECASE | re.DOTALL,
+        )
+        assert events_block_match, (
+            "Could not find the events CREATE TABLE block in init.sql."
+        )
+        events_block = events_block_match.group(0)
+        assert re.search(
+            r"\bcreated_at\s+TIMESTAMPTZ\b", events_block, re.IGNORECASE
+        ), (
+            "events.created_at must be declared as TIMESTAMPTZ in init.sql. "
+            "Plain TIMESTAMP is not safe when the Postgres session timezone may differ from UTC."
+        )
+
 
 # ---------------------------------------------------------------------------
 # init.sql — risk_assessments table columns and constraints
@@ -346,7 +380,9 @@ class TestInitSqlRiskAssessmentsTable:
             "Expected CHECK constraint value 'allow' for risk_assessments.decision"
         )
 
-    def test_risk_assessments_decision_check_contains_step_up_mfa(self, init_sql_text: str):
+    def test_risk_assessments_decision_check_contains_step_up_mfa(
+        self, init_sql_text: str
+    ):
         """The decision CHECK constraint must include 'step_up_mfa'."""
         assert "'step_up_mfa'" in init_sql_text, (
             "Expected CHECK constraint value 'step_up_mfa' for risk_assessments.decision"
@@ -358,7 +394,9 @@ class TestInitSqlRiskAssessmentsTable:
             "Expected CHECK constraint value 'deny' for risk_assessments.decision"
         )
 
-    def test_risk_assessments_decision_check_constraint_present(self, init_sql_text: str):
+    def test_risk_assessments_decision_check_constraint_present(
+        self, init_sql_text: str
+    ):
         """
         The decision column must have a CHECK constraint listing all three valid
         decisions: allow, step_up_mfa, deny.
@@ -703,7 +741,9 @@ class TestRedisConfExists:
         Missing directory means the Redis config cannot be mounted by Docker Compose.
         """
         redis_dir = REPO_ROOT / "infrastructure" / "redis"
-        assert redis_dir.exists(), f"infrastructure/redis/ directory not found at {redis_dir}"
+        assert redis_dir.exists(), (
+            f"infrastructure/redis/ directory not found at {redis_dir}"
+        )
         assert redis_dir.is_dir(), f"{redis_dir} exists but is not a directory"
 
     def test_redis_conf_file_exists(self):

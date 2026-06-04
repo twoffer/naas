@@ -1,8 +1,22 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, Literal, Optional, Union
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator  # noqa: F401
+
+
+def _to_utc(v: datetime) -> datetime:
+    """Normalize a datetime to an aware UTC instant.
+
+    Naive inputs (no tzinfo) are treated as UTC rather than left ambiguous —
+    a deliberate convention so values that omit an offset are not silently
+    shifted by the PostgreSQL session timezone.  Aware inputs from other zones
+    are converted to UTC so the pipeline always works with a single canonical
+    representation.
+    """
+    if v.tzinfo is None:
+        return v.replace(tzinfo=timezone.utc)
+    return v.astimezone(timezone.utc)
 
 
 class LoginEventBase(BaseModel):
@@ -21,6 +35,12 @@ class LoginEventBase(BaseModel):
     is_historical: bool = False
     raw_attributes: Dict[str, Any] = Field(default_factory=dict)
 
+    @field_validator("timestamp", mode="after")
+    @classmethod
+    def normalize_timestamp_to_utc(cls, v: datetime) -> datetime:
+        """Ensure the event timestamp is always an aware UTC instant."""
+        return _to_utc(v)
+
 
 class LoginEventIngest(LoginEventBase):
     """Request body for POST /events/ingest."""
@@ -34,7 +54,19 @@ class LoginEventRecord(LoginEventBase):
     id: UUID = Field(default_factory=uuid4)
     normalized_attributes: Optional[Dict[str, Any]] = None
     enriched_signals: Optional[Dict[str, Any]] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @field_validator("created_at", mode="after")
+    @classmethod
+    def normalize_created_at_to_utc(cls, v: datetime) -> datetime:
+        """Normalize an explicitly-supplied created_at to an aware UTC instant.
+
+        The default_factory already yields aware UTC; this validator only fires
+        when created_at is passed explicitly (e.g. reconstructing a record from a
+        serialized stream payload), keeping it safe-by-construction rather than
+        relying on every caller to supply an aware value.
+        """
+        return _to_utc(v)
 
 
 # ============================================================

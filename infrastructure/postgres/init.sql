@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS events (
     raw_attributes JSONB,
     normalized_attributes JSONB,
     enriched_signals JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_events_user_id ON events(user_id);
