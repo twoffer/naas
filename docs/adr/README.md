@@ -49,6 +49,7 @@ Do not write an ADR for:
 | 0007 | [Train the ML Risk Model on Parameterized Distribution Profiles with Labels Independent of the Rule Engine](0007-independent-ml-training-labels.md) | accepted | 2026-05-01 |
 | 0008 | [Enrich OIDC and SAML Events via Live OpenLDAP Lookup, Correlated by a Unified-Schema Key](0008-cross-protocol-ldap-enrichment.md)     | accepted | 2026-05-01 |
 | 0009 | [Use Hexagonal Architecture for Service Internals](0009-hexagonal-service-architecture.md)                                             | accepted | 2026-05-01 |
+| 0010 | [Accept Only IPv4 Addresses for Login-Event `client_ip` in the Initial Release](0010-ipv4-only-client-ip.md)                           | accepted | 2026-06-03 |
 
 ## Template
 
