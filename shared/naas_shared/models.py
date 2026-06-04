@@ -9,7 +9,10 @@ class LoginEventBase(BaseModel):
     """Schema for events entering the pipeline via ingestion."""
 
     user_id: str = Field(..., min_length=1, max_length=255)
-    client_ip: str = Field(..., pattern=r"^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$")
+    client_ip: str = Field(
+        ...,
+        pattern=r"^((25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])\.){3}(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])$",
+    )
     protocol: Literal["oidc", "saml", "ldap"]
     timestamp: datetime
     user_agent: Optional[str] = None
@@ -26,10 +29,9 @@ class LoginEventIngest(LoginEventBase):
 
 
 class LoginEventRecord(LoginEventBase):
-    """Full event record after ingestion (has IDs assigned)."""
+    """Full event record after ingestion (has the UUID id assigned)."""
 
     id: UUID = Field(default_factory=uuid4)
-    event_id: str
     normalized_attributes: Optional[Dict[str, Any]] = None
     enriched_signals: Optional[Dict[str, Any]] = None
     created_at: datetime = Field(default_factory=datetime.utcnow)

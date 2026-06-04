@@ -472,6 +472,80 @@ class TestLoginEventIngestValidation:
                 timestamp=VALID_TIMESTAMP,
             )
 
+    def test_login_event_ingest_rejects_out_of_range_octet(self):
+        """
+        client_ip='256.0.0.1' must raise ValidationError.
+        The tightened pattern accepts only octets in 0-255; a value that is
+        well-shaped (four dot-separated groups) but numerically invalid must be
+        rejected at the ingestion boundary so malformed IPs never reach the
+        geolocation, IP-reputation, or impossible-travel enrichers.
+        """
+        from pydantic import ValidationError
+
+        from naas_shared.models import LoginEventIngest
+
+        with pytest.raises(ValidationError):
+            LoginEventIngest(
+                user_id=VALID_USER_ID,
+                client_ip="256.0.0.1",
+                protocol="oidc",
+                timestamp=VALID_TIMESTAMP,
+            )
+
+    def test_login_event_ingest_rejects_all_octets_out_of_range(self):
+        """
+        client_ip='999.999.999.999' must raise ValidationError.
+        The prior shape-only pattern accepted this value (four groups of one-to-
+        three digits); the tightened octet-bounded pattern rejects it. This test
+        locks in the regression so the old shape-only behavior cannot return.
+        """
+        from pydantic import ValidationError
+
+        from naas_shared.models import LoginEventIngest
+
+        with pytest.raises(ValidationError):
+            LoginEventIngest(
+                user_id=VALID_USER_ID,
+                client_ip="999.999.999.999",
+                protocol="oidc",
+                timestamp=VALID_TIMESTAMP,
+            )
+
+    def test_login_event_ingest_rejects_leading_zero_octet(self):
+        """
+        client_ip='192.168.001.1' must raise ValidationError.
+        The tightened pattern disallows leading-zero octet forms, which are
+        ambiguous (octal-looking) and not a canonical dotted-quad representation.
+        """
+        from pydantic import ValidationError
+
+        from naas_shared.models import LoginEventIngest
+
+        with pytest.raises(ValidationError):
+            LoginEventIngest(
+                user_id=VALID_USER_ID,
+                client_ip="192.168.001.1",
+                protocol="oidc",
+                timestamp=VALID_TIMESTAMP,
+            )
+
+    def test_login_event_ingest_accepts_max_octet_boundary(self):
+        """
+        client_ip='255.255.255.255' must be accepted.
+        255 is the upper boundary of a valid octet; the tightened pattern must
+        still admit well-formed addresses at the boundary, not just reject the
+        out-of-range ones.
+        """
+        from naas_shared.models import LoginEventIngest
+
+        event = LoginEventIngest(
+            user_id=VALID_USER_ID,
+            client_ip="255.255.255.255",
+            protocol="oidc",
+            timestamp=VALID_TIMESTAMP,
+        )
+        assert event.client_ip == "255.255.255.255"
+
     def test_login_event_ingest_rejects_unknown_protocol(self):
         """
         LoginEventIngest must raise ValidationError for protocol='kerberos'.

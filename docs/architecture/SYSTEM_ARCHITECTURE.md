@@ -288,7 +288,6 @@ User/Simulator → Event Ingestion (validate, dual-write)
 ```sql
 events (
   id UUID PK,
-  event_id VARCHAR(255) UNIQUE,
   user_id VARCHAR(255),
   protocol VARCHAR(10),         -- oidc | saml | ldap
   client_ip INET,

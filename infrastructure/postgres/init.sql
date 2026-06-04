@@ -22,7 +22,6 @@ CREATE TABLE IF NOT EXISTS users (
 -- ============================================================
 CREATE TABLE IF NOT EXISTS events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_id VARCHAR(255) UNIQUE NOT NULL,
     user_id VARCHAR(255) NOT NULL,
     protocol VARCHAR(10) NOT NULL CHECK (protocol IN ('oidc', 'saml', 'ldap')),
     client_ip INET NOT NULL,
