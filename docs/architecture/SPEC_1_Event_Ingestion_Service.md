@@ -49,7 +49,7 @@ Request body is the canonical `LoginEventIngest` model from `naas_shared.models`
 | `user_id` | string (1–255) | yes | Identity subject. |
 | `client_ip` | string | yes | **IPv4 only.** Validated against the shared model's octet-bounded regex (each octet 0–255). Non-IPv4 or malformed values are rejected with HTTP 422. |
 | `protocol` | `"oidc" \| "saml" \| "ldap"` | yes | Drives downstream normalization routing. |
-| `timestamp` | datetime (ISO 8601) | yes | Event time. Stored in `events.timestamp`. Submit UTC. |
+| `timestamp` | datetime (ISO 8601) | yes | Event time. Stored in `events.timestamp` (`TIMESTAMPTZ`, the UTC instant). Submit UTC (e.g. `"...Z"`); timezone-aware values are accepted. |
 | `user_agent` | string | no | Pass-through; used downstream for device fingerprinting. |
 | `source` | `"user" \| "simulator" \| "api"` | no | Defaults to `"user"`. |
 | `is_synthetic` | bool | no | Defaults to `false`. |
@@ -192,7 +192,7 @@ class EventORM(Base):
     protocol: Mapped[str] = mapped_column(String(10), nullable=False)
     client_ip: Mapped[str] = mapped_column(INET, nullable=False)
     user_agent: Mapped[str | None] = mapped_column(String, nullable=True)
-    timestamp: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     source: Mapped[str] = mapped_column(String(20), nullable=False, default="user")
     is_synthetic: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_historical: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

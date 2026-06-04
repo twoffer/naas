@@ -292,7 +292,7 @@ events (
   protocol VARCHAR(10),         -- oidc | saml | ldap
   client_ip INET,
   user_agent TEXT,
-  timestamp TIMESTAMP,
+  timestamp TIMESTAMPTZ,        -- timezone-aware; stores the UTC instant
   source VARCHAR(20),           -- user | simulator | api
   is_synthetic BOOLEAN,
   is_historical BOOLEAN,
