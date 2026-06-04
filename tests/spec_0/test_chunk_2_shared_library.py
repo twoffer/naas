@@ -1224,51 +1224,20 @@ class TestHealthResponseValidation:
 # ---------------------------------------------------------------------------
 
 
-class TestSchemasPyPlaceholder:
+class TestSchemasModule:
     """
-    schemas.py must exist as a Gap-5 placeholder.  It must import without error
-    and must NOT define any ORM table classes — those are populated by Spec 1.
-    Defining ORM tables here prematurely would couple Spec 0 to SQLAlchemy
-    metadata and cause import-time failures before any DB engine is created.
+    schemas.py was a Gap-5 placeholder in Spec 0 and is now populated by Spec 1
+    (Base, EventORM).  Its ORM surface is covered positively by
+    tests/shared/test_chunk1_orm_mapping.py; here we only smoke-test that the
+    module still imports cleanly so services importing it at load time don't crash.
+
+    (The former placeholder assertions — exact Gap-5 comment text and "no public
+    names" — were retired when Spec 1 populated the module.)
     """
 
     def test_schemas_module_imports_without_error(self):
         """schemas.py must be importable without raising any exception."""
         import naas_shared.schemas  # noqa: F401
-
-    def test_schemas_module_contains_gap5_placeholder_comment(self):
-        """
-        schemas.py must contain the exact Gap-5 comment:
-        '# ORM table definitions — populated by Spec 1 when first needed'
-        This comment is the canonical marker that distinguishes an intentional
-        placeholder from an accidentally empty file.
-        """
-        import naas_shared.schemas
-
-        source_path = Path(naas_shared.schemas.__file__)
-        content = source_path.read_text(encoding="utf-8")
-        expected_comment = (
-            "# ORM table definitions — populated by Spec 1 when first needed"
-        )
-        assert expected_comment in content, (
-            f"schemas.py does not contain the Gap-5 placeholder comment.\n"
-            f"Expected: {expected_comment!r}\n"
-            f"Actual content: {content!r}"
-        )
-
-    def test_schemas_module_defines_no_public_orm_classes(self):
-        """
-        schemas.py must define no public names (no ORM table classes).
-        Defining ORM classes before Spec 1 is premature coupling.
-        """
-        import naas_shared.schemas
-
-        public_names = [
-            name for name in dir(naas_shared.schemas) if not name.startswith("_")
-        ]
-        assert public_names == [], (
-            f"schemas.py must define no public names, but found: {public_names}"
-        )
 
 
 class TestMlFeaturesPyPlaceholder:

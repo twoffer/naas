@@ -60,16 +60,41 @@ per module. If the file is absent, `pytest.fail()` inside the fixture causes all
 fixture-dependent tests to show as ERROR (not FAIL). This is correct — they are
 blocked by the missing file, not themselves buggy.
 
-## Exact service-set assertion
+## Exact service-set assertion (evolving — IMPLEMENTED_APP_SERVICES)
+
+⚠ The exact-set assertion is a **point-in-time tripwire**. Asserting
+`actual == REQUIRED_SERVICES` (infra only) is correct at Spec 0, but every spec
+that adds its service to `docker-compose.yml` then breaks it as a false positive.
+
+Resolution chosen for this repo (do NOT re-tighten to infra-only): keep a
+maintained set of landed app services and fold it into both the exact-set check
+and the forbidden-list derivation.
 
 ```python
-actual = set(compose["services"].keys())
-assert actual == REQUIRED_SERVICES, f"Missing: {REQUIRED_SERVICES - actual}\nExtra: {actual - REQUIRED_SERVICES}"
+REQUIRED_SERVICES = {"postgres", "redis", "keycloak", "openldap"}
+IMPLEMENTED_APP_SERVICES = {"event-ingestion"}      # Spec 1 — append per landed spec
+ALL_APP_SERVICES = {"api-gateway", "event-ingestion", ..., "dashboard"}
+FORBIDDEN_SERVICES = ALL_APP_SERVICES - IMPLEMENTED_APP_SERVICES
+
+# exact-set test:
+expected = REQUIRED_SERVICES | IMPLEMENTED_APP_SERVICES
+assert actual == expected, f"Missing: {expected - actual}\nExtra: {actual - expected}"
 ```
 
-This simultaneously enforces "no app containers" AND "all infra present".
-The parametrized negative test (`@pytest.mark.parametrize("forbidden", ...)`) adds
-explicit documentation but is logically redundant given the set-equality check.
+This still enforces "all infra present" AND "no *un-implemented* app container
+overstepped scope", while accepting the ones that legitimately landed. The
+parametrized negative test (`@pytest.mark.parametrize("forbidden", sorted(FORBIDDEN_SERVICES))`)
+automatically stops flagging an implemented service because it derives from
+`FORBIDDEN_SERVICES`.
+
+**When generating/refreshing tests after a new spec lands, you MUST add that
+spec's service name to `IMPLEMENTED_APP_SERVICES`** in
+`test_chunk_5_docker_compose.py` (and the mirror set in
+`test_chunk_1_root_scaffold.py`).
+
+**General rule:** never write a forward-looking "services == EXACTLY {…}" guard
+without a maintained allow-set escape hatch, or it false-fails on every
+legitimate growth.
 
 ## KC_DB* absence pattern (security invariant)
 

@@ -243,6 +243,15 @@ EXPECTED_SERVICES = [
     "persona-simulator",
 ]
 
+# Application services whose directories now contain implementation code (not just
+# a README) because their spec has landed.  Append here as future specs land so the
+# "only README" guard keeps protecting un-implemented services without flagging the
+# implemented ones.  The README existence/content tests still apply to all eight.
+IMPLEMENTED_APP_SERVICES = {"event-ingestion"}  # Spec 1
+
+# Services still expected to be scaffold-only (README.md and nothing else).
+SCAFFOLD_ONLY_SERVICES = [s for s in EXPECTED_SERVICES if s not in IMPLEMENTED_APP_SERVICES]
+
 REQUIRED_README_PHRASE = "Part of the NAAS system."
 
 
@@ -297,10 +306,12 @@ class TestServiceDirectoryContents:
     Chunk 1 creates placeholder directories with exactly one file each.
     Any additional file (Dockerfile, app/, requirements.txt) belongs to a later
     spec and must not appear here.  Enforcing this prevents accidental scope
-    creep from contaminating the test baseline.
+    creep from contaminating the test baseline.  Once a service's spec lands it
+    is moved to IMPLEMENTED_APP_SERVICES and excluded from this guard (its code
+    is then covered by that spec's own test suite).
     """
 
-    @pytest.mark.parametrize("service_name", EXPECTED_SERVICES)
+    @pytest.mark.parametrize("service_name", SCAFFOLD_ONLY_SERVICES)
     def test_service_directory_contains_only_readme(self, service_name):
         """
         services/<name>/ must contain exactly one entry: README.md.

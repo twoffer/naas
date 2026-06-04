@@ -33,6 +33,32 @@ Use `set(entry.name for entry in dir.iterdir())` to assert exact directory
 contents without recursion. This catches unexpected extra files without needing
 `os.walk`.
 
+### ⚠ Evolving scope-guard maintenance — IMPLEMENTED_APP_SERVICES
+
+The `test_service_directory_contains_only_readme` guard is a **point-in-time
+tripwire**: it asserts a service dir holds *only* `README.md`. This is correct
+during the spec that scaffolds it, but the moment that service's spec lands and
+fills the dir with code, the guard breaks (it fires as a false positive).
+
+Resolution chosen for this repo (do NOT re-tighten it): the file keeps a
+maintained set and parametrizes the guard over the complement —
+
+```python
+IMPLEMENTED_APP_SERVICES = {"event-ingestion"}  # Spec 1 — append per landed spec
+SCAFFOLD_ONLY_SERVICES = [s for s in EXPECTED_SERVICES if s not in IMPLEMENTED_APP_SERVICES]
+@pytest.mark.parametrize("service_name", SCAFFOLD_ONLY_SERVICES)
+```
+
+**When generating/refreshing tests after a new spec lands, you MUST add that
+spec's service name to `IMPLEMENTED_APP_SERVICES`** in `test_chunk_1_root_scaffold.py`
+(and the mirror set in `test_chunk_5_docker_compose.py`). The README
+existence/content tests still parametrize over ALL eight `EXPECTED_SERVICES` —
+only the "only README" guard uses `SCAFFOLD_ONLY_SERVICES`.
+
+**General rule:** never write a forward-looking "directory contains ONLY X" /
+"exactly N entries" guard without an escape hatch (a maintained allow-set), or
+it becomes a recurring false-failure every time the project legitimately grows.
+
 ### .gitignore line matching
 
 Strip trailing whitespace per line with `line.rstrip()` — do NOT strip leading
