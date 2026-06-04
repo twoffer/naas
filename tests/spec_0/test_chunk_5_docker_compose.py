@@ -11,7 +11,8 @@
 #   - Keycloak command contains `start-dev` AND `--import-realm`
 #   - Top-level networks: naas-network with driver: bridge
 #   - Top-level volumes: exactly the four named volumes required
-#   - Bind-mount source files from Chunks 1/3/4 exist on disk
+#   - Compose source files from Chunks 1/3/4 exist on disk (bind-mounted for
+#     postgres/redis/keycloak; a Dockerfile COPY source for openldap)
 #   - Explicit negative assertion: no application-layer service names present
 #
 # Why this matters:
@@ -20,9 +21,10 @@
 #   containers in this file violate the Spec 0 scope boundary (§1 "no application
 #   services yet"). The KC_DB* absence is a security / correctness invariant: any
 #   KC_DB var causes Keycloak to attempt PG connection which fails, hanging the
-#   entire stack on startup. The bind-mount source paths must match the exact files
+#   entire stack on startup. The compose source paths must match the exact files
 #   created in Chunks 1/3/4, otherwise container startup silently creates empty
-#   directories in place of the expected files.
+#   directories in place of the expected bind-mounted files (or, for openldap,
+#   the image build fails because the Dockerfile COPY source is missing).
 #
 # PyYAML availability:
 #   PyYAML (pyyaml 6.0+) was installed into the project venv during test authoring
@@ -91,8 +93,11 @@ FORBIDDEN_SERVICES = {
 # Named volumes required at top level
 REQUIRED_VOLUMES = {"postgres-data", "redis-data", "ldap-data", "ldap-config"}
 
-# Bind-mount source paths (relative to repo root) from Chunks 1/3/4
-REQUIRED_BIND_SOURCES = [
+# Source files (relative to repo root) from Chunks 1/3/4 that the compose stack
+# depends on existing. The first three are bind-mounted at runtime; the openldap
+# bootstrap.ldif is a Dockerfile COPY source baked into naas-openldap:local
+# (see TestOpenLdapService). Either way, each must exist on disk.
+REQUIRED_SOURCE_FILES = [
     Path("infrastructure/postgres/init.sql"),
     Path("infrastructure/redis/redis.conf"),
     Path("infrastructure/keycloak/naas-realm-export.json"),
@@ -673,35 +678,88 @@ class TestKeycloakService:
 class TestOpenLdapService:
     """Validates the openldap service configuration."""
 
-    def test_openldap_image_is_correct(self, compose: dict[str, Any]) -> None:
-        """openldap image must be osixia/openldap:1.5.0.
-
-        WHY: The spec pins 1.5.0 for the osixia/openldap image. This version
-        has the correct bootstrap.ldif injection path
-        (/container/service/slapd/assets/config/bootstrap/ldif/custom/).
-        Different versions may look for bootstrap files in different locations.
-        """
-        svc = compose["services"]["openldap"]
-        image = svc.get("image", "")
-        assert image == "osixia/openldap:1.5.0", (
-            f"openldap image must be 'osixia/openldap:1.5.0', got '{image}'"
-        )
-
-    def test_openldap_bind_mount_bootstrap_ldif_source(
+    def test_openldap_uses_locally_built_image(
         self, compose: dict[str, Any]
     ) -> None:
-        """openldap must bind-mount ./infrastructure/openldap/bootstrap.ldif.
+        """openldap must be a locally-built image from ./infrastructure/openldap
+        tagged naas-openldap:local, based on osixia/openldap:1.5.0.
 
-        WHY: The bootstrap LDIF creates the ou=users, ou=groups OUs and five
-        test users. Without it, the LDAP directory starts empty and identity
-        normalization cross-protocol enrichment has nothing to look up.
+        WHY: The bootstrap LDIF is baked into a custom image at build time rather
+        than bind-mounted (see test_openldap_bakes_bootstrap_ldif_into_image and
+        infrastructure/openldap/Dockerfile for the rationale). The compose service
+        therefore declares a `build` context pointing at ./infrastructure/openldap
+        and pins the resulting image tag to `naas-openldap:local`. The osixia
+        1.5.0 base is still pinned — in the Dockerfile's FROM — because that
+        version has the correct bootstrap injection path
+        (/container/service/slapd/assets/config/bootstrap/ldif/custom/).
         """
         svc = compose["services"]["openldap"]
-        mounts = _extract_bind_mounts(svc)
-        sources = [m[0] for m in mounts]
-        assert "./infrastructure/openldap/bootstrap.ldif" in sources, (
-            f"openldap must bind-mount './infrastructure/openldap/bootstrap.ldif'. "
-            f"Found bind mounts: {sources}"
+
+        # `build` may be a bare string (the context) or a mapping with `context`.
+        build = svc.get("build")
+        assert build is not None, (
+            "openldap must declare a `build` context (the LDIF is baked into a "
+            "custom image, not bind-mounted)."
+        )
+        context = build if isinstance(build, str) else build.get("context", "")
+        assert context == "./infrastructure/openldap", (
+            f"openldap build context must be './infrastructure/openldap', "
+            f"got '{context}'"
+        )
+
+        image = svc.get("image", "")
+        assert image == "naas-openldap:local", (
+            f"openldap image tag must be 'naas-openldap:local', got '{image}'"
+        )
+
+        # The osixia 1.5.0 pin now lives in the Dockerfile's FROM line.
+        dockerfile = REPO_ROOT / "infrastructure" / "openldap" / "Dockerfile"
+        assert dockerfile.exists(), (
+            f"openldap Dockerfile not found at {dockerfile}"
+        )
+        text = dockerfile.read_text(encoding="utf-8")
+        assert "FROM osixia/openldap:1.5.0" in text, (
+            "openldap Dockerfile must pin 'FROM osixia/openldap:1.5.0' — that "
+            "version has the correct bootstrap injection path."
+        )
+
+    def test_openldap_bakes_bootstrap_ldif_into_image(
+        self, compose: dict[str, Any]
+    ) -> None:
+        """openldap must bake bootstrap.ldif into the image, not bind-mount it.
+
+        WHY: The bootstrap LDIF creates the ou=users, ou=groups OUs and five
+        test users — without it the directory starts empty and cross-protocol
+        enrichment has nothing to look up. It is COPYed into the image at build
+        time rather than bind-mounted because the osixia entrypoint runs
+        `chown -R`/`sed -i`/`rm -rf` over its assets tree on startup; a
+        bind-mounted LDIF would have its host ownership flipped to uid 911 or
+        fail with "Device or resource busy". See infrastructure/openldap/Dockerfile.
+        """
+        svc = compose["services"]["openldap"]
+
+        # The LDIF must NOT be bind-mounted (that's the bug this design avoids).
+        sources = [m[0] for m in _extract_bind_mounts(svc)]
+        assert "./infrastructure/openldap/bootstrap.ldif" not in sources, (
+            "openldap must NOT bind-mount bootstrap.ldif — it is baked into the "
+            f"image instead. Found bind mounts: {sources}"
+        )
+
+        # The Dockerfile must COPY it into the osixia custom-bootstrap directory.
+        dockerfile = REPO_ROOT / "infrastructure" / "openldap" / "Dockerfile"
+        assert dockerfile.exists(), (
+            f"openldap Dockerfile not found at {dockerfile}"
+        )
+        text = dockerfile.read_text(encoding="utf-8")
+        assert "COPY bootstrap.ldif" in text, (
+            "openldap Dockerfile must COPY bootstrap.ldif into the image."
+        )
+        assert (
+            "/container/service/slapd/assets/config/bootstrap/ldif/custom/" in text
+        ), (
+            "openldap Dockerfile must COPY bootstrap.ldif into the osixia "
+            "custom-bootstrap path "
+            "(/container/service/slapd/assets/config/bootstrap/ldif/custom/)."
         )
 
     def test_openldap_declares_ldap_data_volume(
@@ -820,40 +878,43 @@ class TestTopLevelVolumes:
 # ===========================================================================
 
 
-class TestBindMountSourceFilesExist:
-    """Assert that each bind-mount source file created by Chunks 1/3/4 is
-    present on disk.
+class TestRequiredSourceFilesExist:
+    """Assert that each compose source file created by Chunks 1/3/4 is present
+    on disk.
 
     NOTE: These assertions may PASS even before docker-compose.yml is created
     because the files themselves come from prior chunks. This is acceptable —
     the suite as a whole still fails due to the missing compose file.
     """
 
-    @pytest.mark.parametrize("rel_path", [str(p) for p in REQUIRED_BIND_SOURCES])
-    def test_bind_mount_source_file_exists(self, rel_path: str) -> None:
-        """Each bind-mount source file (from prior chunks) must exist.
+    @pytest.mark.parametrize("rel_path", [str(p) for p in REQUIRED_SOURCE_FILES])
+    def test_required_source_file_exists(self, rel_path: str) -> None:
+        """Each compose source file (from prior chunks) must exist.
 
-        WHY: If these files are absent, Docker Compose creates an empty
-        directory at the mount point instead of mounting the file. postgres
+        WHY: If these files are absent, the stack breaks in silent or cryptic
+        ways. For the three bind-mounted files, Docker Compose creates an empty
+        directory at the mount point instead of mounting the file: postgres
         silently ignores init.sql; redis crashes with a config parse error;
-        keycloak imports nothing; openldap starts with no users. All failures
-        are silent or cryptic, not obvious. Asserting file existence catches
-        this class of bug before the stack is ever started.
+        keycloak imports nothing. For openldap, bootstrap.ldif is a Dockerfile
+        COPY source — if it is missing the image build fails outright (or, were
+        the COPY guarded, the directory would start with no users). Asserting
+        file existence catches this class of bug before the stack is ever built
+        or started.
 
         Files validated:
-          - infrastructure/postgres/init.sql  (Chunk 3)
-          - infrastructure/redis/redis.conf   (Chunk 3)
-          - infrastructure/keycloak/naas-realm-export.json  (Chunk 4)
-          - infrastructure/openldap/bootstrap.ldif          (Chunk 4)
+          - infrastructure/postgres/init.sql                (Chunk 3, bind-mount)
+          - infrastructure/redis/redis.conf                 (Chunk 3, bind-mount)
+          - infrastructure/keycloak/naas-realm-export.json  (Chunk 4, bind-mount)
+          - infrastructure/openldap/bootstrap.ldif          (Chunk 4, Dockerfile COPY)
         """
         abs_path = REPO_ROOT / rel_path
         assert abs_path.exists(), (
-            f"Bind-mount source file not found: {abs_path}. "
+            f"Required compose source file not found: {abs_path}. "
             f"This file should have been created by a prior chunk."
         )
         assert abs_path.is_file(), (
             f"Path exists but is not a file: {abs_path}"
         )
         assert abs_path.stat().st_size > 0, (
-            f"Bind-mount source file is empty: {abs_path}"
+            f"Required compose source file is empty: {abs_path}"
         )
