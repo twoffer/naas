@@ -178,14 +178,14 @@ CREATE TABLE IF NOT EXISTS events (
     protocol VARCHAR(10) NOT NULL CHECK (protocol IN ('oidc', 'saml', 'ldap')),
     client_ip INET NOT NULL,
     user_agent TEXT,
-    timestamp TIMESTAMP NOT NULL,
+    timestamp TIMESTAMPTZ NOT NULL,
     source VARCHAR(20) DEFAULT 'user' CHECK (source IN ('user', 'simulator', 'api')),
     is_synthetic BOOLEAN DEFAULT FALSE,
     is_historical BOOLEAN DEFAULT FALSE,
     raw_attributes JSONB,
     normalized_attributes JSONB,
     enriched_signals JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_events_user_id ON events(user_id);
@@ -409,7 +409,7 @@ class LoginEventRecord(LoginEventBase):
     id: UUID = Field(default_factory=uuid4)
     normalized_attributes: Optional[Dict[str, Any]] = None
     enriched_signals: Optional[Dict[str, Any]] = None
-    created_at: datetime = Field(default_factory=datetime.utcnow)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 # ============================================================

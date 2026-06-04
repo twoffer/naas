@@ -292,14 +292,14 @@ events (
   protocol VARCHAR(10),         -- oidc | saml | ldap
   client_ip INET,
   user_agent TEXT,
-  timestamp TIMESTAMP,
+  timestamp TIMESTAMPTZ,        -- timezone-aware; stores the UTC instant
   source VARCHAR(20),           -- user | simulator | api
   is_synthetic BOOLEAN,
   is_historical BOOLEAN,
   raw_attributes JSONB,         -- protocol-specific raw data
   normalized_attributes JSONB,  -- unified schema output
   enriched_signals JSONB,       -- IP rep, geo, device, etc.
-  created_at TIMESTAMP
+  created_at TIMESTAMPTZ          -- timezone-aware (UTC instant)
 )
 
 policies (

@@ -94,8 +94,27 @@ services:
       start_period: 15s
 
   # ─── APPLICATION SERVICES ──────────────────────────────
-  # Placeholder comments — each Spec (1-6) adds its own services here.
-  # DO NOT add service containers in this spec.
+
+  event-ingestion:
+    build:
+      context: .
+      dockerfile: services/event-ingestion/Dockerfile
+    container_name: naas-event-ingestion
+    env_file: .env
+    ports:
+      - "${EVENT_INGESTION_PORT:-8001}:8001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - naas-network
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8001/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
 networks:
   naas-network:
