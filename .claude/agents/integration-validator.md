@@ -31,11 +31,11 @@ Never skip levels. Stop if Level N has blocking failures.
 6. **OpenLDAP**: `ldapsearch` returns test users (alice, bob, charlie)
 7. **Config files**: `config/normalization.yaml` exists and parses; LDAP enrichment block (`enrichment.sources.ldap`) present.
 8. **Service health**: Hit every service's `/health` → `{"status": "healthy"}`
-9. **Shared library mount (CRITICAL — #1 failure mode)**: Per service container:
+9. **Shared library import (CRITICAL — #1 failure mode)**: Per service container:
    ```
    docker exec [container] python -c "from naas_shared.config import get_settings; print(get_settings().database_url)"
    ```
-   If this fails, the shared/ volume mount is broken and NO service will function.
+   If this fails, the shared package was not copied into the image at build time (`COPY shared/` + `pip install -e`) and NO service will function.
 
 ### LEVEL 2 — Pipeline Flow
 

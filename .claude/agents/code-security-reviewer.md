@@ -67,7 +67,7 @@ Review **recently written or modified code only**, not the entire codebase. Exam
 - **Stream schemas:** Redis Stream messages conform to `naas_shared/models.py` (`LoginEventBase`, `NormalizedAttributes` with discriminated `resolution_details` and `enrichment` unions, `RiskDecision`). Consistent serialization. `decisions` and `alerts` Pub/Sub messages match `RiskDecision` / `AlertMessage` exactly.
 - **Correlation IDs:** Propagated across service boundaries (headers, streams, logs)?
 - **Observability:** `/health` endpoint, Prometheus metrics, structlog JSON output present?
-- **Docker:** Correct Dockerfile patterns, `naas_shared` volume mount, network membership, env vars?
+- **Docker:** Correct Dockerfile patterns, `naas_shared` copied in at build time (`COPY shared/` + `pip install -e`, repo-root `build.context`, no runtime volume mount), network membership, env vars?
 - **Spec compliance:** Respects "What NOT to Build"? No scope creep?
 - **Pipeline contract:** Messages match expected schemas at each stage (`login_events` → `normalized_events` → `enriched_events` → `decisions` Pub/Sub → `alerts` Pub/Sub).
 
