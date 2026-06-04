@@ -777,8 +777,8 @@ def get_settings() -> Settings:
 This IS the shared imports spec. All subsequent specs import from `naas_shared`:
 
 ```python
-# Every service's requirements.txt (or pyproject.toml) includes:
-#   -e /app/shared   (mounted via Docker volume)
+# The shared package is copied into each service image and installed at build time
+# (pip install -e on the copied shared/ dir); it is NOT listed in requirements.txt.
 
 # Standard imports available to all services:
 from naas_shared.database import get_db_session, get_engine
@@ -795,19 +795,22 @@ from naas_shared.constants import (
 
 ### Shared Library Installation Strategy
 
-The `shared/` directory is a pip-installable package. In Docker, each service mounts it as a volume and installs it in editable mode:
+The `shared/` directory is a pip-installable package. Each service image copies it in at build time and installs it in editable mode, producing a self-contained image with no runtime source mounts. Because the Dockerfile must see both `shared/` and the service directory, the Docker build context is the repository root:
 
 ```yaml
 # docker-compose.yml pattern for each service:
-volumes:
-  - ./shared:/app/shared
+build:
+  context: .                                  # repo root, so shared/ is in the build context
+  dockerfile: services/<service-name>/Dockerfile
 ```
 
 ```dockerfile
-# Each service's Dockerfile:
+# Each service's Dockerfile (paths relative to the repo-root build context):
 COPY shared/ /app/shared/
 RUN pip install -e /app/shared/
 ```
+
+A repo-root `.dockerignore` keeps the build context lean.
 
 **⚠️ CRITICAL — Do not duplicate.** If you find yourself copy-pasting database connection code, Redis client code, Pydantic models, or structlog setup into a service, STOP. Import it from `naas_shared` instead. This is the entire point of this spec.
 
@@ -1369,7 +1372,7 @@ A bind-mount fix (parent-directory mount + `LDAP_REMOVE_CONFIG_AFTER_SETUP: "fal
 
 4. **Docker network DNS.** Inside containers, services reference each other by service name (`postgres`, `redis`, `keycloak`, `openldap`), not `localhost`. The `.env.example` defaults reflect this. When running the shared library tests OUTSIDE Docker (bare metal), override these with `localhost` via environment variables.
 
-5. **The `shared/` volume mount.** When adding services in later specs, every service container MUST mount `./shared:/app/shared` and install it. Forgetting this mount means imports fail with `ModuleNotFoundError: No module named 'naas_shared'`. This is the #1 predicted failure mode across specs.
+5. **The `shared/` package copy.** When adding services in later specs, every service Dockerfile MUST `COPY shared/ /app/shared/` and install it, with the compose `build.context` set to the repo root so `shared/` is in the build context. Forgetting this copy means imports fail with `ModuleNotFoundError: No module named 'naas_shared'`. This is the #1 predicted failure mode across specs.
 
 ---
 
