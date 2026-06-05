@@ -81,17 +81,25 @@ Dashboard     ◄── [decisions Pub/Sub] ◄───────────
 ## Key Commands
 
 ```bash
-docker-compose up              # Start all services
-docker-compose up -d           # Start detached
-docker-compose up -d --build   # Start detached, rebuilding local images (see note)
-docker-compose logs -f <svc>   # Tail service logs
-docker-compose ps              # Check service health
+docker compose up              # Start all services
+docker compose up -d           # Start detached
+docker compose up -d --build   # Start detached, rebuilding local images (see note)
+docker compose logs -f <svc>   # Tail service logs
+docker compose ps              # Check service health
 ```
 
-> **`--build`:** The `openldap` service runs a locally-built image (`naas-openldap:local`)
-> that bakes `bootstrap.ldif` into the image. Pass `--build` the first time and after any
-> change to `infrastructure/openldap/`; otherwise a plain `up` reuses the cached image and
-> won't pick up the changes. Other services pull pre-built images and don't need it.
+> **`--build` (locally-built images only):** `openldap` (`infrastructure/openldap/`) and every
+> application service (e.g. `event-ingestion`) build from local Dockerfiles — a plain `up` reuses
+> the cached image, so pass `--build` after changing their source. `postgres`/`redis`/`keycloak`
+> pull pre-built images; `--build` is a no-op for them.
+>
+> **Schema changes need a volume wipe.** `infrastructure/postgres/init.sql` is the only schema
+> source (no runtime DDL/migrations) and runs *only against an empty `postgres-data` volume*.
+> Editing it does nothing to an existing volume. To pick up DDL changes (wipes data):
+> ```bash
+> docker compose down -v && docker compose up -d --build   # resets postgres + redis + ldap
+> docker compose rm -sf postgres && docker volume rm naas_postgres-data && docker compose up -d postgres   # postgres only
+> ```
 
 ## Python Virtual Environment
 

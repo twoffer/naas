@@ -23,7 +23,7 @@ Never skip levels. Stop if Level N has blocking failures.
 
 ### LEVEL 1 — Infrastructure Health
 
-1. **Containers**: `docker-compose ps` — all must be healthy/running. Service port map: 8000 api-gateway, 8001 event-ingestion, 8002 identity-normalization, 8003 signal-enrichment, 8005 risk-evaluator, 8006 alert-service.
+1. **Containers**: `docker compose ps` — all must be healthy/running. Service port map: 8000 api-gateway, 8001 event-ingestion, 8002 identity-normalization, 8003 signal-enrichment, 8005 risk-evaluator, 8006 alert-service.
 2. **PostgreSQL**: `docker exec` + `psql` — verify expected tables exist (events, risk_assessments, policies, etc.)
 3. **Redis Streams**: `PING → PONG`. `XINFO STREAM` on `login_events`, `normalized_events`, `enriched_events`. `XINFO GROUPS` must list expected consumer groups: `normalization_workers` on `login_events`, `enrichment_workers` on `normalized_events`, `evaluator_workers` on `enriched_events`.
 4. **Redis Pub/Sub**: `PUBSUB CHANNELS` should show subscribers on `decisions` and `alerts` once services are up.
@@ -87,7 +87,7 @@ Never skip levels. Stop if Level N has blocking failures.
 Before reporting any failure:
 
 1. **Identify the seam**: Name both services that failed to communicate
-2. **Logs**: `docker-compose logs [service] --tail 50` for both sides
+2. **Logs**: `docker compose logs [service] --tail 50` for both sides
 3. **Stream state**: `XINFO STREAM` + `XINFO GROUPS` — pending messages, consumer lag, empty streams
 4. **DB state**: Query recent rows — data arrived malformed?
 5. **Network**: `docker exec [container] ping [other-container]`
