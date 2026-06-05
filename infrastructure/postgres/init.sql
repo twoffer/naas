@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS users (
     user_id VARCHAR(255) UNIQUE NOT NULL,
     email VARCHAR(255) NOT NULL,
     display_name VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS policies (
     is_active BOOLEAN DEFAULT FALSE,
     is_shadow BOOLEAN DEFAULT FALSE,
     policy_yaml TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
@@ -68,7 +68,7 @@ CREATE TABLE IF NOT EXISTS risk_assessments (
     shadow_decision VARCHAR(20),
     shadow_score FLOAT,
     contributing_factors JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_risk_assessments_event_id ON risk_assessments(event_id);
@@ -84,7 +84,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     severity VARCHAR(20) NOT NULL CHECK (severity IN ('critical', 'high', 'medium', 'low')),
     title VARCHAR(500) NOT NULL,
     status VARCHAR(20) DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'investigating', 'dismissed')),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_alerts_status ON alerts(status);

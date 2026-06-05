@@ -19,10 +19,16 @@ Demo-scope postures that are intentional for local development and explicitly ou
 
 Minor code-quality items in the shared library. These files were **faithfully transcribed from the canonical SPEC_0 contract**, and no lint gate currently enforces them. They are deliberately deferred rather than hand-patched: editing the code directly would create code↔spec drift that a future pipeline run could flag. **Address by revising the spec, then letting the pipeline regenerate** — ideally bundled into the next spec revision that touches these files.
 
-- **`datetime.utcnow` deprecation** — `shared/naas_shared/models.py:35,213`: `default_factory=datetime.utcnow` produces naive UTC datetimes, deprecated in Python 3.12+. Modern equivalent: `default_factory=lambda: datetime.now(timezone.utc)`. Faithful to SPEC_0 §3.4. _(Source: security review, chunk 2)_
 - **`Optional` type annotation** — `shared/naas_shared/logging.py:31`: `get_logger(name: str = None)` should be `get_logger(name: Optional[str] = None)` (and add `from typing import Optional`). Faithful to SPEC_0 §3.7; cosmetic. _(Source: security review, chunk 2)_
 - **Unused import** — `shared/naas_shared/models.py:5`: `field_validator` is imported but unused, carried with `# noqa: F401` to match the spec's import block. Drop it when a future model actually needs it, or when the spec import block is revised. _(Source: security review, chunk 2)_
 - **README placeholder wording** — `services/*/README.md:3`: uses "a later Spec" where the SPEC_0 §5.6 template says "Spec {N}". Benign and arguably better (avoids hardcoding a possibly-wrong number); traceability only. _(Source: security review, chunk 1)_
+
+## Service code-quality nits
+
+Minor non-blocking quality items in service code. No lint gate enforces them; low value, deferred.
+
+- **Stale chunk reference in health docstring** — `services/event-ingestion/app/main.py:8`: the module docstring still cites "Chunk 3" for the real readiness probe, which has since landed. Pipeline-artifact wording; doc-only, harmless. _(Source: security review, chunk 1)_
+- **`logger: object` type hint** — `services/event-ingestion/app/service.py:29`: `logger: object` is imprecise (`object` exposes no `.error()`); prefer a structlog logger type or `typing.Any`. The spec's exemplary code is untyped here, so this is a quality nit. _(Source: security review, chunk 2)_
 
 ## Test coverage polish
 
@@ -43,3 +49,5 @@ Decisions deferred to the spec that first needs them.
 
 - **Keycloak healthcheck never reports `healthy`** — fixed before Spec 1. The probe targeted port 8080 and health was not enabled; corrected to set `KC_HEALTH_ENABLED: "true"` and probe the management port 9000. Updated `docker-compose.yml`, SPEC_0 §5.1, and the integration-validator memory note. _(Source: integration & quality reports, Spec 0)_
 - **`--build` requirement documentation** — already surfaced in both `README.md` (Quick start) and `CLAUDE.md` before this triage; no further action. _(Source: integration & quality reports, Spec 0)_
+- **`datetime.utcnow` deprecation / `HealthResponse` timestamp missing UTC offset** — resolved. The last remaining `datetime.utcnow` in `shared/` (`HealthResponse.timestamp` in `shared/naas_shared/models.py`) was switched to `default_factory=lambda: datetime.now(timezone.utc)`, making the timestamp timezone-aware so it serializes with an explicit UTC `Z`/offset consistent with event timestamps. SPEC_0 §3 updated in lockstep (incl. the `from datetime import datetime, timezone` import) to avoid code↔spec drift. `grep -rn datetime.utcnow shared/` now returns nothing. _(Source: security review chunk 2; integration report Run 2 caveat 1)_
+- **`events.timestamp` TIMESTAMPTZ extended to all tables** — the four remaining naive `created_at TIMESTAMP` columns (`users`, `policies`, `risk_assessments`, `alerts`) were changed to `TIMESTAMPTZ` in `infrastructure/postgres/init.sql`, matching the `events` table and pre-empting the tz-aware-vs-naive bind error that downstream specs (Risk Evaluator, Alert Service) would otherwise hit. DDL-only (no ORM/write-paths exist yet; the async engine's UTC session pin already covers all connections). SPEC_0 DDL updated in lockstep. Takes effect on a fresh volume (`docker compose down -v`). _(Source: integration report Run 1 architect follow-up #2)_
