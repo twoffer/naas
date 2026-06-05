@@ -247,7 +247,7 @@ EXPECTED_SERVICES = [
 # a README) because their spec has landed.  Append here as future specs land so the
 # "only README" guard keeps protecting un-implemented services without flagging the
 # implemented ones.  The README existence/content tests still apply to all eight.
-IMPLEMENTED_APP_SERVICES = {"event-ingestion"}  # Spec 1
+IMPLEMENTED_APP_SERVICES = {"event-ingestion", "identity-normalization"}  # Spec 1, Spec 2
 
 # Services still expected to be scaffold-only (README.md and nothing else).
 SCAFFOLD_ONLY_SERVICES = [s for s in EXPECTED_SERVICES if s not in IMPLEMENTED_APP_SERVICES]

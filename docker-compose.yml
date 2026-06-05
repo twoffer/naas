@@ -116,6 +116,31 @@ services:
       timeout: 5s
       retries: 5
 
+  identity-normalization:
+    build:
+      context: .
+      dockerfile: services/identity-normalization/Dockerfile
+    container_name: naas-identity-normalization
+    env_file: .env
+    ports:
+      - "${IDENTITY_NORMALIZATION_PORT:-8002}:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      openldap:
+        condition: service_healthy
+    networks:
+      - naas-network
+    volumes:
+      - ./config:/app/config:ro
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://localhost:8002/health').status==200 else 1)\""]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 networks:
   naas-network:
     driver: bridge
