@@ -1,0 +1,41 @@
+defaults:
+  source_weights:
+    ldap: 0.7
+    saml: 0.6
+    oidc: 0.8
+
+attributes:
+  display_name:
+    priority: [ldap, saml, oidc]
+    weights: {ldap: 0.90, saml: 0.70, oidc: 0.60}
+    rationale: "LDAP synced from HR system; most authoritative for legal name"
+  primary_email:
+    priority: [oidc, saml, ldap]
+    weights: {oidc: 0.95, saml: 0.75, ldap: 0.65}
+    rationale: "OIDC has the most current email from recent SSO migration"
+  department:
+    priority: [ldap, oidc, saml]
+    weights: {ldap: 0.90, oidc: 0.70, saml: 0.50}
+    rationale: "LDAP synced nightly from HR; OIDC updated on login; SAML may be stale"
+  employee_type:
+    priority: [ldap, saml, oidc]
+    weights: {ldap: 0.95, saml: 0.80, oidc: 0.60}
+    rationale: "HR system (LDAP) is authoritative for employment classification"
+  groups:
+    merge_strategy: union
+    rationale: "Groups from all sources are valid; a user may hold roles in each system"
+
+enrichment:
+  sources:
+    ldap:
+      enabled: true
+      correlation_key: primary_email
+      timeout_ms: 2000
+      on_failure: continue
+      cache_ttl_seconds: 60
+      # enrich_attributes:
+      #   - display_name
+      #   - primary_email
+      #   - department
+      #   - employee_type
+      #   - groups
