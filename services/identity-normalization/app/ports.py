@@ -58,7 +58,7 @@ class LdapEnricher(Protocol):
         self,
         correlation_field: str,
         lookup_value: str,
-    ) -> dict | None:
+    ) -> tuple[dict | None, str]:
         """Perform an active LDAP directory query and return normalized attributes.
 
         WHY: Spec §5.3 — python-ldap is synchronous; every blocking LDAP call

@@ -26,3 +26,4 @@ CACHE_JWKS = "jwks:keycloak"
 CACHE_JWKS_TTL = 300  # 5min
 CACHE_FEATURE_FLAGS = "feature_flags"
 CACHE_FEATURE_FLAGS_TTL = 60
+LDAP_ENRICHMENT_CACHE_PREFIX = "ldap_enrichment:"

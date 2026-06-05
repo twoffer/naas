@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     ldap_base_dn: str = "dc=corp,dc=com"
     ldap_admin_dn: str = "cn=admin,dc=corp,dc=com"
     ldap_admin_password: str = "admin"
+    ldap_pool_size: int = Field(default=3, ge=1, le=10)
 
     # Keycloak
     keycloak_url: str = "http://keycloak:8080"
