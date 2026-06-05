@@ -322,11 +322,12 @@ class TestInitSqlEventsTable:
         The plain TIMESTAMP type would store a wall-clock value that is ambiguous
         when the session timezone differs from UTC — a silent data-corruption risk
         for downstream risk and alert services that compare timestamps.
-        We scope the check to the events table block to avoid a false positive from
-        the other four tables whose created_at columns remain TIMESTAMP.
+        We scope the check to the events table block so this guard pins the events
+        contract specifically, independent of the other tables' created_at columns
+        (all of which are now also TIMESTAMPTZ).
         """
-        # Extract just the events table CREATE TABLE block so we do not match
-        # TIMESTAMPTZ occurrences that belong to other tables or comments.
+        # Extract just the events table CREATE TABLE block so this assertion stays
+        # specific to events rather than matching any TIMESTAMPTZ occurrence.
         events_block_match = re.search(
             r"CREATE\s+TABLE\s+IF\s+NOT\s+EXISTS\s+events\s*\(.*?\);",
             init_sql_text,

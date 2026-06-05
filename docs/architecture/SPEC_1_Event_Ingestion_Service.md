@@ -393,7 +393,7 @@ docs
 
 ## 6. Validation Criteria
 
-Bring up infrastructure and the service: `docker-compose up -d --build event-ingestion` (with `postgres` and `redis` healthy). Then:
+Bring up infrastructure and the service: `docker compose up -d --build event-ingestion` (with `postgres` and `redis` healthy). Then:
 
 1. **Single ingest → 202 + dual-write.**
    ```bash

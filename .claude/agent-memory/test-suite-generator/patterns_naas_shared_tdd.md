@@ -34,13 +34,29 @@ def clear_settings_cache(self):
 
 ## Placeholder module test pattern
 
-For placeholder modules (schemas.py, ml_features.py, simulation_tools.py):
+For placeholder modules (ml_features.py, simulation_tools.py — and schemas.py
+*until Spec 1*):
 - Assert `importlib.import_module(name)` succeeds
 - Assert no fabricated content that belongs to a later spec
-- For schemas.py specifically: check the exact Gap-5 comment text and that `dir()` returns
-  no public names (empty module)
 - For ml_features.py / simulation_tools.py: only assert clean import + absence of
   specific named attributes (FEATURE_COLUMNS, TOOL_DEFINITIONS) with real content
+
+### ⚠ schemas.py is now POPULATED by Spec 1 — do not regenerate placeholder guards
+
+`schemas.py` is no longer a placeholder: Spec 1 added `Base` and `EventORM`. The
+spec_0 class is now `TestSchemasModule` and keeps ONLY the clean-import smoke-test.
+Its ORM surface is covered positively by `tests/shared/test_chunk1_orm_mapping.py`.
+
+The two retired assertions were **brittle one-way tripwires** that broke
+permanently the instant the module was filled:
+- exact-text check for `"# ORM table definitions — populated by Spec 1 when first needed"`
+- `dir(module)` returns no public names
+
+**Do NOT re-add these for schemas.py, and do not write this style of
+"exact placeholder comment" / "no public names" guard for any module that a
+later spec is expected to populate** — unlike the docker-compose / scaffold
+guards there is no allow-set to evolve here; once populated, the placeholder
+assertion is simply obsolete and must be deleted (keep the import smoke-test).
 
 ## Test file location
 `tests/spec_0/test_chunk_2_shared_library.py` — 102 tests total

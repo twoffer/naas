@@ -10,7 +10,7 @@
 
 ## 1. Scope Boundary
 
-This spec creates the project skeleton, infrastructure containers, database schema, identity provider configs, and the shared Python library that every downstream service imports. After this spec is complete, `docker-compose up` should bring up a working infrastructure stack with no application services yet.
+This spec creates the project skeleton, infrastructure containers, database schema, identity provider configs, and the shared Python library that every downstream service imports. After this spec is complete, `docker compose up` should bring up a working infrastructure stack with no application services yet.
 
 ### Files and Directories Created
 
@@ -166,7 +166,7 @@ CREATE TABLE IF NOT EXISTS users (
     user_id VARCHAR(255) UNIQUE NOT NULL,
     email VARCHAR(255) NOT NULL,
     display_name VARCHAR(255),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
@@ -203,7 +203,7 @@ CREATE TABLE IF NOT EXISTS policies (
     is_active BOOLEAN DEFAULT FALSE,
     is_shadow BOOLEAN DEFAULT FALSE,
     policy_yaml TEXT NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ============================================================
@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS risk_assessments (
     shadow_decision VARCHAR(20),
     shadow_score FLOAT,
     contributing_factors JSONB,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_risk_assessments_event_id ON risk_assessments(event_id);
@@ -236,7 +236,7 @@ CREATE TABLE IF NOT EXISTS alerts (
     severity VARCHAR(20) NOT NULL CHECK (severity IN ('critical', 'high', 'medium', 'low')),
     title VARCHAR(500) NOT NULL,
     status VARCHAR(20) DEFAULT 'new' CHECK (status IN ('new', 'acknowledged', 'investigating', 'dismissed')),
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE INDEX idx_alerts_status ON alerts(status);
@@ -378,7 +378,7 @@ These are the **canonical** pipeline message schemas. Every service MUST use the
 ```python
 # shared/naas_shared/models.py
 from pydantic import BaseModel, Field, field_validator
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Literal, Dict, Any, Optional, Annotated, Union
 from uuid import UUID, uuid4
 
@@ -574,7 +574,7 @@ class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded", "unhealthy"]
     service: str
     version: str = "2.0.0"
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 ```
 
 ### 3.5 Shared Database Module
@@ -1211,10 +1211,10 @@ Run these checks after implementation to verify success.
 # From the naas/ root directory.
 # --build is required: the openldap service builds a custom image (bakes the
 # bootstrap LDIF). All other infra services pull stock images.
-docker-compose up -d --build
+docker compose up -d --build
 
 # Wait for all services to be healthy (may take 60-90s for Keycloak):
-docker-compose ps
+docker compose ps
 
 # Expected: postgres (healthy), redis (healthy), keycloak (healthy or running), openldap (healthy)
 ```
@@ -1307,7 +1307,7 @@ print('All imports OK')
 ### 6.7 Clean Shutdown
 
 ```bash
-docker-compose down -v
+docker compose down -v
 # Expected: All containers stopped, volumes removed, no errors
 ```
 
@@ -1364,7 +1364,7 @@ A bind-mount fix (parent-directory mount + `LDAP_REMOVE_CONFIG_AFTER_SETUP: "fal
 
 ### Areas Requiring Extra Care
 
-1. **Keycloak realm JSON format.** The `--import-realm` flag is picky about JSON structure. If realm import fails silently, the OIDC discovery endpoint will 404. Always verify with the curl check in §6.4 after startup. If it fails, check `docker-compose logs keycloak` for import errors.
+1. **Keycloak realm JSON format.** The `--import-realm` flag is picky about JSON structure. If realm import fails silently, the OIDC discovery endpoint will 404. Always verify with the curl check in §6.4 after startup. If it fails, check `docker compose logs keycloak` for import errors.
 
 2. **OpenLDAP LDIF ordering.** Parent entries (OUs) must appear before child entries (users). LDIF is order-sensitive. The `bootstrap.ldif` in this spec is correctly ordered.
 

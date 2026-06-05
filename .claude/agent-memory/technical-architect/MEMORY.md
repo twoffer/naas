@@ -11,6 +11,11 @@
 - **config.py transcription bug:** Spec §3.8 snippet uses `Field`/`Optional` (LLM fields) but its import block omits them. Implementer MUST add `from pydantic import Field` and `from typing import Optional` or §6.6 import test fails.
 - **Pre-existing root files:** `.gitignore`, `README.md`, root `CLAUDE.md` already exist in repo despite §1 listing them as "created." Augment/verify, do NOT overwrite (root CLAUDE.md = the agent reference; gitignore already superset of §5.5).
 
+## Spec 1 Patterns (Event Ingestion)
+
+- [Dual-write order & created_at trap](spec1_dual_write_patterns.md) — PG commit first, publish after; catch-and-log publish failures; leave DB-default/downstream columns unset in the ORM.
+- [EventORM mirrors init.sql](spec1_orm_matches_init_sql.md) — infra owns the events DDL; ORM is a mapping, never create_all/migrations.
+
 ## Chunking Strategy
 
 - Chunk sizing: ~200-500 lines new code, 30-45 min agent work

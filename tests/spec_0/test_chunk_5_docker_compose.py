@@ -74,11 +74,17 @@ def _find_repo_root() -> Path:
 REPO_ROOT = _find_repo_root()
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 
-# Services that MUST be present — exact set, no more, no less
+# Infrastructure services that MUST always be present.
 REQUIRED_SERVICES = {"postgres", "redis", "keycloak", "openldap"}
 
-# Application service names that must NOT appear (Spec 0 scope: infra only)
-FORBIDDEN_SERVICES = {
+# Application services implemented by specs that have landed since Spec 0 — these
+# now legitimately appear in docker-compose.yml.  As each future spec adds its
+# service, append its name here so the scope-boundary guards below keep protecting
+# the not-yet-implemented services without flagging the implemented ones.
+IMPLEMENTED_APP_SERVICES = {"event-ingestion"}  # Spec 1
+
+# Every application service name (none of which exist at Spec 0 stage).
+ALL_APP_SERVICES = {
     "api-gateway",
     "event-ingestion",
     "identity-normalization",
@@ -89,6 +95,9 @@ FORBIDDEN_SERVICES = {
     "persona-simulator",
     "dashboard",
 }
+
+# Application service names that must NOT appear yet (not implemented).
+FORBIDDEN_SERVICES = ALL_APP_SERVICES - IMPLEMENTED_APP_SERVICES
 
 # Named volumes required at top level
 REQUIRED_VOLUMES = {"postgres-data", "redis-data", "ldap-data", "ldap-config"}
@@ -348,18 +357,20 @@ class TestComposeServiceSet:
     def test_services_contains_exactly_the_four_required_services(
         self, compose: dict[str, Any]
     ) -> None:
-        """Services must be exactly {postgres, redis, keycloak, openldap}.
+        """Services must be exactly the infra services plus any implemented app services.
 
-        WHY: Spec 0 §1 scope boundary states 'no application services yet'.
-        Any additional service key here means the implementer overstepped scope,
-        which cascades into failing Spec 1+ tests that expect to ADD services.
-        Fewer than four means infrastructure is incomplete.
+        WHY: The Spec 0 §1 scope boundary was 'no application services yet'. As
+        specs land they add their service to compose; IMPLEMENTED_APP_SERVICES
+        tracks those so this guard still catches an implementer overstepping into
+        a not-yet-built service, without flagging the ones that legitimately exist.
+        Fewer than the expected set means infrastructure or a landed spec is incomplete.
         """
         actual = set(compose.get("services", {}).keys())
-        assert actual == REQUIRED_SERVICES, (
-            f"Expected services == {REQUIRED_SERVICES}, got {actual}.\n"
-            f"Missing: {REQUIRED_SERVICES - actual}\n"
-            f"Extra: {actual - REQUIRED_SERVICES}"
+        expected = REQUIRED_SERVICES | IMPLEMENTED_APP_SERVICES
+        assert actual == expected, (
+            f"Expected services == {expected}, got {actual}.\n"
+            f"Missing: {expected - actual}\n"
+            f"Extra: {actual - expected}"
         )
 
     @pytest.mark.parametrize("forbidden", sorted(FORBIDDEN_SERVICES))
