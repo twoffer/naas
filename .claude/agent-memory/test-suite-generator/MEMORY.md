@@ -16,4 +16,4 @@
 ## Service Tests
 
 - [patterns_service_tdd.md](patterns_service_tdd.md) — Spec 1 Chunk 1 patterns: sys.path injection for app.main, mock patching for FastAPI health endpoint tests, ORM column-type assertions (INET/JSONB), negative requirements.txt assertions
-- [patterns_spec2_identity_normalization_tests.md](patterns_spec2_identity_normalization_tests.md) — Spec 2 identity-normalization durable test patterns: fake-ldap sys.modules injection, three-state Redis cache contract, marking/neutralizing sanitization assertions, resolve() shape + confidence formula, outcome→skip_reason mapping, consumer ordering invariants, spec quick-reference tables (consolidated from the retired per-chunk TDD notes)
+- [patterns_spec2_identity_normalization_tests.md](patterns_spec2_identity_normalization_tests.md) — Spec 2 identity-normalization durable test patterns: fake-ldap sys.modules injection, three-state Redis cache contract, sanitization assertions, resolve() shape, outcome→skip_reason mapping, consumer ordering invariants. ⚠ conftest auto-flush REMOVED (N hygiene fix) — use explicit f.flush() in each test helper. Remediation patterns for A/B/C/E/J/D/F appended.

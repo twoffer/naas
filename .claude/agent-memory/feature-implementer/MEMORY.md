@@ -24,5 +24,9 @@
 ## Patterns
 - [patterns_tempfile_flush_conftest.md](patterns_tempfile_flush_conftest.md) — Test helpers calling load_config() inside a NamedTemporaryFile with block need a conftest flush-on-write autouse fixture to prevent reading an empty file
 
+## Patterns
+- [patterns_ldap_dn_str2dn_fallback.md](patterns_ldap_dn_str2dn_fallback.md) — _reduce_dn_to_group_name: str2dn primary + regex fallback on ImportError to keep dev-venv (no gcc/python-ldap) tests green
+- [patterns_consumer_loop_resilience.md](patterns_consumer_loop_resilience.md) — xreadgroup outer loop: except Exception catches transient errors, CancelledError propagates; truncate str(exc)[:200] at all log sites for PII safety
+
 ## Feedback
 - [feedback_ruff_format_test_files.md](feedback_ruff_format_test_files.md) — ruff format must be applied to test files, not just ruff check

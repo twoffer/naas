@@ -19,6 +19,7 @@
 ## Spec 2 Patterns (Identity Normalization)
 
 - [Spec 2 decomposition gotchas](spec2_identity_normalization.md) — bootstrap.ldif has no memberOf (live groups empty); LDAP depts partly outside DEPARTMENT_CANONICAL; lockstep shared+SPEC_0 chunk; python-ldap build deps; no LDAP_URI/BIND env; asyncio.to_thread; three-state negative cache; resolution/service boundary; 6-chunk layout.
+- [Spec 2 normalization internals](spec2_normalization_internals.md) — adapters discard was_mapped (service re-derives from string); dept non-str must short-circuit to (None,False) not title-case; shared/pyproject.toml already exists (pytest ini goes at root only); async tests use manual _run() not pytest.mark.asyncio.
 
 ## Chunking Strategy
 

@@ -60,9 +60,15 @@ class SamlAdapter:
             et_value = None
 
         return {
-            "display_name": raw_attributes.get("displayName"),
-            "primary_email": raw_attributes.get("email"),
+            "display_name": (
+                v if isinstance(v := raw_attributes.get("displayName"), str) else None
+            ),
+            "primary_email": (
+                v if isinstance(v := raw_attributes.get("email"), str) else None
+            ),
             "department": dept_value,
             "employee_type": et_value,
-            "groups": list(raw_attributes.get("groups") or []),
+            "groups": [
+                g for g in (raw_attributes.get("groups") or []) if isinstance(g, str)
+            ],
         }

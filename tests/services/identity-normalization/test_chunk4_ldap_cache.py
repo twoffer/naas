@@ -965,7 +965,7 @@ class TestTransientFailureNotCached:
         # Re-inject fresh ldap mock with error
         for key in list(sys.modules.keys()):
             if key == "app.adapters.ldap" or key == "app.adapters":
-                del sys.modules[key]
+                monkeypatch.delitem(sys.modules, key, raising=False)
 
         fake_ldap2 = _make_fake_ldap_module()
         monkeypatch.setitem(sys.modules, "ldap", fake_ldap2)

@@ -104,12 +104,17 @@ with XACK LAST; enrichment skip ≠ processing failure (skipped events still per
 repository `write()` is UPDATE-only (no `session.add()`, no `create_all`, one `execute()`);
 publisher sends the FULL record (ADR-0011) via shared `publish_to_stream`.
 
-## tempfile flush in this service's conftest (still required)
+## tempfile flush — conftest auto-flush REMOVED (N hygiene fix)
 
-`tests/services/identity-normalization/conftest.py` autouse-patches
-`tempfile.NamedTemporaryFile` to flush-on-write, because some helpers call
-`load_config(Path(f.name))` while still inside the `with` block (unflushed buffer →
-empty read). See [[patterns-tempfile-flush-conftest]] and [[resolution-confidence-invariants]].
+The autouse `_patch_named_temp_file` fixture and `_AutoFlushWrapper` class were
+REMOVED from `conftest.py` as part of the post-Spec-2 N remediation. Each test that
+calls `load_config()` inside a `NamedTemporaryFile` `with` block now calls `f.flush()`
+explicitly before reading (see `test_chunk5_groups_merge.py::_load_config_with_strategy`).
+Tests that read AFTER the `with` block closes (`test_chunk5_scalar_resolution.py:820`,
+`test_chunk5_penalty.py:225`) are unaffected.
+
+**Do NOT re-add the conftest auto-flush** — it was a global side-effect and the explicit
+flush is the cleaner approach going forward.
 
 ## Spec quick-reference (transcribed from §5.2 / §5.6 / §5.5.2)
 
@@ -130,3 +135,81 @@ employee_type .25, groups .15.
 memberOf bootstrap caveat: `infrastructure/openldap/bootstrap.ldif` seeds NO memberOf on
 any user, so live LDAP enrichment yields groups=[]; test DN-reduction with synthetic DNs,
 never assert non-empty enriched groups from the live directory.
+
+## _classify_ldap_error test pattern (bug FIXED post-spec-2)
+
+Current (correct) behavior of `_classify_ldap_error` (ldap.py): `ldap.TIMEOUT` and
+`ldap.TIMELIMIT_EXCEEDED` → `ldap_timeout`; `ldap.SERVER_DOWN` → `ldap_connection_error`;
+`ldap.LDAPError` (base) → `ldap_search_error`; anything else → `ldap_unexpected_error`. It
+probes the attributes via `getattr` + `isinstance(t, type)` and catches `(ImportError,
+AttributeError)`. (Historical: it once referenced the nonexistent `ldap.TIMEOUT_EXCEEDED`,
+which made the timeout/connection branches dead code; fixed in the post-spec-2 remediation.)
+
+**Test pattern for `_classify_ldap_error` (durable):**
+- Build a "correct-hierarchy" fake with `TIMEOUT`, `TIMELIMIT_EXCEEDED`, `SERVER_DOWN`,
+  `LDAPError` as real classes subclassing correctly. To prove the code tolerates a module
+  missing the legacy attr, `del fake.TIMEOUT_EXCEEDED` so access raises `AttributeError`
+  (verified: `del` on a fresh MagicMock attribute makes subsequent access raise).
+- Inject via `_inject_correct_hierarchy_ldap(monkeypatch)` (in `test_remediation.py`);
+  follows the same clear-`app.adapters.ldap` pattern.
+- `TestClassifyLdapError` asserts each exception class maps to its outcome string and that
+  a non-LDAP `ValueError` → `ldap_unexpected_error` without raising.
+
+**Important:** the existing `_make_fake_ldap_module()` / `_inject_fake_ldap()` helpers
+in `test_remediation.py` deliberately define `TIMEOUT_EXCEEDED` (for the older
+enrich/pool tests that simulate a timeout via that fake class). The new
+`_make_correct_hierarchy_fake_ldap()` / `_inject_correct_hierarchy_ldap()` are
+**separate** helpers that use the correct python-ldap attribute names and omit
+`TIMEOUT_EXCEEDED`. Do NOT merge them.
+
+## Remediation test patterns (post-Spec-2 non-blocking fixes)
+
+See `tests/services/identity-normalization/test_remediation.py`. Key patterns:
+
+**Non-str type guard tests (A):** Call normalize_department/normalize_employee_type with int,
+list, dict directly — assert `(None, False)` / `None` returned, no exception. For adapter
+extract() tests with non-str values, inject fake_ldap before importing app.adapters.ldap.
+
+**Consumer resilience tests (B):** Use xreadgroup side_effect sequence: [RuntimeError, message,
+CancelledError]. Assert normalize called once after the error. Patch asyncio.sleep to assert
+positive-delay sleep after error. CancelledError propagation test should PASS now (existing
+behavior) and remain passing after fix.
+
+**weight_for floor test (C):** the floor is `_UNKNOWN_SOURCE_WEIGHT_FLOOR = 0.5` in
+`normalization_config.py` (returned by `weight_for` for an unknown source via `.get(source,
+floor)`). Test asserts result in [0.0, min_default] and does not raise.
+
+**unbind_s thread test (E):** Patch asyncio.to_thread to capture called functions; assert
+>= 3 calls (connect, search, unbind). The "slot freed even when unbind raises" sub-test
+correctly PASSes before and after the fix (slot is always freed).
+
+**str2dn DN reduction test (J):** Add `str2dn` MagicMock to `fake_ldap.dn` in
+`_inject_ldap_with_str2dn()`. The fake str2dn does manual escaped-comma parsing (walks char
+by char, treating `\X` as literal X). Tests for normal DN / bare name / malformed DN PASS
+before the fix (regex handles them). Only escaped-comma test FAILS before fix.
+
+**Log redaction tests (D, F, H):** Patch the module-level `_logger` directly (not via
+monkeypatch) for the corrupted-cache path (app.adapters.ldap._logger) and consumer path
+(app.consumer._logger). Both use a CapturingBoundLogger wrapper with `bind()` delegation.
+Restore the original in `finally:`.
+
+**Non-str display_name/primary_email guard tests (G):** Six tests in
+`TestAdapterExtractNonStringNameEmail` — one per adapter×field (OIDC name, OIDC email; SAML
+displayName, SAML email; LDAP cn, LDAP mail). Feed non-str values (42 or {"x":1} or
+["a@b.com"]) to extract(); assert the result field is None. These tests FAIL now because the
+adapters do `raw_attributes.get(key)` with no type check. Fix: `isinstance(v, str) or None`.
+
+**ValidationError PII redaction test (H, LOW#1):** `TestValidationErrorLogRedaction` with one
+test. Key technique: set `id='alice@corp.com'` (invalid UUID) in a LoginEventRecord payload —
+Pydantic v2 includes `input_value='alice@corp.com'` in `str(ValidationError)[:200]` for this
+case (verified). The test asserts `pii_email not in repr(log_event)` AND that location info
+(field name 'id') is present. This FAILS now because the consumer logs `str(exc)[:200]` for
+ALL exceptions including ValidationError. The fix: detect `isinstance(exc, ValidationError)`
+and log `error_locations=[e["loc"] for e in exc.errors()]` instead. The F test (truncation
+path) was also updated to use a RuntimeError from service.normalize (not a ValidationError
+parse failure) so F explicitly covers the non-ValidationError truncation branch.
+
+**Pydantic v2 ValidationError PII in [:200] rule:** For a UUID-parse error, `str(exc)[:200]`
+DOES contain the raw input_value (email). For a pattern-mismatch error (e.g., IP field), the
+regex pattern text is so long that the email appears AFTER the 200-char truncation point. Use
+the `id` field (UUID type) to reliably have the email in the first 200 chars.

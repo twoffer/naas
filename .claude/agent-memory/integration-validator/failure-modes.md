@@ -68,6 +68,29 @@ metadata:
   Do NOT use raw .env with --env-file: inline comments leak into values and Settings
   fails int_parsing on ldap_pool_size/simulation_* and pattern on llm_provider.
 
+## identity-normalization ↔ python-ldap: _classify_ldap_error referenced nonexistent ldap.TIMEOUT_EXCEEDED — RESOLVED (post-spec-2 remediation, same session it was found)
+- SEAM: LDAP adapter error-classification (app/adapters/ldap.py) ↔ python-ldap 3.4.7 API.
+- Was: `_classify_ldap_error` checked `isinstance(exc, ldap_module.TIMEOUT_EXCEEDED)`, an attribute
+  that does NOT exist on python-ldap 3.4.7. The `AttributeError` escaped the `except ImportError`,
+  so the `ldap_timeout`/`ldap_connection_error` branches were dead code and every transient LDAP
+  failure was mislabeled skip_reason `ldap_search_error`. Fail-safe always held (events still
+  published+ACKed, service healthy) — observability/classification defect, not availability.
+- Fixed: now classifies `ldap.TIMEOUT` + `ldap.TIMELIMIT_EXCEEDED` → `ldap_timeout`, `SERVER_DOWN`
+  → `ldap_connection_error`, `LDAPError` → `ldap_search_error`, via `getattr` + `isinstance(t, type)`
+  probing (tolerates stub modules), except broadened to `(ImportError, AttributeError)`. Covered by
+  `TestClassifyLdapError` in `tests/services/identity-normalization/test_remediation.py`.
+- Durable lesson: this only surfaced under a REAL broken python-ldap connection (openldap
+  stop/restart) — fakes did not exercise it. When validating LDAP error paths, drive a real
+  transient failure (stop openldap mid-run) and grep logs for `ldap_enrichment_unexpected_exception`
+  / `module 'ldap' has no attribute`. Enrichment self-heals once broken pooled connections drain
+  (the E unbind-on-discard path works).
+
+## identity-normalization consumer: unparseable stream message left PENDING, not ACKed (design)
+- Injecting structurally-invalid JSON into login_events → consumer logs `message_processing_failed`
+  (ValidationError, redacted to error_locations only — F fix works) but does NOT ACK; message stays
+  in PEL forever, redelivered on restart. Distinct from the A poison-message case (valid record w/
+  non-str scalars) which IS normalized+ACKed (pending stays 0). Pre-existing, informational.
+
 ## What works correctly in Spec 1 event-ingestion (verified)
 - Dual-write mechanics with naive ts: PG row (normalized_attributes/enriched_signals
   NULL), stream `login_events` single `data` field, JSON `id` == row `id`.

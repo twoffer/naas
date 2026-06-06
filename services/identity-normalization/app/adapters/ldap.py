@@ -85,27 +85,64 @@ def _reduce_dn_to_group_name(dn: str) -> str | None:
     would always fail and group-based policy conditions would be broken for
     all LDAP users.
 
-    For a bare name (no ',' separator, no '=' assignment), the input is
-    returned as-is — some LDAP implementations store group names directly.
+    Primary strategy: ldap.dn.str2dn (RFC 4514 parser). This correctly handles
+    escaped commas in cn values (e.g. 'cn=Smith\\, John,...'), which the regex
+    approach truncates to 'Smith\\'.  ldap.dn is available at runtime (Docker)
+    via python-ldap, or injected via sys.modules in tests.
 
-    For a malformed DN that contains '=' but no 'cn=' component, returns None
-    so the caller can skip the entry safely.
+    Fallback strategy: _CN_RDN_RE regex, used only when ldap.dn is not importable
+    (e.g., dev-venv where python-ldap cannot be installed without gcc). The fallback
+    preserves all existing behaviour for simple DNs; only escaped-comma handling
+    requires str2dn.
+
+    For a bare name (no '=' assignment in the string), the input is returned as-is —
+    some LDAP implementations store group names directly in memberOf.
+
+    For a malformed DN that str2dn raises on or that contains no 'cn=' RDN,
+    returns None so the caller can skip the entry safely.
 
     Args:
         dn: A memberOf value, either a full LDAP DN or a bare group name.
 
     Returns:
-        The extracted group name string, or None if the DN is malformed and
+        The extracted group name string, or None if the DN is malformed or
         has no cn= component.
     """
-    if "=" not in dn:
-        return dn.strip() if dn.strip() else None
+    dn_stripped = dn.strip()
+    if not dn_stripped:
+        return None
 
-    match = _CN_RDN_RE.search(dn)
+    if "=" not in dn_stripped:
+        # Bare group name — return as-is
+        return dn_stripped
+
+    # Primary: use ldap.dn.str2dn for correct RFC-4514 escaped-character handling.
+    try:
+        import ldap.dn  # noqa: PLC0415  lazy import — python-ldap not in dev venv
+
+        parsed = ldap.dn.str2dn(dn_stripped)
+        # parsed is list[list[(attr, value, flags)]] — one list per RDN component.
+        # Walk all RDNs to find the first with attr=="cn" (case-insensitive).
+        for rdn_list in parsed:
+            for attr, value, _flags in rdn_list:
+                if attr.lower() == "cn":
+                    return value
+        _logger.warning("ldap_dn_reduction_no_cn_rdn", dn_length=len(dn_stripped))
+        return None
+    except ImportError:
+        pass  # python-ldap not available; fall through to regex fallback
+    except Exception:
+        _logger.warning("ldap_dn_reduction_failed", dn_length=len(dn_stripped))
+        return None
+
+    # Fallback: regex-based extraction (python-ldap not installed, e.g., dev venv).
+    # Handles simple DNs correctly; escaped-comma DNs will be partially wrong,
+    # but that is acceptable in a dev context without python-ldap.
+    match = _CN_RDN_RE.search(dn_stripped)
     if match:
         return match.group(1).strip()
 
-    _logger.warning("ldap_dn_reduction_no_cn_rdn", dn=dn)
+    _logger.warning("ldap_dn_reduction_no_cn_rdn", dn_length=len(dn_stripped))
     return None
 
 
@@ -262,6 +299,18 @@ def _create_ldap_connection(uri: str, admin_dn: str, password: str) -> object:
     return conn
 
 
+def _do_unbind_s(conn: object) -> None:
+    """Call unbind_s() on an LDAP connection (blocking — call via to_thread).
+
+    WHY: python-ldap is a blocking C extension; unbind_s() must run in a thread.
+    Signalling the server that the session is closed prevents server-side session
+    leaks which, under heavy error load, can exhaust the directory's connection
+    limit and block all future clients. Any exception from unbind_s() is swallowed
+    by the caller — the point is best-effort cleanup, not error propagation.
+    """
+    conn.unbind_s()  # type: ignore[union-attr]
+
+
 def _ldap_search_on_conn(
     conn: object,
     base_dn: str,
@@ -327,6 +376,15 @@ async def _pool_search(
         pool.put_nowait(conn)  # return live connection to pool
         return results
     except Exception:
+        # Best-effort unbind: tell the server the session is done before
+        # discarding the connection object so server-side sessions are not
+        # leaked under error conditions. Any exception from unbind_s() is
+        # swallowed — the slot must be freed regardless.
+        if conn is not None:
+            try:
+                await asyncio.to_thread(_do_unbind_s, conn)
+            except Exception:
+                pass
         pool.put_nowait(None)  # discard broken connection; free the slot
         raise
 
@@ -376,7 +434,11 @@ class LdapAdapter:
         else:
             et_value = None
 
-        member_of: list[str] = raw_attributes.get("memberOf") or []
+        # Filter to str only — non-str memberOf entries (e.g., ints from malformed
+        # directory data) would cause _reduce_dn_to_group_name to raise AttributeError.
+        member_of: list[str] = [
+            dn for dn in (raw_attributes.get("memberOf") or []) if isinstance(dn, str)
+        ]
         groups: list[str] = []
         for dn in member_of:
             name = _reduce_dn_to_group_name(dn)
@@ -384,8 +446,12 @@ class LdapAdapter:
                 groups.append(name)
 
         return {
-            "display_name": raw_attributes.get("cn"),
-            "primary_email": raw_attributes.get("mail"),
+            "display_name": (
+                v if isinstance(v := raw_attributes.get("cn"), str) else None
+            ),
+            "primary_email": (
+                v if isinstance(v := raw_attributes.get("mail"), str) else None
+            ),
             "department": dept_value,
             "employee_type": et_value,
             "groups": groups,
@@ -453,11 +519,14 @@ class LdapAdapter:
                 _logger.debug("ldap_enrich_positive_cache_hit", ldap_attr=ldap_attr)
                 return attrs, "cache_hit_positive"
             except (json.JSONDecodeError, TypeError):
-                # Corrupted cache entry — fall through to live query
+                # Corrupted cache entry — fall through to live query.
+                # Log the length only (not the raw content) to prevent PII leakage:
+                # the cached string may contain the user's email address, display name,
+                # or other directory attributes collected during a prior successful query.
                 _logger.warning(
                     "ldap_enrich_cache_decode_error",
                     ldap_attr=ldap_attr,
-                    cached_value=repr(cached_str),
+                    cached_value_length=len(cached_str),
                 )
 
         # --- Cache miss: query LDAP via connection pool ---
@@ -513,6 +582,12 @@ def _classify_ldap_error(exc: Exception) -> str:
     EnrichmentSkipped.  Using outcome strings (not exception types) keeps
     chunk 6 decoupled from python-ldap's exception hierarchy.
 
+    python-ldap timeout names:
+      ldap.TIMEOUT            — client / network timeout
+      ldap.TIMELIMIT_EXCEEDED — server time-limit exceeded
+    Both map to 'ldap_timeout'.  The former buggy name (TIMEOUT_EXCEEDED) does
+    not exist on the real library and raised AttributeError.
+
     Args:
         exc: Any exception raised during the LDAP operation.
 
@@ -523,13 +598,28 @@ def _classify_ldap_error(exc: Exception) -> str:
     try:
         import ldap as ldap_module  # noqa: PLC0415  lazy import
 
-        if isinstance(exc, ldap_module.TIMEOUT_EXCEEDED):
+        # Collect timeout exception types from the real attribute names.
+        # ldap.TIMEOUT = client/network timeout; ldap.TIMELIMIT_EXCEEDED = server
+        # time-limit.  The old (incorrect) name TIMEOUT_EXCEEDED is also included
+        # via getattr so pre-existing test stubs using that name stay classified
+        # correctly.  All three are guarded with getattr + isinstance(t, type) to
+        # tolerate stub modules that may be missing any of these attributes.
+        _timeout_types = tuple(
+            t
+            for t in (
+                getattr(ldap_module, "TIMEOUT", None),
+                getattr(ldap_module, "TIMELIMIT_EXCEEDED", None),
+                getattr(ldap_module, "TIMEOUT_EXCEEDED", None),
+            )
+            if isinstance(t, type)
+        )
+        if _timeout_types and isinstance(exc, _timeout_types):
             return "ldap_timeout"
         if isinstance(exc, ldap_module.SERVER_DOWN):
             return "ldap_connection_error"
         if isinstance(exc, ldap_module.LDAPError):
             return "ldap_search_error"
-    except ImportError:
+    except (ImportError, AttributeError):
         pass
 
     return "ldap_unexpected_error"

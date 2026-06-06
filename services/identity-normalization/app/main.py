@@ -181,6 +181,9 @@ def create_app() -> FastAPI:
         title="identity-normalization",
         version="2.0.0",
         lifespan=lifespan,
+        # Disable the hidden /docs/oauth2-redirect route: unlike event-ingestion,
+        # this service has no OAuth2-protected endpoints, so the redirect is unused
+        # and its presence breaks scope-boundary tests that enumerate all routes.
         swagger_ui_oauth2_redirect_url=None,
     )
     application.include_router(router)

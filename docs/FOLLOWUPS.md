@@ -29,6 +29,8 @@ Minor non-blocking quality items in service code. No lint gate enforces them; lo
 
 - **Stale chunk reference in health docstring** — `services/event-ingestion/app/main.py:8`: the module docstring still cites "Chunk 3" for the real readiness probe, which has since landed. Pipeline-artifact wording; doc-only, harmless. _(Source: security review, chunk 1)_
 - **`logger: object` type hint** — `services/event-ingestion/app/service.py:29`: `logger: object` is imprecise (`object` exposes no `.error()`); prefer a structlog logger type or `typing.Any`. The spec's exemplary code is untyped here, so this is a quality nit. _(Source: security review, chunk 2)_
+- **Cross-service `swagger_ui_oauth2_redirect_url` alignment** — `services/identity-normalization/app/main.py` sets `swagger_ui_oauth2_redirect_url=None` (now with an explanatory comment) while `services/event-ingestion/app/main.py` omits it. Neither service has OAuth2-protected endpoints, so both are correct; aligning them for uniformity would touch event-ingestion and is deferred. _(Source: Spec 2 remediation triage; security review chunk 1)_
+- **Raw attribute value logged at WARNING** — `services/identity-normalization/app/normalization_values.py` (`normalize_department`/`normalize_employee_type` unmapped-value path): logs `raw_value=<value>` (the raw department/employee_type string) at WARNING. Low sensitivity (not email/name/token) and pre-existing, but worth redacting/bounding in a future cleanup. _(Source: Spec 2 remediation security review, LOW)_
 
 ## Test coverage polish
 
@@ -37,11 +39,20 @@ Low-value test improvements; current coverage is adequate.
 - **Negative quote guards for `'US'` / `'ldap'`** — `tests/spec_0/test_chunk_3_postgres_redis.py:643-660`: the unescaped-quote negative guard only checks `'contractor'`. Add equivalent negative-lookbehind guards for `'US'` and `'ldap'`. (Positive doubled-quote coverage already exists for both.) _(Source: security review, chunk 3)_
 - **LDIF parser robustness** — `tests/spec_0/test_chunk_4_keycloak_ldap.py:676`: the structural LDIF parser lacks base64/continuation-line handling. Fine for the current LDIF; revisit only if the LDIF grows to use those features. _(Source: security review, chunk 4)_
 
+## Test infrastructure
+
+Repo-resident test-harness improvements deferred as too broad/risky for an incremental remediation batch.
+
+- **Import-mode modernization** — replace the manual `sys.modules`/`sys.path` juggling (root `conftest.py` `pytest_collect_file`; per-service `conftest.py` `pytest_runtest_setup`) with a pytest `[tool.pytest.ini_options]` `--import-mode=importlib` (+ `consider_namespace_packages`). **Blocked by a prerequisite:** both services ship a real top-level package literally named `app`, imported by bare name from ~20+ test files; they collide in `sys.modules` and importlib mode alone does NOT fix this. Requires first renaming the services' `app` packages (or eliminating bare-`app` imports) — high blast radius across the full ~1200-test suite. Address as its own dedicated change. _(Source: security review chunk 1; Spec 2 quality report; remediation triage)_
+- **Convert the manual `_run()` async-test helper to pytest-asyncio markers** — the suite drives coroutines via a hand-rolled `_run(coro)` helper rather than `@pytest.mark.asyncio` (zero markers, no `asyncio_mode` configured). Modernizing interacts with the root `pyproject.toml [tool.pytest.ini_options]` (added for `pytest-timeout`), so it was kept out of that change. _(Source: Spec 2 remediation triage)_
+
 ## Forward-looking design items
 
 Decisions deferred to the spec that first needs them.
 
 - **Keycloak group-name binding (plain vs slash)** — `infrastructure/keycloak/naas-realm-export.json` uses plain group names (`engineering`/`product`/`security`); SPEC_0 §6.4 acceptance does not assert group-membership binding via the OIDC `groups` claim. Resolve the plain-vs-slash question in the **first downstream spec that consumes the OIDC `groups` claim** (identity-normalization / risk-evaluator). Note: this is **not** Spec 1 (event ingestion → Postgres/Redis), so it does not block the immediate next spec. _(Source: security review, chunk 4)_
+- **Broader RFC-4514 DN conformance + real-directory group test** — `services/identity-normalization/app/adapters/ldap.py` `_reduce_dn_to_group_name` now uses `ldap.dn.str2dn` (handles escaped commas) with a regex fallback. Remaining RFC-4514 edge cases (hex `\NN` escapes, multi-valued/`+`-joined RDNs) are untriggered today because the seeded directory has no `memberOf`. Add a real-directory integration test exercising group enrichment once a directory with group memberships exists. _(Source: Spec 2 remediation triage; security review chunk 2/4)_
+- **Dead-letter handling for unparseable stream messages** — `services/identity-normalization/app/consumer.py`: a structurally-invalid `login_events` message is logged (PII-redacted) but never XACKed, so it remains in the consumer group's pending-entries list and is redelivered on every consumer restart. Decide a deliberate policy (dead-letter stream vs. ACK-and-drop vs. keep-pending) — applies to all stream consumers. _(Source: Spec 2 remediation integration validation, LOW)_
 
 ---
 

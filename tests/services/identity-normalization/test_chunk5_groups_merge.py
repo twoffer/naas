@@ -98,6 +98,7 @@ enrichment:
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
         f.write(yaml_content)
+        f.flush()
         return load_config(Path(f.name))
 
 
