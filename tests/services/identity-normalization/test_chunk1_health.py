@@ -136,9 +136,19 @@ def _patch_health_deps(db_session=None, redis_client=None):
     async def _fake_get_redis():
         return redis_cli
 
+    # Patch the lifespan's background consumer + group setup. Entering the
+    # TestClient context manager fires the FastAPI lifespan, which spawns
+    # run_consumer_loop. Against an AsyncMock Redis, that loop's
+    # `await redis.xreadgroup(..., block=2000)` returns instantly and never
+    # suspends, so its `while True` monopolizes the event loop — starving the
+    # /health request and hanging the process at 100% CPU. Patch at the app.main
+    # binding so chunk-6 tests driving app.consumer.run_consumer_loop directly
+    # are unaffected.
     with (
         patch("naas_shared.database.get_db_session", new=_fake_get_db_session),
         patch("naas_shared.redis_client.get_redis", new=_fake_get_redis),
+        patch("naas_shared.redis_client.ensure_consumer_group", new=AsyncMock()),
+        patch("app.main.run_consumer_loop", new=AsyncMock()),
     ):
         yield db_sess, redis_cli
 

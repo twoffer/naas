@@ -135,9 +135,20 @@ class TestOnlyHealthRouteExposed:
         mock_redis = AsyncMock()
         mock_redis.ping = AsyncMock(return_value=True)
 
+        # Patch the lifespan's background consumer + group setup so entering the
+        # TestClient context manager (which fires the FastAPI lifespan) does NOT
+        # spawn the real run_consumer_loop. Against an AsyncMock Redis, that loop's
+        # `await redis.xreadgroup(..., block=2000)` returns instantly (block is
+        # meaningless to a mock) and never suspends, so its `while True` monopolizes
+        # the event loop — starving the /health request and hanging the process at
+        # 100% CPU. run_consumer_loop is patched at the app.main binding (where it is
+        # imported) so chunk-6 tests that drive app.consumer.run_consumer_loop
+        # directly are unaffected.
         with (
             patch("naas_shared.database.get_db_session", return_value=mock_session),
             patch("naas_shared.redis_client.get_redis", return_value=mock_redis),
+            patch("naas_shared.redis_client.ensure_consumer_group", new=AsyncMock()),
+            patch("app.main.run_consumer_loop", new=AsyncMock()),
         ):
             yield
 
