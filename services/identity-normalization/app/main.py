@@ -8,6 +8,7 @@ Exposes GET /health; the full consumer loop pipeline is wired in the lifespan
 """
 
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -95,11 +96,22 @@ async def lifespan(application: FastAPI):
     from app.repository import PostgresNormalizationRepository
     from app.service import NormalizationPublisher, NormalizationService
 
-    # Load and validate config — let the exception propagate on invalid config
-    # Path: app/main.py → app/ → identity-normalization/ → services/ → naas/ → config/
-    config_path = (
+    # Load and validate config — let the exception propagate on invalid config.
+    # Resolution order:
+    #   1. NORMALIZATION_CONFIG_PATH env var (Docker/CI/test override)
+    #   2. /app/config/normalization.yaml (compose mount: ./config:/app/config:ro)
+    #   3. Repo-relative fallback for host/dev: 4 parents from __file__ → repo root
+    _compose_default = Path("/app/config/normalization.yaml")
+    _repo_fallback = (
         Path(__file__).parent.parent.parent.parent / "config" / "normalization.yaml"
     )
+    _env_override = os.environ.get("NORMALIZATION_CONFIG_PATH")
+    if _env_override:
+        config_path = Path(_env_override)
+    elif _compose_default.exists():
+        config_path = _compose_default
+    else:
+        config_path = _repo_fallback
     config = load_config(config_path)
 
     # Ensure the consumer group exists (idempotent; BUSYGROUP is swallowed).
