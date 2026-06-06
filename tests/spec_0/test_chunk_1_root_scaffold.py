@@ -247,10 +247,15 @@ EXPECTED_SERVICES = [
 # a README) because their spec has landed.  Append here as future specs land so the
 # "only README" guard keeps protecting un-implemented services without flagging the
 # implemented ones.  The README existence/content tests still apply to all eight.
-IMPLEMENTED_APP_SERVICES = {"event-ingestion"}  # Spec 1
+IMPLEMENTED_APP_SERVICES = {
+    "event-ingestion",
+    "identity-normalization",
+}  # Spec 1, Spec 2
 
 # Services still expected to be scaffold-only (README.md and nothing else).
-SCAFFOLD_ONLY_SERVICES = [s for s in EXPECTED_SERVICES if s not in IMPLEMENTED_APP_SERVICES]
+SCAFFOLD_ONLY_SERVICES = [
+    s for s in EXPECTED_SERVICES if s not in IMPLEMENTED_APP_SERVICES
+]
 
 REQUIRED_README_PHRASE = "Part of the NAAS system."
 
@@ -357,16 +362,35 @@ class TestConfigAndScriptsDirs:
         assert scripts_dir.exists(), f"scripts/ directory not found at {scripts_dir}"
         assert scripts_dir.is_dir(), f"{scripts_dir} exists but is not a directory"
 
-    def test_normalization_yaml_does_not_exist(self):
+    def test_normalization_yaml_exists(self):
         """
-        config/normalization.yaml must NOT exist in Chunk 1.
-        Its content is defined by Spec 2.  Presence here would indicate
-        out-of-order implementation.
+        config/normalization.yaml must exist and be a valid YAML file with the
+        top-level keys defined by Spec 2 (attributes, defaults, enrichment).
+
+        This test was originally a negative guard ("must NOT exist in Chunk 1")
+        because the file belonged to a later spec.  It became a positive assertion
+        when Spec 2 (Identity Normalization Service) legitimately created the file —
+        exactly the same kind of spec_0 maintenance applied to IMPLEMENTED_APP_SERVICES
+        when each new spec lands.
         """
+        import yaml  # stdlib-free import guarded here to avoid module-level dep
+
         normalization_yaml = REPO_ROOT / "config" / "normalization.yaml"
-        assert not normalization_yaml.exists(), (
-            f"config/normalization.yaml must not exist in Chunk 1 — "
-            f"it belongs to Spec 2.  Found at: {normalization_yaml}"
+        assert normalization_yaml.exists(), (
+            f"config/normalization.yaml not found at {normalization_yaml} — "
+            f"expected to be created by Spec 2."
+        )
+        assert normalization_yaml.is_file(), (
+            f"{normalization_yaml} exists but is not a regular file"
+        )
+        content = yaml.safe_load(normalization_yaml.read_text(encoding="utf-8"))
+        assert isinstance(content, dict), (
+            "config/normalization.yaml must parse as a YAML mapping"
+        )
+        expected_keys = {"attributes", "defaults", "enrichment"}
+        missing = expected_keys - content.keys()
+        assert not missing, (
+            f"config/normalization.yaml is missing top-level keys: {missing}"
         )
 
     def test_train_bootstrap_model_does_not_exist(self):

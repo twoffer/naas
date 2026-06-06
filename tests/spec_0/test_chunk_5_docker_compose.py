@@ -81,7 +81,7 @@ REQUIRED_SERVICES = {"postgres", "redis", "keycloak", "openldap"}
 # now legitimately appear in docker-compose.yml.  As each future spec adds its
 # service, append its name here so the scope-boundary guards below keep protecting
 # the not-yet-implemented services without flagging the implemented ones.
-IMPLEMENTED_APP_SERVICES = {"event-ingestion"}  # Spec 1
+IMPLEMENTED_APP_SERVICES = {"event-ingestion", "identity-normalization"}  # Spec 1, Spec 2
 
 # Every application service name (none of which exist at Spec 0 stage).
 ALL_APP_SERVICES = {

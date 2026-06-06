@@ -369,6 +369,7 @@ CACHE_JWKS = "jwks:keycloak"
 CACHE_JWKS_TTL = 300           # 5min
 CACHE_FEATURE_FLAGS = "feature_flags"
 CACHE_FEATURE_FLAGS_TTL = 60
+LDAP_ENRICHMENT_CACHE_PREFIX = "ldap_enrichment:"
 ```
 
 ### 3.4 Shared Pydantic Models
@@ -730,6 +731,7 @@ class Settings(BaseSettings):
     ldap_base_dn: str = "dc=corp,dc=com"
     ldap_admin_dn: str = "cn=admin,dc=corp,dc=com"
     ldap_admin_password: str = "admin"
+    ldap_pool_size: int = Field(default=3, ge=1, le=10)
 
     # Keycloak
     keycloak_url: str = "http://keycloak:8080"

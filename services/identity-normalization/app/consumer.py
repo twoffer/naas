@@ -1,0 +1,161 @@
+"""Redis Streams consumer loop for the Identity Normalization Service.
+
+Reads login events from the login_events stream using XREADGROUP, runs the
+full normalization pipeline, persists results, publishes to normalized_events,
+and ACKs only after both persist AND publish succeed (§5.1, ADR-0002).
+
+Critical ordering (§5.1, ADR-0002):
+  1. normalize()                 — extract + enrich + resolve
+  2. repository.write() + commit — point of no return (persist BEFORE publish)
+  3. publisher.publish_normalized() — XADD to normalized_events
+  4. redis.xack()                — ONLY after both 2 and 3 succeed
+
+WHY this ordering: if the service crashes between write+commit and publish the
+event is re-delivered and re-published (at-least-once delivery); downstream
+services receiving a duplicate normalized event is safe because normalization is
+idempotent.  If publish fails without a preceding commit, the event stays pending
+and will be re-processed — correct behaviour.  If we ACK before commit, a crash
+can lose a normalized result with no recovery path.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import socket
+
+import naas_shared.redis_client as _redis_mod
+from naas_shared.constants import GROUP_NORMALIZATION, STREAM_LOGIN_EVENTS
+from naas_shared.logging import get_logger
+from naas_shared.models import LoginEventRecord
+
+# Minimum pause on an empty XREADGROUP batch.  In production, `block=2000` means
+# Redis holds the connection open for up to 2 s before returning [] — so this
+# sleep is negligible there.  Its purpose is to prevent a misbehaving or mocked
+# Redis that ignores `block` from busy-spinning the event loop at 100 % CPU.
+# asyncio.sleep(0) is NOT sufficient because it only yields once, not for real time.
+_EMPTY_BATCH_SLEEP_S: float = 0.5
+
+_logger = get_logger(__name__)
+
+
+async def run_consumer_loop(
+    service: object,
+    repository: object,
+    publisher: object,
+    redis: object | None = None,
+) -> None:
+    """Process login events from the Redis Stream indefinitely.
+
+    Uses XREADGROUP so messages are delivered to exactly one consumer in the
+    group at a time (at-least-once semantics with pending-entries redelivery).
+    The consumer name is derived from the hostname to be unique per replica.
+
+    On any per-message exception: log the error, do NOT XACK (the message
+    stays in the pending-entries list and will be redelivered by Redis after
+    the visibility timeout).  The loop continues to the next batch — a single
+    bad message does not stall the pipeline.
+
+    EnrichmentSkipped in the normalized result is NOT a processing failure;
+    such messages proceed through the full write → publish → XACK path.
+
+    Args:
+        service:    NormalizationService instance (has normalize(record) -> NormalizedAttributes).
+        repository: PostgresNormalizationRepository (has write(event_id, normalized) -> None).
+        publisher:  NormalizationPublisher (has publish_normalized(record, normalized) -> None).
+        redis:      Async Redis client (aioredis.Redis or compatible AsyncMock in tests).
+    """
+    if redis is None:
+        redis = await _redis_mod.get_redis()
+
+    consumer_name = f"{socket.gethostname()}-normalization"
+    log = _logger.bind(consumer=consumer_name, group=GROUP_NORMALIZATION)
+
+    log.info("consumer_loop_started", stream=STREAM_LOGIN_EVENTS)
+
+    while True:
+        # XREADGROUP: block up to 2 s, read up to 10 new messages per iteration.
+        # ">" means: deliver only messages not yet delivered to any consumer.
+        batches = await redis.xreadgroup(
+            GROUP_NORMALIZATION,
+            consumer_name,
+            streams={STREAM_LOGIN_EVENTS: ">"},
+            count=10,
+            block=2000,
+        )
+
+        if not batches:
+            # Yield real wall-clock time so a non-blocking client (e.g. an
+            # AsyncMock in tests that ignores `block`) cannot spin the event
+            # loop at 100 % CPU.  Production Redis with block=2000 waits in the
+            # server, so this sleep is effectively a no-op there.
+            await asyncio.sleep(_EMPTY_BATCH_SLEEP_S)
+            continue
+
+        for _stream, messages in batches:
+            for msg_id, fields in messages:
+                await _process_message(
+                    msg_id=msg_id,
+                    fields=fields,
+                    service=service,
+                    repository=repository,
+                    publisher=publisher,
+                    redis=redis,
+                    log=log,
+                )
+
+
+async def _process_message(
+    *,
+    msg_id: str,
+    fields: dict,
+    service: object,
+    repository: object,
+    publisher: object,
+    redis: object,
+    log: object,
+) -> None:
+    """Handle one stream message end-to-end.
+
+    Failures at any step are caught, logged, and do NOT XACK.  This keeps the
+    message in the pending-entries list for redelivery.
+
+    WHY bytes handling: redis-py may return field keys/values as either str or
+    bytes depending on decode_responses setting.  We normalize here so the
+    consumer works in both modes.
+    """
+    try:
+        # Decode bytes if needed (redis-py without decode_responses returns bytes)
+        data_raw = fields.get("data") or fields.get(b"data")
+        if isinstance(data_raw, bytes):
+            data_raw = data_raw.decode("utf-8")
+
+        record = LoginEventRecord.model_validate(json.loads(data_raw))
+
+        # Step 1: normalize (extract + enrich + resolve)
+        normalized = await service.normalize(record)
+
+        # Step 2: persist + commit (point of no return)
+        await repository.write(record.id, normalized)
+
+        # Step 3: publish to normalized_events stream
+        await publisher.publish_normalized(record, normalized)
+
+        # Step 4: ACK only after BOTH write and publish succeed
+        await redis.xack(STREAM_LOGIN_EVENTS, GROUP_NORMALIZATION, msg_id)
+
+        log.debug(
+            "message_processed",
+            msg_id=msg_id,
+            event_id=str(record.id),
+            protocol=record.protocol,
+        )
+
+    except Exception as exc:
+        log.error(
+            "message_processing_failed",
+            msg_id=msg_id,
+            error=str(exc),
+            error_type=type(exc).__name__,
+        )
+        # Do NOT XACK — message stays pending for redelivery
