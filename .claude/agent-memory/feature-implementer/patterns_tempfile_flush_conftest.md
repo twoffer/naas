@@ -11,7 +11,7 @@ Test helper functions (e.g. `_load_config_with_strategy`) that call `load_config
 
 **How to apply:** Add an autouse pytest fixture in the service's conftest.py that monkeypatches `tempfile.NamedTemporaryFile` with a wrapper whose `write()` calls `flush()` immediately after writing. Save the real `NamedTemporaryFile` at module load time as `_REAL_NAMED_TEMP_FILE` before patching to avoid infinite recursion.
 
-Pattern implemented in `tests/services/identity-normalization/conftest.py`:
+Pattern implemented in `tests/services/identity_normalization/conftest.py`:
 
 ```python
 _REAL_NAMED_TEMP_FILE = tempfile.NamedTemporaryFile

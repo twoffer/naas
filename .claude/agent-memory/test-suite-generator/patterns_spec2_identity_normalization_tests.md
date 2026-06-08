@@ -104,14 +104,14 @@ with XACK LAST; enrichment skip ≠ processing failure (skipped events still per
 repository `write()` is UPDATE-only (no `session.add()`, no `create_all`, one `execute()`);
 publisher sends the FULL record (ADR-0011) via shared `publish_to_stream`.
 
-## tempfile flush — conftest auto-flush REMOVED (N hygiene fix)
+## tempfile flush — conftest auto-flush REMOVED
 
 The autouse `_patch_named_temp_file` fixture and `_AutoFlushWrapper` class were
-REMOVED from `conftest.py` as part of the post-Spec-2 N remediation. Each test that
+REMOVED from `conftest.py` as a hygiene fix. Each test that
 calls `load_config()` inside a `NamedTemporaryFile` `with` block now calls `f.flush()`
-explicitly before reading (see `test_chunk5_groups_merge.py::_load_config_with_strategy`).
-Tests that read AFTER the `with` block closes (`test_chunk5_scalar_resolution.py:820`,
-`test_chunk5_penalty.py:225`) are unaffected.
+explicitly before reading (see `test_groups_merge.py::_load_config_with_strategy`).
+Tests that read AFTER the `with` block closes (`test_scalar_resolution.py:820`,
+`test_penalty.py:225`) are unaffected.
 
 **Do NOT re-add the conftest auto-flush** — it was a global side-effect and the explicit
 flush is the cleaner approach going forward.
@@ -162,54 +162,56 @@ enrich/pool tests that simulate a timeout via that fake class). The new
 **separate** helpers that use the correct python-ldap attribute names and omit
 `TIMEOUT_EXCEEDED`. Do NOT merge them.
 
-## Remediation test patterns (post-Spec-2 non-blocking fixes)
+## Input-hardening / log-redaction / consumer-resilience test patterns
 
-See `tests/services/identity-normalization/test_remediation.py`. Key patterns:
+These patterns live in `tests/services/identity_normalization/`. Some are in
+`test_remediation.py` (non-blocking fixes applied after initial implementation);
+others were added to the primary adapter/consumer test files.
 
-**Non-str type guard tests (A):** Call normalize_department/normalize_employee_type with int,
-list, dict directly — assert `(None, False)` / `None` returned, no exception. For adapter
-extract() tests with non-str values, inject fake_ldap before importing app.adapters.ldap.
+**Input-coercion tests** (`test_input_coercion.py` / `test_remediation.py`):
+- Call `normalize_department` / `normalize_employee_type` with int, list, dict directly —
+  assert `(None, False)` / `None` returned, no exception.
+- `TestAdapterExtractNonStringNameEmail`: six tests, one per adapter×field (OIDC name,
+  OIDC email; SAML displayName, SAML email; LDAP cn, LDAP mail). Feed non-str values
+  (42, {"x":1}, ["a@b.com"]) to `extract()`; assert the result field is `None`.
+  Fix pattern: `isinstance(v, str) or None` in each adapter.
+- For adapter `extract()` tests with non-str values: inject fake_ldap before importing
+  `app.adapters.ldap`.
 
-**Consumer resilience tests (B):** Use xreadgroup side_effect sequence: [RuntimeError, message,
-CancelledError]. Assert normalize called once after the error. Patch asyncio.sleep to assert
-positive-delay sleep after error. CancelledError propagation test should PASS now (existing
-behavior) and remain passing after fix.
+**Consumer-resilience tests** (`test_consumer_resilience.py` / `test_remediation.py`):
+- Use `xreadgroup` side_effect sequence: [RuntimeError, message, CancelledError].
+  Assert `normalize` called once after the error.
+- Patch `asyncio.sleep` to assert positive-delay sleep after error.
+- `CancelledError` propagation test should PASS (existing behavior preserved).
 
-**weight_for floor test (C):** the floor is `_UNKNOWN_SOURCE_WEIGHT_FLOOR = 0.5` in
-`normalization_config.py` (returned by `weight_for` for an unknown source via `.get(source,
-floor)`). Test asserts result in [0.0, min_default] and does not raise.
+**weight_for floor test**: The floor is `_UNKNOWN_SOURCE_WEIGHT_FLOOR = 0.5` in
+`normalization_config.py` (returned by `weight_for` for an unknown source via
+`.get(source, floor)`). Test asserts result in [0.0, min_default] and does not raise.
 
-**unbind_s thread test (E):** Patch asyncio.to_thread to capture called functions; assert
+**unbind_s thread test**: Patch `asyncio.to_thread` to capture called functions; assert
 >= 3 calls (connect, search, unbind). The "slot freed even when unbind raises" sub-test
-correctly PASSes before and after the fix (slot is always freed).
+correctly passes before and after the fix (slot is always freed).
 
-**str2dn DN reduction test (J):** Add `str2dn` MagicMock to `fake_ldap.dn` in
-`_inject_ldap_with_str2dn()`. The fake str2dn does manual escaped-comma parsing (walks char
-by char, treating `\X` as literal X). Tests for normal DN / bare name / malformed DN PASS
-before the fix (regex handles them). Only escaped-comma test FAILS before fix.
+**str2dn DN reduction test** (`test_remediation.py`): Add `str2dn` MagicMock to
+`fake_ldap.dn` in `_inject_ldap_with_str2dn()`. The fake str2dn does manual
+escaped-comma parsing (walks char by char, treating `\X` as literal X). Tests for
+normal DN / bare name / malformed DN pass before the fix (regex handles them).
+Only escaped-comma test fails before fix.
 
-**Log redaction tests (D, F, H):** Patch the module-level `_logger` directly (not via
-monkeypatch) for the corrupted-cache path (app.adapters.ldap._logger) and consumer path
-(app.consumer._logger). Both use a CapturingBoundLogger wrapper with `bind()` delegation.
-Restore the original in `finally:`.
-
-**Non-str display_name/primary_email guard tests (G):** Six tests in
-`TestAdapterExtractNonStringNameEmail` — one per adapter×field (OIDC name, OIDC email; SAML
-displayName, SAML email; LDAP cn, LDAP mail). Feed non-str values (42 or {"x":1} or
-["a@b.com"]) to extract(); assert the result field is None. These tests FAIL now because the
-adapters do `raw_attributes.get(key)` with no type check. Fix: `isinstance(v, str) or None`.
-
-**ValidationError PII redaction test (H, LOW#1):** `TestValidationErrorLogRedaction` with one
-test. Key technique: set `id='alice@corp.com'` (invalid UUID) in a LoginEventRecord payload —
-Pydantic v2 includes `input_value='alice@corp.com'` in `str(ValidationError)[:200]` for this
-case (verified). The test asserts `pii_email not in repr(log_event)` AND that location info
-(field name 'id') is present. This FAILS now because the consumer logs `str(exc)[:200]` for
-ALL exceptions including ValidationError. The fix: detect `isinstance(exc, ValidationError)`
-and log `error_locations=[e["loc"] for e in exc.errors()]` instead. The F test (truncation
-path) was also updated to use a RuntimeError from service.normalize (not a ValidationError
-parse failure) so F explicitly covers the non-ValidationError truncation branch.
-
-**Pydantic v2 ValidationError PII in [:200] rule:** For a UUID-parse error, `str(exc)[:200]`
-DOES contain the raw input_value (email). For a pattern-mismatch error (e.g., IP field), the
-regex pattern text is so long that the email appears AFTER the 200-char truncation point. Use
-the `id` field (UUID type) to reliably have the email in the first 200 chars.
+**Log-redaction tests** (`test_log_redaction.py` / `test_remediation.py`):
+- Patch the module-level `_logger` directly (not via monkeypatch) for the
+  corrupted-cache path (`app.adapters.ldap._logger`) and consumer path
+  (`app.consumer._logger`). Both use a `CapturingBoundLogger` wrapper with
+  `bind()` delegation. Restore the original in `finally:`.
+- `TestValidationErrorLogRedaction`: set `id='alice@corp.com'` (invalid UUID) in a
+  LoginEventRecord payload — Pydantic v2 includes `input_value='alice@corp.com'` in
+  `str(ValidationError)[:200]` for this case (verified). Assert `pii_email not in
+  repr(log_event)` AND that location info (field name 'id') is present.
+  Fix: detect `isinstance(exc, ValidationError)` and log
+  `error_locations=[e["loc"] for e in exc.errors()]` instead.
+- The truncation-path test uses a `RuntimeError` from `service.normalize` (not a
+  ValidationError parse failure) so it explicitly covers the non-ValidationError branch.
+- **Pydantic v2 PII rule**: For a UUID-parse error, `str(exc)[:200]` DOES contain the
+  raw `input_value` (email). For a pattern-mismatch error (e.g., IP field), the regex
+  text is so long the email appears AFTER the 200-char cutoff. Always use the `id` field
+  (UUID type) to reliably trigger PII exposure within 200 chars.

@@ -73,17 +73,17 @@ assert result == {"combined": "1-None"}
 
 - New surface area (`_mapping.py`): new file `test_mapping_engine.py`
 - New wrapper in existing module (`normalize_department_value`): append CLASS 8 to
-  `test_chunk2_normalization_values.py` (keeps normalization_values tests together)
+  `test_normalization_values.py` (keeps normalization_values tests together)
 - Behavior change in existing adapters: append CLASS 7 to each adapter test file
-  (`test_chunk2_adapters_oidc.py`, `test_chunk2_adapters_saml.py`,
-  `test_chunk2_adapters_ldap.py`) so the behavior change is co-located with the
+  (`test_adapters_oidc.py`, `test_adapters_saml.py`,
+  `test_adapters_ldap.py`) so the behavior change is co-located with the
   existing adapter test suite
 
 ### Running from the service directory
 
 Always run pytest from `services/identity-normalization/` with:
 ```bash
-python -m pytest ../../tests/services/identity-normalization/test_*.py -v
+python -m pytest ../../tests/services/identity_normalization/test_*.py -v
 ```
 
 The pyproject.toml configures the test root correctly when CWD is the service dir.

@@ -19,5 +19,5 @@ metadata:
 ## §3.3 payload is ILLUSTRATIVE, not binding
 The §3.3 example shows normalization_confidence 0.87 and groups 0.85; the §5.5 FORMULA gives ~0.889 / 0.90 for the same inputs. chunk-5 tests correctly assert the formula, not the illustrative payload values. Do not flag this divergence as a bug.
 
-## conftest tempfile monkeypatch (chunk-5)
-`tests/services/identity-normalization/conftest.py` autouse-patches `tempfile.NamedTemporaryFile` to flush-on-write, working around `test_chunk5_groups_merge.py:99-101` reading the temp file via `load_config` while still inside the `with` block (unflushed buffer → empty read). Scoped fine: chunk-3 config-validation tests use pytest `tmp_path` + `write_text`, NOT NamedTemporaryFile, so they are unaffected. The cleaner fix (one-line `f.flush()` in the helper) needs a test-file edit blocked by pipeline rules. Non-blocking; weakens no assertion.
+## conftest tempfile monkeypatch
+`tests/services/identity_normalization/conftest.py` autouse-patches `tempfile.NamedTemporaryFile` to flush-on-write, working around `test_groups_merge.py` reading the temp file via `load_config` while still inside the `with` block (unflushed buffer → empty read). Scoped fine: the config-validation tests use pytest `tmp_path` + `write_text`, NOT NamedTemporaryFile, so they are unaffected. A cleaner alternative is a one-line `f.flush()` in the helper. Non-blocking; weakens no assertion.

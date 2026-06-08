@@ -41,11 +41,11 @@ For placeholder modules (ml_features.py, simulation_tools.py — and schemas.py
 - For ml_features.py / simulation_tools.py: only assert clean import + absence of
   specific named attributes (FEATURE_COLUMNS, TOOL_DEFINITIONS) with real content
 
-### ⚠ schemas.py is now POPULATED by Spec 1 — do not regenerate placeholder guards
+### ⚠ schemas.py is now POPULATED — do not regenerate placeholder guards
 
-`schemas.py` is no longer a placeholder: Spec 1 added `Base` and `EventORM`. The
-spec_0 class is now `TestSchemasModule` and keeps ONLY the clean-import smoke-test.
-Its ORM surface is covered positively by `tests/shared/test_chunk1_orm_mapping.py`.
+`schemas.py` is no longer a placeholder: `Base` and `EventORM` are defined.
+The shared-library test class `TestSchemasModule` keeps ONLY the clean-import smoke-test.
+Its ORM surface is covered positively by `tests/shared/test_orm_mapping.py`.
 
 The two retired assertions were **brittle one-way tripwires** that broke
 permanently the instant the module was filled:
@@ -58,8 +58,11 @@ later spec is expected to populate** — unlike the docker-compose / scaffold
 guards there is no allow-set to evolve here; once populated, the placeholder
 assertion is simply obsolete and must be deleted (keep the import smoke-test).
 
-## Test file location
-`tests/spec_0/test_chunk_2_shared_library.py` — 102 tests total
+## Test file locations
+
+The shared-library tests live in `tests/shared/` split across:
+- `test_models.py`, `test_constants.py`, `test_settings.py`, `test_pyproject.py`, `test_package_surface.py`
+- `test_orm_mapping.py` — Base/EventORM ORM surface (was originally co-located, now separate)
 
 ## Key discriminated union testing pattern
 
