@@ -111,6 +111,30 @@ def normalize_department(value: object) -> tuple[str | None, bool]:
     return value.strip().title(), False
 
 
+def normalize_department_value(value: object) -> str | None:
+    """Single-value variant of normalize_department for the adapter rule tables.
+
+    Drops the was_mapped flag (resolution recomputes it independently). Behavior is
+    otherwise identical: canonical hit, title-case fallback on miss, None on non-str.
+
+    WHY: The three protocol adapters need a one-arg transform for the department
+    field in their declarative FieldRule tables.  normalize_department returns a
+    (str|None, bool) tuple; this wrapper strips the flag so the transform signature
+    matches what apply_field_rules expects (a single return value, not a tuple).
+    normalize_department's tuple contract is preserved — service.py and resolution
+    depend on it.
+
+    Args:
+        value: Raw department string from the login event attributes.
+
+    Returns:
+        Canonical department string on a hit, title-cased raw string on a miss,
+        or None for any non-str input.
+    """
+    canonical, _was_mapped = normalize_department(value)
+    return canonical
+
+
 def normalize_employee_type(value: object) -> str | None:
     """Map a raw employee_type string to its canonical Literal form.
 

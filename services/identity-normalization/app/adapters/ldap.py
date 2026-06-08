@@ -7,7 +7,7 @@ live LDAP query with a bounded connection pool and three-state Redis cache.
 Mapping (spec §5.2 [TRANSCRIBE EXACTLY]):
   cn               → display_name
   mail             → primary_email
-  departmentNumber → department   (value-normalized via normalize_department)
+  departmentNumber → department   (value-normalized via normalize_department_value)
   employeeType     → employee_type (value-normalized via normalize_employee_type)
   memberOf         → groups        (DN-reduced to cn RDN values; default [])
 
@@ -50,9 +50,10 @@ import asyncio
 import inspect
 import json
 import re
+from app.adapters._mapping import FieldRule, apply_field_rules, coerce_str, coerce_str_list
 from app.normalization_values import (
     UNIFIED_TO_LDAP,
-    normalize_department,
+    normalize_department_value,
     normalize_employee_type,
 )
 from naas_shared.config import get_settings
@@ -144,6 +145,44 @@ def _reduce_dn_to_group_name(dn: str) -> str | None:
 
     _logger.warning("ldap_dn_reduction_no_cn_rdn", dn_length=len(dn_stripped))
     return None
+
+
+def reduce_member_of(value: object) -> list[str]:
+    """Reduce a raw memberOf attribute to a list of group name strings.
+
+    Applies coerce_str_list (strict list-only semantics) first so that a bare
+    string memberOf value produces [] rather than iterating the string
+    character-by-character.  Each DN string in the resulting list is then passed
+    to _reduce_dn_to_group_name; entries that cannot be reduced (malformed DN with
+    no cn= component) are silently dropped so the caller always receives a clean
+    list of group name strings.
+
+    WHY: This is the FieldRule transform for LDAP's 'memberOf' → 'groups' mapping.
+    Consolidating the coercion + DN-reduction pipeline here keeps extract() as a
+    one-liner while preserving the existing _reduce_dn_to_group_name logic intact.
+
+    Args:
+        value: Raw memberOf value from the login event attributes. Expected to be
+            a list[str] of LDAP DNs; a non-list produces [] immediately.
+
+    Returns:
+        List of extracted group name strings (cn RDN values or bare names).
+    """
+    names: list[str] = []
+    for dn in coerce_str_list(value):
+        name = _reduce_dn_to_group_name(dn)
+        if name is not None:
+            names.append(name)
+    return names
+
+
+LDAP_FIELD_RULES: dict[str, FieldRule] = {
+    "display_name":  FieldRule(("cn",),               coerce_str),
+    "primary_email": FieldRule(("mail",),             coerce_str),
+    "department":    FieldRule(("departmentNumber",), normalize_department_value),
+    "employee_type": FieldRule(("employeeType",),     normalize_employee_type),
+    "groups":        FieldRule(("memberOf",),         reduce_member_of),
+}
 
 
 def _decode_first(value: object) -> str | None:
@@ -405,8 +444,8 @@ class LdapAdapter:
         """Map LDAP attribute names to unified field names with value normalization.
 
         Absent scalar keys produce None in the result. The 'groups' field always
-        returns a list ([] when absent or when memberOf is empty) so the resolution
-        engine can iterate it without a None guard.
+        returns a list ([] when absent or when memberOf is empty or non-list) so
+        the resolution engine can iterate it without a None guard.
 
         The bootstrap.ldif seeded users carry no memberOf attributes, so real
         queries to the test directory will produce groups=[]; the DN-reduction
@@ -422,40 +461,7 @@ class LdapAdapter:
             Dict with keys: display_name, primary_email, department,
             employee_type, groups.
         """
-        raw_dept = raw_attributes.get("departmentNumber")
-        if raw_dept is not None:
-            dept_value, _ = normalize_department(raw_dept)
-        else:
-            dept_value = None
-
-        raw_et = raw_attributes.get("employeeType")
-        if raw_et is not None:
-            et_value = normalize_employee_type(raw_et)
-        else:
-            et_value = None
-
-        # Filter to str only — non-str memberOf entries (e.g., ints from malformed
-        # directory data) would cause _reduce_dn_to_group_name to raise AttributeError.
-        member_of: list[str] = [
-            dn for dn in (raw_attributes.get("memberOf") or []) if isinstance(dn, str)
-        ]
-        groups: list[str] = []
-        for dn in member_of:
-            name = _reduce_dn_to_group_name(dn)
-            if name is not None:
-                groups.append(name)
-
-        return {
-            "display_name": (
-                v if isinstance(v := raw_attributes.get("cn"), str) else None
-            ),
-            "primary_email": (
-                v if isinstance(v := raw_attributes.get("mail"), str) else None
-            ),
-            "department": dept_value,
-            "employee_type": et_value,
-            "groups": groups,
-        }
+        return apply_field_rules(raw_attributes, LDAP_FIELD_RULES)
 
     async def enrich(
         self,

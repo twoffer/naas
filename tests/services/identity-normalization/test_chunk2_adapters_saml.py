@@ -396,3 +396,90 @@ class TestSamlAdapterMissingKeys:
             f"Got department={dept_val!r}. "
             "Spec §2.3: SAML uses 'dept', not 'department'."
         )
+
+
+# ===========================================================================
+# CLASS 7 — Bare-string groups behavior (adapter refactor, intentional change)
+# ===========================================================================
+
+
+class TestSamlAdapterBareStringGroups:
+    """SamlAdapter.extract must yield groups=[] when 'groups' is a bare string.
+
+    This is the ONE intentional behavior change introduced by the adapter refactor.
+    The SAML adapter uses the same coerce_str_list transform for the 'groups' key
+    as the OIDC adapter.  The strict list-only semantics apply: a non-list value
+    (including a bare string) returns [].
+
+    WHY this is a security-relevant behavior change:
+      SAML assertions may send groups as a single string attribute value rather
+      than a multi-valued list (this is common with older SAML IdPs that do not
+      support multi-value attributes).  With the old iteration logic, 'admin'
+      becomes ['a','d','m','i','n'] — no policy condition checking
+      `"admin" in groups` would match.  With strict list-only semantics, the
+      result is [] and the policy engine sees no groups.  Both are secure; []
+      is the more predictable and explicit failure mode.
+
+    TDD state:
+      These tests describe the post-refactor behavior.  They WILL FAIL against
+      the current implementation if it uses `list(...)` or iteration that
+      processes bare strings.  The implementer must switch to coerce_str_list.
+    """
+
+    def test_bare_string_groups_yields_empty_list(self) -> None:
+        """extract({'groups': 'admin'}) must yield groups=[] (not ['a','d','m','i','n']).
+
+        WHY: See class docstring.  SAML bare-string groups must produce [].
+        """
+        from app.adapters.saml import SamlAdapter
+
+        result = SamlAdapter().extract({"groups": "admin"})
+
+        groups = result.get("groups", "ABSENT_SENTINEL")
+        assert groups == [], (
+            f"SamlAdapter.extract({{'groups': 'admin'}}) must yield groups=[], "
+            f"got {groups!r}. "
+            "A bare string for groups must produce [] (strict list-only semantics). "
+            "The refactor replaces the old iteration logic with coerce_str_list."
+        )
+        # Belt-and-suspenders: explicitly confirm it is not the character list
+        assert groups != list("admin"), (
+            "groups must NOT be ['a','d','m','i','n'] — "
+            "that would be iterating the string character-by-character."
+        )
+
+    def test_bare_string_groups_not_iterated_as_chars(self) -> None:
+        """extract({'groups': 'staff'}) must NOT produce individual chars.
+
+        WHY: Makes the character-iteration failure mode explicitly visible in test
+        output, distinguishing it from the empty-list check.
+        """
+        from app.adapters.saml import SamlAdapter
+
+        result = SamlAdapter().extract({"groups": "staff"})
+
+        groups = result.get("groups", [])
+        for char in "staff":
+            assert char not in groups or len(groups[0]) > 1, (
+                f"groups={groups!r} contains single-char entry {char!r} — "
+                "this indicates character-by-character iteration. "
+                "coerce_str_list('staff') must return [], not list('staff')."
+            )
+        assert groups == [], (
+            f"extract({{'groups': 'staff'}}) must yield groups=[], got {groups!r}."
+        )
+
+    def test_list_groups_still_passes_through(self) -> None:
+        """extract({'groups': ['admin', 'vpn']}) must still yield groups=['admin', 'vpn'].
+
+        WHY: Regression guard — the refactor must not break the normal list path.
+        """
+        from app.adapters.saml import SamlAdapter
+
+        result = SamlAdapter().extract({"groups": ["admin", "vpn"]})
+
+        assert result.get("groups") == ["admin", "vpn"], (
+            f"SamlAdapter.extract with list groups must return ['admin', 'vpn'], "
+            f"got {result.get('groups')!r}. "
+            "The refactor must not regress normal list behavior."
+        )

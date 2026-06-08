@@ -476,3 +476,100 @@ class TestOidcAdapterMissingKeys:
             f"Empty raw_attributes must yield groups=[], "
             f"got {result.get('groups', 'ABSENT')!r}."
         )
+
+
+# ===========================================================================
+# CLASS 7 — Bare-string groups behavior (adapter refactor, intentional change)
+# ===========================================================================
+
+
+class TestOidcAdapterBareStringGroups:
+    """OidcAdapter.extract must yield groups=[] when 'groups' is a bare string.
+
+    This is the ONE intentional behavior change introduced by the adapter refactor.
+    Before the refactor, `list(raw_attributes.get('groups') or [])` on a bare
+    string like 'admin' would iterate the string character-by-character, yielding
+    ['a', 'd', 'm', 'i', 'n'] — or with the existing [g for g in (...) if isinstance(g, str)]
+    guard the same character-by-character list, since each char IS a str.
+
+    After the refactor the OIDC adapter uses coerce_str_list which applies strict
+    list-only semantics: if the value is not a list, return [].
+
+    WHY this is a security-relevant behavior change:
+      A misconfigured IdP may send groups as a bare string rather than a
+      JSON array.  With character iteration, 'admin' becomes ['a','d','m','i','n']
+      — none of which equals 'admin', so `"admin" in groups` evaluates False and
+      admin-only policy conditions silently never fire.  With strict list-only
+      semantics, the groups field is [] and the policy engine correctly denies
+      access to admin-only resources pending proper IdP configuration.
+      [] is the safer, more predictable failure mode.
+
+    TDD state:
+      These tests describe the post-refactor behavior.  They WILL PASS against
+      the current implementation IF the current code already uses coerce_str_list
+      (which it doesn't yet — the refactor is not implemented).  If the current
+      code uses `list(raw_attributes.get('groups') or [])` or an equivalent that
+      iterates strings, these tests FAIL.  The implementer must switch to
+      coerce_str_list (or equivalent strict semantics) to make them pass.
+    """
+
+    def test_bare_string_groups_yields_empty_list(self) -> None:
+        """extract({'groups': 'admin'}) must yield groups=[] (not ['a','d','m','i','n']).
+
+        WHY: See class docstring.  This is the canonical bare-string test case.
+        The intent is: if the IdP sends a non-list for groups, the adapter must
+        return [] rather than iterating the string.
+        """
+        from app.adapters.oidc import OidcAdapter
+
+        result = OidcAdapter().extract({"groups": "admin"})
+
+        groups = result.get("groups", "ABSENT_SENTINEL")
+        assert groups == [], (
+            f"extract({{'groups': 'admin'}}) must yield groups=[], got {groups!r}. "
+            "A bare string for groups must produce [] (strict list-only semantics). "
+            "The refactor replaces the old iteration logic with coerce_str_list."
+        )
+        # Belt-and-suspenders: explicitly confirm it is not the character list
+        assert groups != list("admin"), (
+            "groups must NOT be ['a','d','m','i','n'] — "
+            "that would be iterating the string character-by-character."
+        )
+
+    def test_bare_string_groups_not_iterated_as_chars(self) -> None:
+        """extract({'groups': 'engineering'}) must NOT produce individual chars.
+
+        WHY: This test makes the failure mode explicit and distinct from the
+        empty-list check.  A reviewer reading a failure report must see clearly
+        WHAT went wrong (char-by-char iteration) not just that the result != [].
+        """
+        from app.adapters.oidc import OidcAdapter
+
+        result = OidcAdapter().extract({"groups": "engineering"})
+
+        groups = result.get("groups", [])
+        for char in "engineering":
+            assert char not in groups or len(groups[0]) > 1, (
+                f"groups={groups!r} contains single-char entry {char!r} — "
+                "this indicates character-by-character iteration of the bare string. "
+                "coerce_str_list('engineering') must return [], not list('engineering')."
+            )
+        assert groups == [], (
+            f"extract({{'groups': 'engineering'}}) must yield groups=[], got {groups!r}."
+        )
+
+    def test_list_groups_still_passes_through(self) -> None:
+        """extract({'groups': ['admin', 'vpn']}) must still yield groups=['admin', 'vpn'].
+
+        WHY: The refactor must not break the normal list-of-strings path.
+        This is a regression guard ensuring the behavior change is surgical.
+        """
+        from app.adapters.oidc import OidcAdapter
+
+        result = OidcAdapter().extract({"groups": ["admin", "vpn"]})
+
+        assert result.get("groups") == ["admin", "vpn"], (
+            f"extract with list groups must still return ['admin', 'vpn'], "
+            f"got {result.get('groups')!r}. "
+            "The refactor must not regress normal list behavior."
+        )
