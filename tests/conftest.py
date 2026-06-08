@@ -1,0 +1,35 @@
+"""tests/conftest.py — project-wide test configuration.
+
+Inserts shared/naas_shared onto sys.path at collection time so that every
+test subtree can import naas_shared without per-file path boilerplate.
+
+WHY here and not in the repo root: with importlib mode active the root
+conftest's pytest_collect_file shim is no longer needed (importlib gives
+each test file a unique module name, eliminating same-basename collisions).
+The only shared setup remaining is the sys.path insertion for naas_shared.
+"""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+
+def _find_repo_root() -> Path:
+    """Walk up from this file until we find docs/architecture/ — repo root marker."""
+    candidate = Path(__file__).resolve().parent
+    for _ in range(10):
+        if (candidate / "docs" / "architecture").is_dir():
+            return candidate
+        candidate = candidate.parent
+    raise RuntimeError(
+        f"Could not locate repo root. Started from: {Path(__file__).resolve()}"
+    )
+
+
+REPO_ROOT = _find_repo_root()
+SHARED_DIR = str(REPO_ROOT / "shared")
+
+# Insert shared/ so naas_shared imports resolve for all subtrees.
+if SHARED_DIR not in sys.path:
+    sys.path.insert(0, SHARED_DIR)
