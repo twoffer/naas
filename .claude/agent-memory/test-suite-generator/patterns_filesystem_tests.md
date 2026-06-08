@@ -5,7 +5,7 @@ metadata:
   type: project
 ---
 
-## Scaffold test patterns (established in spec_0/test_chunk_1_root_scaffold.py)
+## Scaffold test patterns (established in tests/repo/test_root_scaffold.py)
 
 ### Skip vs. Fail for missing files
 
@@ -50,8 +50,8 @@ SCAFFOLD_ONLY_SERVICES = [s for s in EXPECTED_SERVICES if s not in IMPLEMENTED_A
 ```
 
 **When generating/refreshing tests after a new spec lands, you MUST add that
-spec's service name to `IMPLEMENTED_APP_SERVICES`** in `test_chunk_1_root_scaffold.py`
-(and the mirror set in `test_chunk_5_docker_compose.py`). The README
+spec's service name to `IMPLEMENTED_APP_SERVICES`** in `tests/repo/test_root_scaffold.py`
+(and the mirror set in `tests/infrastructure/test_docker_compose.py`). The README
 existence/content tests still parametrize over ALL eight `EXPECTED_SERVICES` —
 only the "only README" guard uses `SCAFFOLD_ONLY_SERVICES`.
 
@@ -91,11 +91,11 @@ Scaffold tests have no app code to import. Do not create a conftest.py that
 imports application code — keep tests self-contained. Module-scope fixtures
 inside the test file suffice.
 
-**Why:** No app code exists during TDD phase; importing would cause ImportError.
-**How to apply:** For each scaffold chunk test file, inline fixtures instead of
-using conftest.py.
+**Why:** Scaffold tests (tests/repo/, tests/infrastructure/) assert file existence and
+static content — no service code exists at that point; importing would cause ImportError.
+**How to apply:** For each scaffold test file, inline fixtures instead of using conftest.py.
 
-### sqlparse availability pattern (established in spec_0/test_chunk_3_postgres_redis.py)
+### sqlparse availability pattern (established in tests/infrastructure/test_postgres_init_sql.py)
 
 `sqlparse` is NOT installed in the dev venv. For a test that needs it:
 
@@ -128,7 +128,7 @@ def init_sql_text() -> str:
     return INIT_SQL_PATH.read_text(encoding="utf-8")
 ```
 
-This is the established pattern for Chunk 3 and should be used for all future
+This is the established pattern for infrastructure tests and should be used for all future
 static-artifact tests (SQL files, config files, YAML files, JSON files).
 
 ### SQL CHECK constraint regex pattern
@@ -156,7 +156,7 @@ Guard with:
 The negative check catches the exact transcription error where doubled was
 forgotten and single was used instead.
 
-### LDIF structural parsing (established in spec_0/test_chunk_4_keycloak_ldap.py)
+### LDIF structural parsing (established in tests/infrastructure/test_openldap_ldif.py)
 
 `python-ldap` / `ldif` package is NOT installed in dev venv. Parse LDIF with
 plain string/line operations. Key patterns:
@@ -187,7 +187,7 @@ plain string/line operations. Key patterns:
    `assert FILE.exists(), f"File missing: {FILE}"` inside each fixture rather
    than a module-scope skip — the chunk 4 pattern reports FAILED (not SKIPPED)
    for all tests when the file is absent, giving the implementer a full picture.
-   (Contrast with chunk 3 pattern using module-scope pytest.skip for cleaner
+   (Contrast with the postgres_init_sql pattern using module-scope pytest.skip for cleaner
    signal — both approaches are valid; choose based on test signal preference.)
 
 ### JSON realm file: locate client by clientId, not array index

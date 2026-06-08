@@ -37,7 +37,30 @@ Before writing ANY tests, read these files (stop and ask if a referenced spec is
 
 ## TEST STANDARDS
 
-**File organization:** `tests/` mirroring source structure. Naming: `test_[function]_[scenario]_[expected_result]`.
+**File & directory organization — conventions are permanent, build provenance is not:**
+
+- **Name files by subject under test, never by build provenance.** A test filename must contain
+  NO chunk number, spec number, iteration, or pipeline-run label (never `test_chunk6_*`,
+  `test_spec2_*`, `test_remediation_*`). Name by the source module or behavior:
+  `test_publisher.py`, `test_ldap_cache.py`, `test_health.py`.
+- **One naming style:** `test_<subject>.py`, lowercase, underscore-separated. Never mix
+  separators (e.g. `chunk6_` vs `chunk_3_`).
+- **Directory = what is tested, never when/how it was built.** Mirror the source tree:
+  `tests/services/<service>/`, `tests/shared/`, `tests/infrastructure/` (postgres/redis/keycloak/
+  ldap/compose config), `tests/repo/` (root scaffold, doc-mirror parity). Never create a directory
+  named for a spec, chunk, or pipeline run (no `tests/spec_0/`). Service test directories use
+  valid Python identifiers — underscores, not hyphens (`tests/services/event_ingestion/`), even
+  though the production service dir stays hyphenated.
+- **One component → one test file. Append, don't fragment.** If a file already covers the
+  component/topic, add to it; do not spawn a parallel file per run. Conversely, a file that
+  tests two distinct components (e.g. postgres init.sql AND redis.conf) should be split.
+- **Test & class names describe behavior, never pipeline vocabulary.** No "chunk", "remediation",
+  "iteration", or bug-letter labels (A/B/C…) in class names, test names, or docstrings. Keep
+  spec-section citations in docstrings where they aid traceability ("Spec §5.5"). Function names
+  stay `test_<function>_<scenario>_<expected_result>`.
+- **Committed headers describe coverage, not the authoring moment.** Before a file is committed,
+  remove TDD-state artifacts: no "NOT YET CREATED", no "ALL tests MUST fail", no "MUST FAIL until
+  implemented". The header states what the file verifies, full stop.
 
 **Design rules:**
 - One behavior per test (no "and" in names — split it)

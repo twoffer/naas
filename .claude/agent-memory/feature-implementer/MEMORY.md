@@ -11,7 +11,7 @@
 - [patterns_utc_timestamp_defense.md](patterns_utc_timestamp_defense.md) — Three-layer UTC pin: Pydantic validator + DateTime(timezone=True) ORM + engine connect_args. Events table only; other tables stay TIMESTAMP.
 
 ## Patterns
-- [patterns_service_test_isolation.md](patterns_service_test_isolation.md) — Per-service conftest.py required to isolate app.* sys.modules when multiple service test dirs share same-named test files; also update spec_0 IMPLEMENTED_APP_SERVICES registry
+- [patterns_service_test_isolation.md](patterns_service_test_isolation.md) — Per-service conftest.py required to isolate app.* sys.modules across services (importlib + underscored test dirs handle same-basename collisions; no root conftest); also update IMPLEMENTED_APP_SERVICES registry in tests/repo + tests/infrastructure
 - [patterns_fastapi_oauth2_redirect.md](patterns_fastapi_oauth2_redirect.md) — Set swagger_ui_oauth2_redirect_url=None on FastAPI() to suppress hidden /docs/oauth2-redirect route that breaks chunk-1 scope boundary tests
 
 ## Patterns

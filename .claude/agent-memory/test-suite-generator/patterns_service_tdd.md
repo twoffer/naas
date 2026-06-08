@@ -71,35 +71,33 @@ to catch all specifier variants (e.g., `sqlalchemy==`, `sqlalchemy>=`, `sqlalche
 ## Pre-existing files that legitimately pass in TDD state
 
 Infrastructure services (postgres, redis, keycloak, openldap) already exist in
-docker-compose.yml at Spec 0. Tests asserting their presence correctly pass before
-Chunk 1 implementation — this is documented and acceptable as long as the suite
-overall has the bulk of its tests failing. Note in the test docstring: 
+docker-compose.yml before application services are implemented. Tests asserting their
+presence correctly pass before the first application service is implemented — this is
+documented and acceptable as long as the suite overall has the bulk of its tests failing.
+Note in the test docstring:
 "Tests that assert pre-existing state may pass before implementation — intentional."
 
-## Spec 1 Chunk 1 test file layout
+## event-ingestion service test files
 
-- `tests/shared/test_chunk1_orm_mapping.py` — Base/EventORM import, tablename,
+- `tests/shared/test_orm_mapping.py` — Base/EventORM import, tablename,
   column set (exact 13 columns), INET/JSONB types, nullability, no create_all
-- `tests/services/event-ingestion/test_chunk1_app_skeleton.py` — app.main import,
+- `tests/services/event_ingestion/test_app_skeleton.py` — app.main import,
   FastAPI instance, /health 200, service/status fields, HealthResponse validation
-- `tests/services/event-ingestion/test_chunk1_packaging.py` — requirements.txt
+- `tests/services/event_ingestion/test_packaging.py` — requirements.txt
   (fastapi+uvicorn present; sqlalchemy/asyncpg/redis absent), Dockerfile (EXPOSE 8001,
   COPY order, -e install, uvicorn CMD), .dockerignore (5 required entries),
   docker-compose.yml (event-ingestion entry with build/env_file/ports/depends_on/healthcheck)
-
-## Spec 1 Chunk 2 test file layout
-
-- `tests/services/event-ingestion/test_chunk2_ports.py` — Protocol import, typing.Protocol
+- `tests/services/event_ingestion/test_ports.py` — Protocol import, typing.Protocol
   MRO check, async method presence on EventRepository (persist/persist_many) and EventPublisher
   (publish)
-- `tests/services/event-ingestion/test_chunk2_schemas.py` — IngestAccepted/BulkIngestAccepted
+- `tests/services/event_ingestion/test_schemas.py` — IngestAccepted/BulkIngestAccepted
   import, Literal["accepted"] default, Pydantic BaseModel check, model_dump key presence,
   ORM isolation assertions (no EventORM/Base in app.schemas)
-- `tests/services/event-ingestion/test_chunk2_service.py` — IngestionService with FakeRepo /
+- `tests/services/event_ingestion/test_service.py` — IngestionService with FakeRepo /
   FakePublisher sharing a call_log list for ordering assertions; persist-before-publish order;
   publisher exception swallowing; logger.error called with event_id= kwarg; ingest_many
   best-effort publish (all 3 attempted even if all raise)
-- `tests/services/event-ingestion/test_chunk2_adapters.py` — _to_orm mapping (direct via
+- `tests/services/event_ingestion/test_adapters.py` — _to_orm mapping (direct via
   class/module attribute or fallback via session.add() observation); session.add+commit for
   persist; session.add_all+single commit for persist_many; publish_to_stream patched at
   app.adapters.publish_to_stream; id is a string in the published payload
@@ -116,24 +114,24 @@ Use `asyncio.get_event_loop().run_until_complete(coroutine)` for calling async s
 methods from sync test classes. Avoid pytest-asyncio for chunk 2 service tests — sync
 test classes are simpler and avoid loop scope configuration warnings.
 
-## Spec 2 Chunk 1 test file layout
+## identity-normalization service test files
 
-- `tests/services/identity-normalization/test_chunk1_app_skeleton.py` — app.main import,
-  FastAPI instance, /health route registered, ONLY /health route in chunk 1 (no extras)
-- `tests/services/identity-normalization/test_chunk1_ports.py` — ports.py Protocol imports,
+- `tests/services/identity_normalization/test_app_skeleton.py` — app.main import,
+  FastAPI instance, /health route registered, ONLY /health route initially (no extras)
+- `tests/services/identity_normalization/test_ports.py` — ports.py Protocol imports,
   @runtime_checkable typing.Protocol check, method signatures: ProtocolAdapter.extract,
   LdapEnricher.extract + async enrich (correlation_field + lookup_value params),
   NormalizationRepository.async write (event_id + normalized params),
   EventPublisher.async publish_normalized (record + normalized params)
-- `tests/services/identity-normalization/test_chunk1_health.py` — /health handler with
+- `tests/services/identity_normalization/test_health.py` — /health handler with
   real PG+Redis probing; all three states (healthy/degraded/unhealthy); service field
   must be "identity-normalization" (not "event-ingestion"); same patch pattern as
-  event-ingestion test_chunk3_health.py
-- `tests/services/identity-normalization/test_chunk1_packaging.py` — requirements.txt
+  event-ingestion test_health.py
+- `tests/services/identity_normalization/test_packaging.py` — requirements.txt
   (fastapi+uvicorn+python-ldap+pyyaml present; sqlalchemy/asyncpg/redis absent),
   Dockerfile (EXPOSE 8002, COPY order, -e install, uvicorn CMD port 8002,
   gcc+libldap2-dev+libsasl2-dev via apt-get BEFORE pip install)
-- `tests/services/identity-normalization/test_chunk1_compose.py` — identity-normalization
+- `tests/services/identity_normalization/test_compose.py` — identity-normalization
   compose entry (build/env_file/port 8002/depends_on postgres+redis+openldap+condition,
   config bind-mount read-only, healthcheck port 8002); existing services preservation
 

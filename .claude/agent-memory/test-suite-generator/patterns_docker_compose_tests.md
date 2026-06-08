@@ -1,14 +1,13 @@
 ---
 name: patterns-docker-compose-tests
-description: Patterns for writing static docker-compose.yml TDD tests in NAAS spec_0 — PyYAML importorskip, docker compose config subprocess skip guard, bind-mount helper supporting short and long syntax
+description: Patterns for writing static docker-compose.yml tests in NAAS — PyYAML importorskip, docker compose config subprocess skip guard, bind-mount helper supporting short and long syntax
 metadata:
   type: project
 ---
 
 ## PyYAML Availability
 
-PyYAML is NOT installed by default in the NAAS .venv. It was added as a transitive dep
-during chunk 5 test authoring (`pip install pyyaml`, now at 6.0.3). Always guard
+PyYAML is NOT installed by default in the NAAS .venv. Always guard
 YAML-parse tests with `pytest.importorskip("yaml")` for portability.
 
 ## docker compose config subprocess test pattern
@@ -89,8 +88,8 @@ automatically stops flagging an implemented service because it derives from
 
 **When generating/refreshing tests after a new spec lands, you MUST add that
 spec's service name to `IMPLEMENTED_APP_SERVICES`** in
-`test_chunk_5_docker_compose.py` (and the mirror set in
-`test_chunk_1_root_scaffold.py`).
+`tests/infrastructure/test_docker_compose.py` (and the mirror set in
+`tests/repo/test_root_scaffold.py`).
 
 **General rule:** never write a forward-looking "services == EXACTLY {…}" guard
 without a maintained allow-set escape hatch, or it false-fails on every
@@ -114,21 +113,12 @@ PRIOR chunks. These tests PASS before docker-compose.yml exists — this is inte
 The overall suite still fails because compose-dependent tests fail/error.
 Documented inline with a clear NOTE comment.
 
-## Test counts for chunk 5
+## TDD initial run pattern for docker-compose tests
 
-46 tests total:
-- 3 file existence/parseability tests
-- 3 top-level structure tests
-- 1 + 9 service set tests (1 exact-set + 9 parametrized forbidden)
-- 5 postgres tests
-- 4 redis tests
-- 6 keycloak tests
-- 4 openldap tests
-- 2 network tests
-- 1 + 4 volume tests (1 aggregate + 4 parametrized)
-- 4 bind-mount source file existence tests (parametrized)
+When docker-compose.yml does not yet exist:
+- Existence / parse / config-validation tests: FAILED
+- Bind-mount source file existence tests (asserting files from prior specs): PASSED (intentional)
+- All fixture-dependent tests: ERROR (blocked by missing compose file)
 
-TDD run result: 3 failed, 4 passed, 39 errors
-- 4 PASSED = bind-mount source file existence tests (files from prior chunks exist)
-- 3 FAILED = compose file existence, YAML parse, docker compose config tests
-- 39 ERRORS = all fixture-dependent tests blocked by missing compose file
+This pattern is correct TDD behavior. Document the PASSED count inline so the TDD
+verification step does not flag them as invalid pre-implementation passes.
