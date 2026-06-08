@@ -287,6 +287,8 @@ class TestLifespanLaunchesConsumerLoop:
             loop_started[0] = True
             # Immediately return (we don't want infinite loop in tests)
 
+        mock_loop_holder = [None]
+
         async def _run_startup():
             with (
                 patch(
@@ -299,20 +301,25 @@ class TestLifespanLaunchesConsumerLoop:
             ):
                 async with _main.lifespan(FastAPI()):
                     pass  # yield point — consumer task already created
-                return mock_loop
+                mock_loop_holder[0] = mock_loop
 
         _run(_run_startup())
 
-        # Either the loop was called directly or as a task
-        # We check that run_consumer_loop was invoked (directly or via asyncio.create_task)
-        # The loop_started flag handles the direct-call case.
-        # For task-based: the mock is called when the task runs.
-        # At minimum, the mock must have been called or scheduled.
-        # We use a broader assertion: the lifespan must have called run_consumer_loop
-        # in some form during startup. Implementation detail: it may be create_task(run_consumer_loop(...))
-        # or just awaiting it (but await would block, so it should be create_task).
-        # We verify this by checking the mock was called OR a task was created.
-        # If the implementation uses asyncio.create_task, the mock is called within the task.
+        # The lifespan must launch run_consumer_loop via asyncio.create_task.
+        # With create_task, the mock coroutine runs (and sets loop_started=True)
+        # when the event loop processes the scheduled task during the lifespan body.
+        # Either the mock was called (create_task path, where task ran during lifespan),
+        # or the mock was scheduled (verified by call_count on mock_loop_holder).
+        mock_loop = mock_loop_holder[0]
+        assert mock_loop is not None, (
+            "run_consumer_loop mock was not captured — ensure the lifespan patch is valid"
+        )
+        assert mock_loop.called or loop_started[0], (
+            "run_consumer_loop must be called/scheduled during lifespan startup. "
+            "The lifespan must launch it as a background task (asyncio.create_task) "
+            "so it runs concurrently without blocking the lifespan yield. "
+            f"mock.called={mock_loop.called}, loop_started={loop_started[0]}"
+        )
 
     def test_lifespan_imports_run_consumer_loop(self):
         """app.main must import (or reference) run_consumer_loop for the lifespan to wire it."""
@@ -341,10 +348,15 @@ class TestLifespanLaunchesConsumerLoop:
             except Exception:
                 pass  # may fail if other deps are missing, but we want to confirm the patch is valid
 
-        # The patch path "app.main.run_consumer_loop" must be valid
-        # If it weren't, patch() would raise AttributeError or fail silently.
-        # The test itself passing confirms the attribute exists.
-        assert True  # reached here = patch path is valid
+        # The patch path "app.main.run_consumer_loop" must be valid.
+        # If it weren't, patch() would raise AttributeError during context entry.
+        # Reaching this point confirms the attribute exists on app.main.
+        # Additionally verify that the attribute is callable (it must be the function).
+        assert hasattr(_main, "run_consumer_loop"), (
+            "app.main must expose 'run_consumer_loop' at module level "
+            "(imported from app.consumer) so the lifespan can reference and launch it. "
+            "patch('app.main.run_consumer_loop', ...) requires this attribute to exist."
+        )
 
 
 # ===========================================================================

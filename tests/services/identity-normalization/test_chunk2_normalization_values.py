@@ -947,3 +947,208 @@ class TestCrossProtocolCanonicalIdentity:
             f"OIDC 'E' normalizes to {oidc_result!r} and LDAP 'FTE' normalizes "
             f"to {ldap_result!r}. Both must equal 'FTE'."
         )
+
+
+# ===========================================================================
+# CLASS 8 — normalize_department_value wrapper (adapter refactor)
+# ===========================================================================
+
+
+class TestNormalizeDepartmentValue:
+    """normalize_department_value(value) -> str | None.
+
+    This is a new wrapper introduced by the adapter refactor.  It delegates to
+    the existing normalize_department(value) -> (str|None, bool) and returns
+    ONLY the string component (the was_mapped flag is dropped).
+
+    WHY this wrapper exists:
+      FieldRule transforms are defined as Callable[..., object].  The adapters
+      use a single function per field; they cannot unpack a tuple return in a
+      lambda without the 'was_mapped' flag leaking into the result dict.
+      normalize_department_value is the adapter-facing interface; the resolution
+      layer continues to call normalize_department directly when it needs the
+      confidence-penalty flag.
+
+    Contract:
+      normalize_department_value('eng')          == 'Engineering'   (canonical hit)
+      normalize_department_value('astrophysics') == 'Astrophysics'  (title-case fallback)
+      normalize_department_value(None)           is None            (None passthrough)
+      normalize_department_value(123)            is None            (non-str → None)
+      NOT a tuple — must return str | None, never (str, bool).
+
+    TDD state:
+      normalize_department_value does NOT exist in normalization_values.py yet.
+      These tests MUST FAIL with AttributeError until the implementer adds it.
+    """
+
+    def test_normalize_department_value_is_importable(self) -> None:
+        """from app.normalization_values import normalize_department_value must not raise.
+
+        WHY: All three adapters import this at module level.  An ImportError here
+        shuts down the service.
+        """
+        from app.normalization_values import normalize_department_value  # noqa: F401
+
+    def test_canonical_hit_returns_string(self) -> None:
+        """normalize_department_value('eng') == 'Engineering'.
+
+        WHY: This is the happy path — a recognized alias maps to its canonical
+        department string.  The adapter stores this string directly in the result
+        dict for the NormalizationService.
+        """
+        from app.normalization_values import normalize_department_value
+
+        result = normalize_department_value("eng")
+
+        assert result == "Engineering", (
+            f"normalize_department_value('eng') must return 'Engineering', got {result!r}. "
+            "It delegates to normalize_department('eng') which returns ('Engineering', True) "
+            "and the wrapper returns only the first element."
+        )
+
+    def test_title_case_fallback_on_unrecognized_alias(self) -> None:
+        """normalize_department_value('Unknown Dept') == 'Unknown Dept' (title-cased fallback).
+
+        WHY: normalize_department for an unrecognized str returns (value.title(), False).
+        The wrapper must return the title-cased string — NOT None and NOT the tuple.
+        Dropping unmapped departments to None would silently discard real department
+        information from IdPs that use non-standard names.
+        """
+        from app.normalization_values import normalize_department_value
+
+        result = normalize_department_value("Unknown Dept")
+
+        assert result == "Unknown Dept", (
+            f"normalize_department_value('Unknown Dept') must return 'Unknown Dept' "
+            f"(title-case fallback preserved), got {result!r}. "
+            "The wrapper must return the fallback string for unrecognized aliases, not None."
+        )
+
+    def test_unrecognized_lowercase_is_titlecased(self) -> None:
+        """normalize_department_value('astrophysics') == 'Astrophysics'.
+
+        WHY: Verifies title-casing is applied to the unrecognized value before return.
+        """
+        from app.normalization_values import normalize_department_value
+
+        result = normalize_department_value("astrophysics")
+
+        assert result == "Astrophysics", (
+            f"normalize_department_value('astrophysics') must return 'Astrophysics', "
+            f"got {result!r}."
+        )
+
+    def test_none_input_returns_none(self) -> None:
+        """normalize_department_value(None) is None.
+
+        WHY: apply_field_rules calls the transform with raw_attributes.get(key),
+        which returns None when the key is absent.  The wrapper must handle None
+        gracefully and return None so the department field is absent/None in the
+        result dict (not a string like 'None').
+        """
+        from app.normalization_values import normalize_department_value
+
+        result = normalize_department_value(None)
+
+        assert result is None, (
+            f"normalize_department_value(None) must return None, got {result!r}. "
+            "A None input means the department key was absent from raw_attributes."
+        )
+
+    def test_non_str_int_returns_none(self) -> None:
+        """normalize_department_value(123) is None.
+
+        WHY: normalize_department(123) returns (None, False) per the non-str guard
+        (Remediation A).  The wrapper must propagate the None, not the tuple.
+        """
+        from app.normalization_values import normalize_department_value
+
+        result = normalize_department_value(123)
+
+        assert result is None, (
+            f"normalize_department_value(123) must return None for non-str int input, "
+            f"got {result!r}. "
+            "Non-str inputs are guarded by normalize_department; wrapper propagates None."
+        )
+
+    def test_non_str_list_returns_none(self) -> None:
+        """normalize_department_value(['eng']) is None (list is not str)."""
+        from app.normalization_values import normalize_department_value
+
+        result = normalize_department_value(["eng"])
+
+        assert result is None, (
+            f"normalize_department_value(['eng']) must return None for list input, "
+            f"got {result!r}."
+        )
+
+    def test_return_value_is_never_a_tuple(self) -> None:
+        """normalize_department_value must NEVER return a tuple.
+
+        WHY: normalize_department returns (str, bool).  If the wrapper accidentally
+        returns the tuple directly (e.g., by returning normalize_department(value)
+        instead of normalize_department(value)[0]), the result dict entry would be
+        ('Engineering', True) — a non-str value that causes NormalizedAttributes
+        Pydantic validation to fail with a type error on the 'department' field.
+
+        This is the critical correctness invariant of the wrapper.
+        """
+        from app.normalization_values import normalize_department_value
+
+        test_inputs = ["eng", "astrophysics", "fin", "hr", "sales", "mktg"]
+        for inp in test_inputs:
+            result = normalize_department_value(inp)
+            assert not isinstance(result, tuple), (
+                f"normalize_department_value({inp!r}) returned a tuple {result!r}. "
+                "The wrapper must return str | None, never the (str, bool) tuple from "
+                "normalize_department(). "
+                "Likely bug: returning normalize_department(value) directly."
+            )
+
+    def test_return_type_is_str_or_none(self) -> None:
+        """normalize_department_value always returns str or None, never other types.
+
+        WHY: NormalizedAttributes.department is typed as str | None. Any other return
+        type (e.g., tuple, int) would cause Pydantic ValidationError at model
+        construction time.
+        """
+        from app.normalization_values import normalize_department_value
+
+        test_inputs = [
+            "eng", "ENGINEERING", " Engineering ", "r&d",
+            "fin", "hr", "it", "sales", "mktg",
+            "astrophysics", "quantum computing",
+            None, 123, ["eng"], {"dept": "eng"},
+        ]
+        for inp in test_inputs:
+            result = normalize_department_value(inp)
+            assert result is None or isinstance(result, str), (
+                f"normalize_department_value({inp!r}) must return str or None. "
+                f"Got {type(result).__name__!r}: {result!r}."
+            )
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("eng",            "Engineering"),
+        ("ENGINEERING",    "Engineering"),
+        ("r&d",            "Engineering"),
+        ("fin",            "Finance"),
+        ("hr",             "Human Resources"),
+        ("it",             "Information Technology"),
+        ("sales",          "Sales"),
+        ("mktg",           "Marketing"),
+        ("astrophysics",   "Astrophysics"),
+        ("Unknown Dept",   "Unknown Dept"),
+        (None,             None),
+        (123,              None),
+    ])
+    def test_normalize_department_value_parametrized(
+        self, raw: object, expected
+    ) -> None:
+        """Parametrized contract verification for normalize_department_value."""
+        from app.normalization_values import normalize_department_value
+
+        result = normalize_department_value(raw)
+
+        assert result == expected, (
+            f"normalize_department_value({raw!r}) expected {expected!r}, got {result!r}."
+        )

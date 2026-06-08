@@ -16,6 +16,11 @@
 - [Dual-write order & created_at trap](spec1_dual_write_patterns.md) — PG commit first, publish after; catch-and-log publish failures; leave DB-default/downstream columns unset in the ORM.
 - [EventORM mirrors init.sql](spec1_orm_matches_init_sql.md) — infra owns the events DDL; ORM is a mapping, never create_all/migrations.
 
+## Spec 2 Patterns (Identity Normalization)
+
+- [Spec 2 decomposition gotchas](spec2_identity_normalization.md) — bootstrap.ldif has no memberOf (live groups empty); LDAP depts partly outside DEPARTMENT_CANONICAL; lockstep shared+SPEC_0 chunk; python-ldap build deps; no LDAP_URI/BIND env; asyncio.to_thread; three-state negative cache; resolution/service boundary; 6-chunk layout.
+- [Spec 2 normalization internals](spec2_normalization_internals.md) — adapters discard was_mapped (service re-derives from string); dept non-str must short-circuit to (None,False) not title-case; shared/pyproject.toml already exists (pytest ini goes at root only); async tests use manual _run() not pytest.mark.asyncio.
+
 ## Chunking Strategy
 
 - Chunk sizing: ~200-500 lines new code, 30-45 min agent work

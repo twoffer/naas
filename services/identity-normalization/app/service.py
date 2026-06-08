@@ -30,20 +30,6 @@ from naas_shared.models import (
 
 _logger = get_logger(__name__)
 
-# Outcome codes that signal a match (attrs dict will be non-None).
-_MATCH_OUTCOMES: frozenset[str] = frozenset({"ldap_match", "cache_hit_positive"})
-
-# Outcome-to-skip-reason mapping for non-match outcomes.
-_OUTCOME_TO_SKIP_REASON: dict[str, str] = {
-    "ldap_no_match": "no_ldap_match",
-    "cache_hit_negative": "no_ldap_match",
-    "ldap_timeout": "ldap_timeout",
-    "ldap_connection_error": "ldap_connection_error",
-    "ldap_search_error": "ldap_search_error",
-    "ldap_unexpected_error": "ldap_search_error",
-    "unmappable_field": "ldap_search_error",
-}
-
 
 class NormalizationService:
     """Coordinates adapter extraction, LDAP enrichment, and attribute resolution.

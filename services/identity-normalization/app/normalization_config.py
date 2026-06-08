@@ -8,7 +8,7 @@ Invalid config aborts startup with a descriptive error.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal, Optional
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field
@@ -16,6 +16,12 @@ from pydantic import BaseModel, Field
 from app.normalization_values import UNIFIED_TO_LDAP
 
 _VALID_UNIFIED_FIELDS: frozenset[str] = frozenset(UNIFIED_TO_LDAP.keys())
+
+# Conservative floor weight returned when an unknown source (not present in
+# defaults.source_weights) is queried. Set below the minimum typical default (0.6)
+# so that undeclared protocols are treated with the least authority — they are
+# weighted lower than any explicitly-configured source.
+_UNKNOWN_SOURCE_WEIGHT_FLOOR: float = 0.5
 
 
 # ---------------------------------------------------------------------------
@@ -26,9 +32,9 @@ _VALID_UNIFIED_FIELDS: frozenset[str] = frozenset(UNIFIED_TO_LDAP.keys())
 class AttributeConfig(BaseModel):
     """Per-attribute authority weight and resolution configuration."""
 
-    priority: Optional[list[str]] = None
-    weights: Optional[dict[str, float]] = None
-    merge_strategy: Optional[Literal["union", "intersection", "priority"]] = None
+    priority: list[str] | None = None
+    weights: dict[str, float] | None = None
+    merge_strategy: Literal["union", "intersection", "priority"] | None = None
     rationale: str = ""
 
 
@@ -46,7 +52,7 @@ class LdapEnrichmentConfig(BaseModel):
     timeout_ms: int
     on_failure: str
     cache_ttl_seconds: int = Field(gt=0)
-    enrich_attributes: Optional[list[str]] = None
+    enrich_attributes: list[str] | None = None
 
 
 class EnrichmentSources(BaseModel):
@@ -87,7 +93,7 @@ class NormalizationConfig(BaseModel):
         if attr_cfg is not None and attr_cfg.weights is not None:
             if source in attr_cfg.weights:
                 return attr_cfg.weights[source]
-        return self.defaults.source_weights[source]
+        return self.defaults.source_weights.get(source, _UNKNOWN_SOURCE_WEIGHT_FLOOR)
 
     def priority_for(self, attribute: str) -> list[str]:
         """Return the priority-ordered source list for an attribute.

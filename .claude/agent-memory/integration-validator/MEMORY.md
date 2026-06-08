@@ -6,3 +6,6 @@
 
 ## Failure Modes
 - [failure-modes.md](failure-modes.md) — Spec 1: tz-aware timestamp 500s — RESOLVED via TIMESTAMPTZ fix (fresh-volume re-validation caveat); plus what-works verification list
+
+## Validation Recipes / Results
+- [normalization-validation.md](normalization-validation.md) — live inject+trace recipe (redis host="redis" gotcha) + adapter rule-table refactor regression PASS (2026-06-07)

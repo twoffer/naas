@@ -373,7 +373,7 @@ class TestConfigAndScriptsDirs:
         exactly the same kind of spec_0 maintenance applied to IMPLEMENTED_APP_SERVICES
         when each new spec lands.
         """
-        import yaml  # stdlib-free import guarded here to avoid module-level dep
+        import yaml  # lazy function-scoped import: yaml is third-party; deferred to avoid module-level dep
 
         normalization_yaml = REPO_ROOT / "config" / "normalization.yaml"
         assert normalization_yaml.exists(), (

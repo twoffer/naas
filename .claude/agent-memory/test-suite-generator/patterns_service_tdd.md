@@ -116,6 +116,57 @@ Use `asyncio.get_event_loop().run_until_complete(coroutine)` for calling async s
 methods from sync test classes. Avoid pytest-asyncio for chunk 2 service tests — sync
 test classes are simpler and avoid loop scope configuration warnings.
 
+## Spec 2 Chunk 1 test file layout
+
+- `tests/services/identity-normalization/test_chunk1_app_skeleton.py` — app.main import,
+  FastAPI instance, /health route registered, ONLY /health route in chunk 1 (no extras)
+- `tests/services/identity-normalization/test_chunk1_ports.py` — ports.py Protocol imports,
+  @runtime_checkable typing.Protocol check, method signatures: ProtocolAdapter.extract,
+  LdapEnricher.extract + async enrich (correlation_field + lookup_value params),
+  NormalizationRepository.async write (event_id + normalized params),
+  EventPublisher.async publish_normalized (record + normalized params)
+- `tests/services/identity-normalization/test_chunk1_health.py` — /health handler with
+  real PG+Redis probing; all three states (healthy/degraded/unhealthy); service field
+  must be "identity-normalization" (not "event-ingestion"); same patch pattern as
+  event-ingestion test_chunk3_health.py
+- `tests/services/identity-normalization/test_chunk1_packaging.py` — requirements.txt
+  (fastapi+uvicorn+python-ldap+pyyaml present; sqlalchemy/asyncpg/redis absent),
+  Dockerfile (EXPOSE 8002, COPY order, -e install, uvicorn CMD port 8002,
+  gcc+libldap2-dev+libsasl2-dev via apt-get BEFORE pip install)
+- `tests/services/identity-normalization/test_chunk1_compose.py` — identity-normalization
+  compose entry (build/env_file/port 8002/depends_on postgres+redis+openldap+condition,
+  config bind-mount read-only, healthcheck port 8002); existing services preservation
+
+## python-ldap system deps pattern (Spec 2)
+
+python-ldap is a C extension requiring gcc, libldap2-dev, and libsasl2-dev.
+Test that all three are present in the Dockerfile AND that the apt-get install
+line precedes the pip install line (line number ordering). Without the ordering
+check, a Dockerfile that has the deps listed but after pip install would still fail the build.
+
+## openldap depends_on (identity-normalization specific)
+
+Unlike event-ingestion (postgres + redis only), identity-normalization must also
+depend on openldap with condition: service_healthy. Test this as a separate test case
+with a clear WHY — it's easy for implementers to copy event-ingestion's depends_on
+and omit the openldap dependency.
+
+## config bind-mount read-only (identity-normalization specific)
+
+The ./config:/app/config mount must be read-only. Accept both short syntax
+("./config:/app/config:ro") and long object syntax (read_only: true). The read-only
+check requires finding the specific config mount first, then inspecting its flags.
+
+## Pre-existing scope-preservation tests passing in TDD state
+
+The `test_existing_service_still_present` parametrized tests (postgres, redis, keycloak,
+openldap, event-ingestion) CORRECTLY PASS before the identity-normalization entry is added —
+they assert pre-existing state. This is intentional and follows the same pattern as
+event-ingestion's TestDockerComposeInfrastructureIntact. Document this explicitly so
+the TDD verification step does not flag these as invalid.
+Total expected passes before implementation: 5 (the 5 service-presence checks).
+Total expected failures: 76.
+
 ## _to_orm fallback pattern
 
 When testing _to_orm mapping, try class attribute first (PostgresEventRepository._to_orm),

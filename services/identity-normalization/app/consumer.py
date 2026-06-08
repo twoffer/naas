@@ -24,6 +24,8 @@ import asyncio
 import json
 import socket
 
+import pydantic
+
 import naas_shared.redis_client as _redis_mod
 from naas_shared.constants import GROUP_NORMALIZATION, STREAM_LOGIN_EVENTS
 from naas_shared.logging import get_logger
@@ -76,13 +78,26 @@ async def run_consumer_loop(
     while True:
         # XREADGROUP: block up to 2 s, read up to 10 new messages per iteration.
         # ">" means: deliver only messages not yet delivered to any consumer.
-        batches = await redis.xreadgroup(
-            GROUP_NORMALIZATION,
-            consumer_name,
-            streams={STREAM_LOGIN_EVENTS: ">"},
-            count=10,
-            block=2000,
-        )
+        # Transient network errors (e.g., a momentary Redis blip) are caught here
+        # so a single I/O failure does not kill the consumer process. CancelledError
+        # is NOT caught — it signals intentional task cancellation on shutdown and
+        # must propagate to allow clean termination.
+        try:
+            batches = await redis.xreadgroup(
+                GROUP_NORMALIZATION,
+                consumer_name,
+                streams={STREAM_LOGIN_EVENTS: ">"},
+                count=10,
+                block=2000,
+            )
+        except Exception as xread_exc:
+            log.warning(
+                "xreadgroup_transient_error",
+                error=str(xread_exc)[:200],
+                error_type=type(xread_exc).__name__,
+            )
+            await asyncio.sleep(_EMPTY_BATCH_SLEEP_S)
+            continue
 
         if not batches:
             # Yield real wall-clock time so a non-blocking client (e.g. an
@@ -152,10 +167,22 @@ async def _process_message(
         )
 
     except Exception as exc:
-        log.error(
-            "message_processing_failed",
-            msg_id=msg_id,
-            error=str(exc),
-            error_type=type(exc).__name__,
-        )
+        # For Pydantic ValidationErrors: log field locations only, NOT the raw exception
+        # string. str(ValidationError) embeds input_value for each failing field, which
+        # can contain PII (e.g., an email address that arrived in a UUID field).
+        # For all other exceptions: truncate the error string to bound PII exposure.
+        if isinstance(exc, pydantic.ValidationError):
+            log.error(
+                "message_processing_failed",
+                msg_id=msg_id,
+                error_locations=[e["loc"] for e in exc.errors()],
+                error_type=type(exc).__name__,
+            )
+        else:
+            log.error(
+                "message_processing_failed",
+                msg_id=msg_id,
+                error=str(exc)[:200],
+                error_type=type(exc).__name__,
+            )
         # Do NOT XACK — message stays pending for redelivery

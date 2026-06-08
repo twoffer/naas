@@ -646,3 +646,147 @@ class TestLdapAdapterMissingKeys:
             f"Got display_name={display_name_val!r}. "
             "Spec §5.2: sn has no entry in the mapping table."
         )
+
+
+# ===========================================================================
+# CLASS 8 — Bare-string memberOf behavior (adapter refactor, intentional change)
+# ===========================================================================
+
+
+class TestLdapAdapterBareStringMemberOf:
+    """LdapAdapter.extract must yield groups=[] when 'memberOf' is a bare string.
+
+    This is the LDAP analog of the OIDC/SAML bare-string groups behavior change
+    introduced by the adapter refactor.  The new `reduce_member_of` transform
+    (introduced in ldap.py as part of the refactor) calls coerce_str_list
+    internally to obtain the list of DN strings before applying _reduce_dn_to_group_name.
+
+    Since coerce_str_list applies strict list-only semantics, a bare string memberOf
+    value (not a list) returns [] from coerce_str_list, and therefore reduce_member_of
+    returns [] with no DN reduction attempted.
+
+    WHY this matters:
+      In production LDAP directories, memberOf is always a multi-valued attribute
+      returned as a list.  A bare string memberOf would indicate a severely
+      misconfigured LDAP client or an injected test payload.  Silently iterating
+      the string character-by-character would produce a groups list of single chars
+      that pass the isinstance(v, str) filter — meaningless group names that would
+      break policy conditions.  Returning [] is the correct safe fallback.
+
+    Contract distinction from the bare-name passthrough test (CLASS 4):
+      The bare-name test uses memberOf=['engineering'] (a LIST containing a string)
+      — this is a valid list, so coerce_str_list passes it through and
+      _reduce_dn_to_group_name handles the bare name within the list.
+      THIS test uses memberOf='cn=eng,ou=groups,dc=corp,dc=com' (a STRING, not a list)
+      — coerce_str_list returns [] immediately, no DN reduction attempted.
+
+    TDD state:
+      These tests describe the post-refactor behavior.  If the current implementation
+      already produces [] for a bare string memberOf (e.g., because it calls
+      `memberOf or []` which treats a string as truthy then list-wraps it, or uses
+      any other non-list-only path), these tests may already pass or already fail
+      depending on the exact implementation.  The refactor must ensure they pass.
+    """
+
+    def test_bare_string_memberOf_yields_empty_groups(self) -> None:
+        """extract({'memberOf': 'cn=eng,ou=groups,dc=corp,dc=com'}) must yield groups=[].
+
+        WHY: See class docstring.  A bare string memberOf (not a list) must return []
+        rather than attempting DN reduction on individual characters.
+        """
+        from app.adapters.ldap import LdapAdapter
+
+        result = LdapAdapter().extract({
+            "memberOf": "cn=eng,ou=groups,dc=corp,dc=com"
+        })
+
+        groups = result.get("groups", "ABSENT_SENTINEL")
+        assert groups == [], (
+            f"LdapAdapter.extract with memberOf as bare string must yield groups=[], "
+            f"got {groups!r}. "
+            "A non-list memberOf value must produce [] via coerce_str_list strict semantics. "
+            "This is the intentional behavior change from the adapter refactor."
+        )
+
+    def test_bare_string_memberOf_not_iterated_as_chars(self) -> None:
+        """extract({'memberOf': 'engineering'}) must NOT produce chars ['e','n','g',...].
+
+        WHY: Makes the character-iteration failure mode explicitly visible.
+        A naive [v for v in value if isinstance(v, str)] on a string would yield
+        individual characters — each is a str, so each passes the filter.
+        """
+        from app.adapters.ldap import LdapAdapter
+
+        result = LdapAdapter().extract({"memberOf": "engineering"})
+
+        groups = result.get("groups", [])
+        # If groups contains single-char strings from 'engineering', that's the bug
+        single_chars_from_value = [g for g in groups if isinstance(g, str) and len(g) == 1]
+        assert len(single_chars_from_value) == 0, (
+            f"groups={groups!r} contains single-char entries: {single_chars_from_value!r}. "
+            "This indicates character-by-character iteration of the bare string. "
+            "coerce_str_list('engineering') must return [], not list('engineering')."
+        )
+        assert groups == [], (
+            f"extract({{'memberOf': 'engineering'}}) must yield groups=[], got {groups!r}."
+        )
+
+    def test_list_memberOf_still_reduces_dns(self) -> None:
+        """extract({'memberOf': ['cn=eng,ou=groups,dc=corp,dc=com']}) still works.
+
+        WHY: Regression guard — the refactor must not break the normal list-of-DNs
+        path.  A single-element list with a valid DN must still produce ['eng'].
+        """
+        from app.adapters.ldap import LdapAdapter
+
+        result = LdapAdapter().extract({
+            "memberOf": ["cn=eng,ou=groups,dc=corp,dc=com"]
+        })
+
+        groups = result.get("groups", [])
+        assert "eng" in groups, (
+            f"LdapAdapter with list memberOf must still reduce DNs to group names. "
+            f"Expected 'eng' in groups, got {groups!r}. "
+            "The refactor must not regress normal list-of-DNs behavior."
+        )
+
+
+# ===========================================================================
+# CLASS 9 — memberOf list containing non-str elements (robustness)
+# ===========================================================================
+
+
+class TestLdapAdapterMemberOfNonStrElements:
+    """LdapAdapter.extract must silently drop non-str elements in a memberOf list.
+
+    WHY: coerce_str_list filters to only str elements before DN reduction.
+    A mixed list (valid DN + non-str, e.g., an int) must produce groups that
+    contain only the reduced names from the valid str DNs.  Non-str elements
+    must be dropped rather than raising TypeError in _reduce_dn_to_group_name.
+
+    This asserts byte-identical output to the equivalent single-element list,
+    proving the non-str element leaves no trace in the result.
+    """
+
+    def test_list_with_non_str_element_drops_non_str_keeps_valid_dn(self) -> None:
+        """extract({'memberOf': ['cn=engineering,...', 123]}) yields groups=['engineering'].
+
+        The int 123 is not a str, so coerce_str_list filters it out before
+        DN reduction.  The valid DN is reduced to 'engineering' as normal.
+        Result must be byte-identical to extract({'memberOf': ['cn=engineering,...']}).
+        """
+        from app.adapters.ldap import LdapAdapter
+
+        result = LdapAdapter().extract({
+            "memberOf": [
+                "cn=engineering,ou=groups,dc=corp,dc=com",
+                123,
+            ]
+        })
+
+        groups = result.get("groups", [])
+        assert groups == ["engineering"], (
+            f"Expected groups=['engineering'] when memberOf list contains one valid "
+            f"DN and one int (123). Got groups={groups!r}. "
+            "Non-str elements must be silently dropped; the int must leave no trace."
+        )

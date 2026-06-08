@@ -64,13 +64,24 @@ class LdapEnricher(Protocol):
         WHY: Spec §5.3 — python-ldap is synchronous; every blocking LDAP call
         is wrapped in asyncio.to_thread(...) inside the concrete adapter. The
         method itself is declared async so NormalizationService can await it
-        without blocking the event loop. Returns None when no LDAP match is found.
+        without blocking the event loop.
 
         Args:
             correlation_field: The unified schema field used to build the LDAP
                 filter (e.g., "primary_email"). The adapter reverse-maps this to
                 the LDAP attribute name (e.g., "mail").
             lookup_value: The value to search for (e.g., "alice@corp.com").
+
+        Returns:
+            A 2-tuple ``(attrs, outcome)`` where:
+              attrs   — unified attribute dict on a successful match; None on
+                        no-match, error, or negative cache hit.
+              outcome — an outcome code string (e.g., "ldap_match",
+                        "cache_hit_positive", "ldap_no_match", "ldap_timeout",
+                        "ldap_connection_error", "ldap_search_error",
+                        "ldap_unexpected_error", "unmappable_field").
+                        Callers use the outcome code to build the correct
+                        EnrichmentSkipped skip_reason without inspecting attrs.
         """
         ...
 

@@ -23,10 +23,11 @@ Three-layer UTC timestamp pinning pattern used for the `events` table (applied i
 `risk_assessments`, `alerts`) retain `TIMESTAMP` / naive `DateTime` for their `created_at` columns —
 do not change them unless explicitly in scope.
 
-**Related models scope:** `RiskDecision.timestamp`, `AlertMessage.timestamp`, and
-`HealthResponse.timestamp` in `naas_shared/models.py` were explicitly out of scope for this fix.
-`HealthResponse.timestamp` still uses `datetime.utcnow` and will emit a DeprecationWarning — a
-pre-existing issue outside the events-table scope.
+**Related models scope:** `RiskDecision.timestamp` and `AlertMessage.timestamp` in
+`naas_shared/models.py` are required fields with no default (caller supplies the value).
+`HealthResponse.timestamp` now uses `default_factory=lambda: datetime.now(timezone.utc)` —
+no `utcnow` remains anywhere in `models.py` (it was migrated to aware-UTC defaults). The
+earlier note that `HealthResponse` still used `datetime.utcnow` is no longer accurate.
 
 **Pre-existing test failures:** Five Spec 0 tests fail because the event-ingestion service has been
 fully implemented (Spec 1), making those scaffold-phase assertions stale. These are not regressions.

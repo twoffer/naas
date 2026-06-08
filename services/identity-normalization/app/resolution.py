@@ -10,12 +10,11 @@ All functions are deterministic and safe to call from any thread.
 
 from __future__ import annotations
 
-from typing import Any, Union
+from typing import Any
 
 from app.normalization_config import NormalizationConfig
 from naas_shared.models import (
-    EnrichmentApplied,
-    EnrichmentSkipped,
+    EnrichmentMetadata,
     ListMergeResolution,
     NormalizedAttributes,
     PriorityResolution,
@@ -34,8 +33,6 @@ ATTRIBUTE_IMPORTANCE: dict[str, float] = {
 
 # Attributes that carry a (normalized_str, was_mapped) tuple instead of a plain str.
 _DEPT_TUPLE_ATTRS: frozenset[str] = frozenset({"department"})
-
-EnrichmentMetadata = Union[EnrichmentApplied, EnrichmentSkipped]
 
 
 def resolve(
