@@ -541,7 +541,7 @@ class TestNoWasMappedAttributes:
     """
 
     def test_display_name_single_source_always_full_weight(self) -> None:
-        """display_name from ldap → confidence = 0.90, no penalty regardless of value."""
+        """display_name from ldap → confidence = 0.85, no penalty regardless of value."""
         from app.resolution import resolve
         from naas_shared.models import SingleSourceResolution
 
@@ -555,8 +555,8 @@ class TestNoWasMappedAttributes:
 
         detail = result.resolution_details["display_name"]
         assert isinstance(detail, SingleSourceResolution)
-        assert detail.confidence == pytest.approx(0.90), (
-            f"Expected 0.90 for display_name (no penalty path), got {detail.confidence!r}."
+        assert detail.confidence == pytest.approx(0.85), (
+            f"Expected 0.85 for display_name (no penalty path), got {detail.confidence!r}."
         )
 
     def test_primary_email_single_source_always_full_weight(self) -> None:
@@ -579,7 +579,7 @@ class TestNoWasMappedAttributes:
         )
 
     def test_display_name_unanimous_oidc_ldap_no_penalty(self) -> None:
-        """display_name unanimous: confidence = max(0.60, 0.90) = 0.90, no penalty."""
+        """display_name unanimous: confidence = max(0.70, 0.85) = 0.85, no penalty."""
         from app.resolution import resolve
         from naas_shared.models import UnanimousResolution
 
@@ -595,6 +595,6 @@ class TestNoWasMappedAttributes:
 
         detail = result.resolution_details["display_name"]
         assert isinstance(detail, UnanimousResolution)
-        assert detail.confidence == pytest.approx(0.90), (
-            f"Expected 0.90 for unanimous display_name, got {detail.confidence!r}."
+        assert detail.confidence == pytest.approx(0.85), (
+            f"Expected 0.85 for unanimous display_name, got {detail.confidence!r}."
         )

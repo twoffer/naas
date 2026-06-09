@@ -213,9 +213,9 @@ class TestConfidenceExtremes:
     def test_two_attribute_confidence_additive(self) -> None:
         """Two attributes present → confidence = sum of their importance×weight products.
 
-        display_name (oidc, weight=0.60): 0.15 × 0.60 = 0.090
+        display_name (oidc, weight=0.70): 0.15 × 0.70 = 0.105
         primary_email (oidc, weight=0.95): 0.25 × 0.95 = 0.2375
-        total = 0.3275
+        total = 0.3425
         WHY: Additivity of the weighted average is the core formula invariant.
         """
         from app.resolution import resolve
@@ -231,7 +231,7 @@ class TestConfidenceExtremes:
             enrichment=_skip_enrichment(),
         )
 
-        expected = 0.15 * 0.60 + 0.25 * 0.95
+        expected = 0.15 * 0.70 + 0.25 * 0.95
         assert result.normalization_confidence == pytest.approx(expected, rel=1e-4), (
             f"Expected confidence={expected:.4f} for two attributes, "
             f"got {result.normalization_confidence!r}."
@@ -255,8 +255,8 @@ class TestPartialPresenceConfidence:
         """Only present attributes contribute; absent ones are 0.0.
 
         employee_type absent: contributes 0.0 (not 0.25 × some_default_weight).
-        Present attributes: display_name (oidc, 0.60), primary_email (oidc, 0.95).
-        Expected = 0.15×0.60 + 0.25×0.95 + 0.0 + 0.0 + 0.0 = 0.3275.
+        Present attributes: display_name (oidc, 0.70), primary_email (oidc, 0.95).
+        Expected = 0.15×0.70 + 0.25×0.95 + 0.0 + 0.0 + 0.0 = 0.3425.
         """
         from app.resolution import resolve
 
@@ -276,7 +276,7 @@ class TestPartialPresenceConfidence:
             "employee_type must not appear in resolution_details when absent."
         )
 
-        expected = 0.15 * 0.60 + 0.25 * 0.95
+        expected = 0.15 * 0.70 + 0.25 * 0.95
         assert result.normalization_confidence == pytest.approx(expected, rel=1e-4), (
             f"Absent employee_type must contribute 0.0, not boost confidence. "
             f"Expected {expected:.4f}, got {result.normalization_confidence!r}."
@@ -286,11 +286,11 @@ class TestPartialPresenceConfidence:
         """All five attributes from a single oidc source.
 
         Each attribute's confidence = weight_for(attr, 'oidc'):
-          display_name: 0.60,  primary_email: 0.95,  department: 0.70 (mapped)
+          display_name: 0.70,  primary_email: 0.95,  department: 0.70 (mapped)
           employee_type: 0.60,  groups: 0.80 (default)
-        Overall = 0.15×0.60 + 0.25×0.95 + 0.20×0.70 + 0.25×0.60 + 0.15×0.80
-                = 0.090 + 0.2375 + 0.140 + 0.150 + 0.120
-                = 0.7375
+        Overall = 0.15×0.70 + 0.25×0.95 + 0.20×0.70 + 0.25×0.60 + 0.15×0.80
+                = 0.105 + 0.2375 + 0.140 + 0.150 + 0.120
+                = 0.7525
         WHY: The all-single-source baseline for an oidc-only event.
         """
         from app.resolution import resolve
@@ -310,7 +310,7 @@ class TestPartialPresenceConfidence:
         )
 
         expected = (
-            0.15 * 0.60    # display_name oidc
+            0.15 * 0.70    # display_name oidc
             + 0.25 * 0.95  # primary_email oidc
             + 0.20 * 0.70  # department oidc (mapped, no penalty)
             + 0.25 * 0.60  # employee_type oidc
@@ -328,39 +328,34 @@ class TestPartialPresenceConfidence:
 
 
 class TestSpec33ConfidenceExample:
-    """Reproduce the §3.3 normalization_confidence=0.87 example.
+    """Reproduce the §3.3 normalization_confidence example.
 
     §3.3 payload (enriched OIDC event, department conflict):
-      display_name:   unanimous(oidc+ldap) → per_attr_conf = max(0.60, 0.90) = 0.90
+      display_name:   unanimous(oidc+ldap) → per_attr_conf = max(0.70, 0.85) = 0.85
       primary_email:  unanimous(oidc+ldap) → per_attr_conf = max(0.95, 0.65) = 0.95
       department:     priority(ldap wins)  → per_attr_conf = 0.90 × 0.8 = 0.72
       employee_type:  unanimous(oidc+ldap) → per_attr_conf = max(0.60, 0.95) = 0.95
       groups:         list_merge           → per_attr_conf depends on formula
 
     normalization_confidence =
-      0.15×0.90 + 0.25×0.95 + 0.20×0.72 + 0.25×0.95 + 0.15×groups_conf
-
-    §3.3 shows 0.87.  For groups conf=0.85 (as shown in §3.3 payload):
-      = 0.135 + 0.2375 + 0.144 + 0.2375 + 0.15×0.85
-      = 0.135 + 0.2375 + 0.144 + 0.2375 + 0.1275
-      = 0.8815 ≈ 0.88
+      0.15×0.85 + 0.25×0.95 + 0.20×0.72 + 0.25×0.95 + 0.15×groups_conf
 
     With groups conf = 0.90 (from the §5.5 formula for the §3.3 groups):
-      = 0.135 + 0.2375 + 0.144 + 0.2375 + 0.15×0.90
-      = 0.135 + 0.2375 + 0.144 + 0.2375 + 0.135 = 0.889 ≈ 0.89
+      = 0.1275 + 0.2375 + 0.144 + 0.2375 + 0.15×0.90
+      = 0.1275 + 0.2375 + 0.144 + 0.2375 + 0.135 = 0.8815
 
-    Neither exactly matches 0.87.  The §3.3 payload is ILLUSTRATIVE.
+    The §3.3 payload is ILLUSTRATIVE.
     This test verifies the FORMULA output for the §3.3 input, not the
-    illustrative 0.87 value.
+    illustrative value.
 
-    ENCODED INTERPRETATION: Tests assert the formula result, not 0.87.
+    ENCODED INTERPRETATION: Tests assert the formula result, not an illustrative value.
     """
 
     def test_spec33_style_event_confidence_formula(self) -> None:
         """Compute normalization_confidence for the §3.3-style input fixture.
 
         Inputs (matching §3.3 scenario):
-          display_name  unanimous oidc+ldap → conf = max(0.60, 0.90) = 0.90
+          display_name  unanimous oidc+ldap → conf = max(0.70, 0.85) = 0.85
           primary_email unanimous oidc+ldap → conf = max(0.95, 0.65) = 0.95
           department    priority ldap wins  → conf = 0.90 × 0.8 = 0.72
           employee_type unanimous oidc+ldap → conf = max(0.60, 0.95) = 0.95
@@ -371,8 +366,8 @@ class TestSpec33ConfidenceExample:
                         groups_conf = 0.7 + 0.3×(2/3) = 0.90
 
         Expected:
-          0.15×0.90 + 0.25×0.95 + 0.20×0.72 + 0.25×0.95 + 0.15×0.90
-          = 0.135 + 0.2375 + 0.144 + 0.2375 + 0.135 = 0.889
+          0.15×0.85 + 0.25×0.95 + 0.20×0.72 + 0.25×0.95 + 0.15×0.90
+          = 0.1275 + 0.2375 + 0.144 + 0.2375 + 0.135 = 0.8815
         """
         from app.resolution import resolve
 
@@ -397,13 +392,13 @@ class TestSpec33ConfidenceExample:
         )
 
         # Per-attribute confidences from the formula:
-        # display_name:  unanimous, conf = max(0.60, 0.90) = 0.90
+        # display_name:  unanimous, conf = max(0.70, 0.85) = 0.85
         # primary_email: unanimous, conf = max(0.95, 0.65) = 0.95
         # department:    priority ldap, conf = 0.90 × 0.8 = 0.72
         # employee_type: unanimous, conf = max(0.60, 0.95) = 0.95
         # groups:        list_merge, 2/3 shared → 0.7 + 0.3×(2/3) = 0.90
         expected = (
-            0.15 * 0.90   # display_name
+            0.15 * 0.85   # display_name
             + 0.25 * 0.95 # primary_email
             + 0.20 * 0.72 # department (priority, 0.2 penalty encoded in 0.72)
             + 0.25 * 0.95 # employee_type
@@ -412,7 +407,7 @@ class TestSpec33ConfidenceExample:
         assert result.normalization_confidence == pytest.approx(expected, rel=1e-3), (
             f"Expected normalization_confidence≈{expected:.4f} for §3.3 scenario, "
             f"got {result.normalization_confidence!r}. "
-            "NOTE: §3.3 shows 0.87 (illustrative); §5.5.2 formula gives ~0.889."
+            "§5.5.2 formula with updated §5.6 display_name weights."
         )
 
     def test_normalization_confidence_is_clamped_to_unit_interval(self) -> None:

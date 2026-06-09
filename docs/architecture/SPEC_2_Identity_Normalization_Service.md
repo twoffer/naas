@@ -357,7 +357,7 @@ normalization_confidence = max(0.0, min(1.0, confidence))
 
 ### 5.6 `config/normalization.yaml` and its validation
 
-Create `config/normalization.yaml` with two top-level sections: `attributes`/`defaults` (authority) and `enrichment`. The values below are the project defaults [TRANSCRIBE EXACTLY — the weights tune demo behaviour and the §3.3 example assumes them]:
+Create `config/normalization.yaml` with two top-level sections: `attributes`/`defaults` (authority) and `enrichment`. The values below are the project defaults [TRANSCRIBE EXACTLY — the weights tune runtime behaviour; note the §3.3 worked example was computed against the pre-change display_name weights and is preserved as illustrative]:
 
 ```yaml
 # config/normalization.yaml
@@ -370,9 +370,15 @@ defaults:
 
 attributes:
   display_name:
-    priority: [ldap, saml, oidc]
-    weights: { ldap: 0.90, saml: 0.70, oidc: 0.60 }
-    rationale: "LDAP synced from HR system; most authoritative for legal name"
+    priority: [oidc, saml, ldap]                      # changed from [ldap, saml, oidc]
+    weights: {ldap: 0.85, saml: 0.75, oidc: 0.70}     # compressed band; weight ORDER ldap>saml>oidc preserved
+    rationale: >-
+      The cloud IdP is the system of record for user-presented identity: users curate
+      their own preferred/display name there, so the IdP value wins on disagreement.
+      Weights are intentionally decoupled from priority for this attribute — they encode
+      source reliability for the canonical record, where the directory's verified legal
+      name remains the most reliable, so a contested IdP-sourced name resolves at
+      correspondingly modest confidence.
   primary_email:
     priority: [oidc, saml, ldap]
     weights: { oidc: 0.95, saml: 0.75, ldap: 0.65 }
