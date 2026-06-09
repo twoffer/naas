@@ -1044,19 +1044,15 @@ If using approach 2, verify the format against Keycloak's documentation. Key pit
 
 ### 5.3 OpenLDAP Bootstrap Data
 
-This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted):
+This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted). The Dockerfile also copies `memberof-overlay.sh` into the osixia custom-bootstrap directory so the memberof and refint overlays are configured at first seed:
 
 ```dockerfile
-# infrastructure/openldap/Dockerfile
 FROM osixia/openldap:1.5.0
 COPY bootstrap.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
+COPY memberof-overlay.sh /container/service/slapd/assets/config/bootstrap/memberof-overlay.sh
 ```
 
 ```ldif
-# infrastructure/openldap/bootstrap.ldif
-# NOTE: The osixia/openldap image auto-creates dc=corp,dc=com from LDAP_DOMAIN.
-# This file adds the OU and users underneath.
-
 dn: ou=users,dc=corp,dc=com
 objectClass: organizationalUnit
 ou: users
@@ -1114,9 +1110,35 @@ uid: eve
 userPassword: password123
 departmentNumber: External
 employeeType: contractor
+
+dn: cn=engineering,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: engineering
+member: uid=alice,ou=users,dc=corp,dc=com
+member: uid=diana,ou=users,dc=corp,dc=com
+
+dn: cn=product,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: product
+member: uid=bob,ou=users,dc=corp,dc=com
+
+dn: cn=security,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: security
+member: uid=charlie,ou=users,dc=corp,dc=com
+
+dn: cn=vpn-users,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: vpn-users
+member: uid=alice,ou=users,dc=corp,dc=com
+member: uid=diana,ou=users,dc=corp,dc=com
 ```
 
 **Note:** 5 users instead of 3 in LDAP to demonstrate variety in `employeeType` (FTE, contractor, vendor) which feeds the normalization layer. The same alice/bob/charlie exist in both Keycloak and OpenLDAP — this is intentional to show cross-protocol identity correlation.
+
+**Group entries** appear after all user entries (LDIF is processed top-to-bottom; member DNs must reference entries that already exist). Four groups are seeded: `engineering` (alice, diana), `product` (bob), `security` (charlie), and `vpn-users` (alice, diana). The token-only groups `product-admins` and `oncall` are not directory groups and are not present here.
+
+**memberof / refint overlay configuration** (`infrastructure/openldap/memberof-overlay.sh`) applies `ldapmodify -Y EXTERNAL -H ldapi:///` against `cn=config` to load the `memberof` and `refint` modules and add the corresponding overlays to the mdb database. The `memberof` overlay back-populates a `memberOf` attribute on each member user entry whenever a `groupOfNames` entry is added or modified. The `refint` overlay maintains referential integrity on the `member` attribute when user entries are renamed or deleted. This means alice and diana will carry `memberOf: cn=engineering,...` and `memberOf: cn=vpn-users,...` after seed. Picking up changes to this script requires an image rebuild and a fresh ldap-data volume: `docker compose build openldap && docker compose down -v openldap && docker compose up -d openldap`.
 
 ### 5.4 Shared Python Package Structure
 

@@ -14,3 +14,4 @@
 FROM osixia/openldap:1.5.0
 
 COPY bootstrap.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
+COPY memberof-overlay.sh /container/service/slapd/assets/config/bootstrap/memberof-overlay.sh
