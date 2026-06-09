@@ -1044,12 +1044,13 @@ If using approach 2, verify the format against Keycloak's documentation. Key pit
 
 ### 5.3 OpenLDAP Bootstrap Data
 
-This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted). The Dockerfile also copies `memberof-overlay.sh` into the osixia custom-bootstrap directory so the memberof and refint overlays are configured at first seed:
+This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted). The Dockerfile also copies `memberof-overlay.sh` (kept for reference) and `00-memberof-overlay.ldif` into the osixia custom-bootstrap directory so the memberof and refint overlay configuration is reconfigured at first seed:
 
 ```dockerfile
 FROM osixia/openldap:1.5.0
 COPY bootstrap.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
 COPY memberof-overlay.sh /container/service/slapd/assets/config/bootstrap/memberof-overlay.sh
+COPY 00-memberof-overlay.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/00-memberof-overlay.ldif
 ```
 
 ```ldif
@@ -1138,7 +1139,7 @@ member: uid=diana,ou=users,dc=corp,dc=com
 
 **Group entries** appear after all user entries (LDIF is processed top-to-bottom; member DNs must reference entries that already exist). Four groups are seeded: `engineering` (alice, diana), `product` (bob), `security` (charlie), and `vpn-users` (alice, diana). The token-only groups `product-admins` and `oncall` are not directory groups and are not present here.
 
-**memberof / refint overlay configuration** (`infrastructure/openldap/memberof-overlay.sh`) applies `ldapmodify -Y EXTERNAL -H ldapi:///` against `cn=config` to load the `memberof` and `refint` modules and add the corresponding overlays to the mdb database. The `memberof` overlay back-populates a `memberOf` attribute on each member user entry whenever a `groupOfNames` entry is added or modified. The `refint` overlay maintains referential integrity on the `member` attribute when user entries are renamed or deleted. This means alice and diana will carry `memberOf: cn=engineering,...` and `memberOf: cn=vpn-users,...` after seed. Picking up changes to this script requires an image rebuild and a fresh ldap-data volume: `docker compose build openldap && docker compose down -v openldap && docker compose up -d openldap`.
+**memberof / refint overlay configuration** — osixia/openldap:1.5.0 ships a default `memberof` overlay pre-configured for `groupOfUniqueNames`/`uniqueMember`. Our bootstrap data uses `groupOfNames`/`member`, so the default overlay must be reconfigured. `infrastructure/openldap/00-memberof-overlay.ldif` is placed in the osixia custom bootstrap LDIF directory (`ldif/custom/`). The `00-` prefix ensures it sorts alphabetically before `bootstrap.ldif`, so the overlay is reconfigured BEFORE the group entries are loaded. The osixia startup script processes `ldif/custom/*.ldif` in sorted order via `ldap_add_or_modify()` which calls `ldapmodify -Y EXTERNAL -Q -H ldapi:///` — running as root with full cn=config write access. The LDIF does a `changetype: modify`/`replace` on the existing `olcOverlay={0}memberof,olcDatabase={1}mdb,cn=config` entry to set `olcMemberOfGroupOC: groupOfNames` and `olcMemberOfMemberAD: member`. Because the overlay is correctly configured when groups are added by `bootstrap.ldif`, the memberOf back-links are populated at group-add time. The `refint` overlay (also default in the image) already tracks the `member` attribute and requires no modification. After seed, alice and diana carry `memberOf: cn=engineering,...` and `memberOf: cn=vpn-users,...`. `infrastructure/openldap/memberof-overlay.sh` is retained as a reference script (also uses `ldapmodify -Y EXTERNAL -H ldapi:///` against `cn=config`, references `memberof` and `refint`). Picking up changes to the overlay config requires an image rebuild and a fresh ldap-data volume: `docker compose build openldap && docker compose down -v openldap && docker compose up -d openldap`.
 
 ### 5.4 Shared Python Package Structure
 

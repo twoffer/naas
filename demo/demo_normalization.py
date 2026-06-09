@@ -936,7 +936,10 @@ def main() -> None:
 
     render_results(SCENES, results, verification)
 
-    if not args.keep:
+    if args.keep:
+        print(f"Retained {len(event_ids)} event(s) in the database (--keep).")
+        print(f"Retained event IDs: {event_ids}")
+    else:
         cleanup_events(event_ids, db_dsn)
 
 

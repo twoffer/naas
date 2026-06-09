@@ -63,3 +63,22 @@ corresponding flags):
 This program reads postgres directly because the query API for normalized events is
 designed but not yet built. The `--db-dsn` flag or `POSTGRES_*` environment variables
 provide the connection credentials.
+
+When running from the host shell (not inside a container), note that:
+
+- The stack's Postgres password is `naas_dev_password`, not the script's default `naas`.
+- `POSTGRES_HOST=postgres` in `.env` is a docker-internal service alias that is not
+  reachable from the host — use `localhost` instead.
+
+A host run typically needs an explicit DSN:
+
+```
+python demo/demo_normalization.py --db-dsn "host=localhost port=5432 dbname=naas user=naas password=naas_dev_password"
+```
+
+Or export the individual variables before running:
+
+```
+export POSTGRES_PASSWORD=naas_dev_password
+python demo/demo_normalization.py
+```
