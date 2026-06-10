@@ -190,6 +190,24 @@ plain string/line operations. Key patterns:
    (Contrast with the postgres_init_sql pattern using module-scope pytest.skip for cleaner
    signal — both approaches are valid; choose based on test signal preference.)
 
+### LDIF group entries — TDD subdir pattern (established in tests/infrastructure/openldap/test_groups_and_overlay.py)
+
+When new infra artifacts are added to an existing infra component (e.g., group entries + overlay
+LDIF for openldap), place the new tests in a subdirectory mirroring the source path:
+`tests/infrastructure/openldap/` rather than appending to the flat
+`tests/infrastructure/test_openldap_ldif.py`.
+
+Key design choices for this pattern:
+- The **regression tests** (asserting that pre-existing content is unchanged) correctly PASS
+  in TDD mode because the existing file is present. This is intentional — they are regression
+  guards, not TDD failures. The implementer must not break them.
+- The **skip-not-fail pattern** on dependent tests: use `pytest.skip(...)` inside a test body
+  when a prerequisite test covers the missing condition. E.g., `test_group_has_objectclass_groupofnames`
+  skips if the group DN isn't found yet (since `test_group_dn_present` will FAIL for that). This
+  avoids noisy double-failures while keeping the prerequisite test as the clear signal.
+- Module-scoped `ldif_lines` / `ldif_blocks` fixtures avoid re-reading the file for every test.
+- `_get_line_index(lines, dn_value)` helper extracts line number for ordering assertions.
+
 ### JSON realm file: locate client by clientId, not array index
 
 ```python

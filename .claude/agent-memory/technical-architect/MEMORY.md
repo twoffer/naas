@@ -21,6 +21,10 @@
 - [Spec 2 decomposition gotchas](spec2_identity_normalization.md) — bootstrap.ldif has no memberOf (live groups empty); LDAP depts partly outside DEPARTMENT_CANONICAL; lockstep shared+SPEC_0 chunk; python-ldap build deps; no LDAP_URI/BIND env; asyncio.to_thread; three-state negative cache; resolution/service boundary; 6-chunk layout.
 - [Spec 2 normalization internals](spec2_normalization_internals.md) — adapters discard was_mapped (service re-derives from string); dept non-str must short-circuit to (None,False) not title-case; shared/pyproject.toml already exists (pytest ini goes at root only); async tests use manual _run() not pytest.mark.asyncio.
 
+## Demo Spec Patterns (Normalization Demo)
+
+- [Demo normalization decomposition](spec_demo_normalization.md) — osixia cn=config overlay mechanism (a changetype:modify LDIF in ldif/custom/ IS applied to cn=config via ldapmodify -Y EXTERNAL; the shell-script assumption was wrong, no refint shipped); which identity-normalization tests assert the old display_name default and need reconciliation; SPEC_2 §3.3 drift still open (illustrative, flagged in §5.6); standalone demo HTTP+SQL contract; spec doc never committed.
+
 ## Chunking Strategy
 
 - Chunk sizing: ~200-500 lines new code, 30-45 min agent work

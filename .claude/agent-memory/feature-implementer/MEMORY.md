@@ -28,5 +28,11 @@
 - [patterns_ldap_dn_str2dn_fallback.md](patterns_ldap_dn_str2dn_fallback.md) — _reduce_dn_to_group_name: str2dn primary + regex fallback on ImportError to keep dev-venv (no gcc/python-ldap) tests green
 - [patterns_consumer_loop_resilience.md](patterns_consumer_loop_resilience.md) — xreadgroup outer loop: except Exception catches transient errors, CancelledError propagates; truncate str(exc)[:200] at all log sites for PII safety
 
+## Patterns
+- [patterns_spec_doc_section_extractor.md](patterns_spec_doc_section_extractor.md) — SPEC_0 §5.3 section extractor treats `# comment` lines inside code fences as heading stops; never put `# path/to/file` comments inside code blocks in that section
+
+## Patterns
+- [patterns_osixia_memberof_overlay.md](patterns_osixia_memberof_overlay.md) — osixia default memberof overlay is groupOfUniqueNames/uniqueMember; fix via 00-prefixed LDIF in ldif/custom/ that modifies cn=config before bootstrap data loads
+
 ## Feedback
 - [feedback_ruff_format_test_files.md](feedback_ruff_format_test_files.md) — ruff format must be applied to test files, not just ruff check
