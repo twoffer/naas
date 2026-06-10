@@ -108,7 +108,7 @@ SCENES: list[dict[str, Any]] = [
         "client_ip": "203.0.113.20",
         "source": "api",
         "is_synthetic": True,
-        "caption": "OIDC login · FTE with elevated group membership",
+        "caption": "OIDC login · token and directory agree — unanimous resolution lifts confidence",
         "raw_attributes": {
             "name": "Alice Smith",
             "email": "alice@corp.com",
@@ -123,13 +123,13 @@ SCENES: list[dict[str, Any]] = [
         "client_ip": "203.0.113.21",
         "source": "api",
         "is_synthetic": True,
-        "caption": "OIDC login · vendor account with cross-team group overlap",
+        "caption": "OIDC login · token and directory disagree — per-attribute authority splits the winners",
         "raw_attributes": {
             "name": "Di Prince",
             "email": "diana@corp.com",
             "department": "Marketing",
             "employee_type": "vendor",
-            "groups": ["engineering", "vpn-users", "oncall"],
+            "groups": ["engineering", "oncall"],
         },
     },
 ]
@@ -258,8 +258,9 @@ def submit_scenes(
     """Submit each scene to the ingest service and return a list of event IDs.
 
     Posts scenes sequentially to {ingest_url}/events/ingest. Expects 202
-    with {"id": ..., "status": "accepted"} per scene. Pacing between scenes
-    is controlled by args.pace and args.step.
+    with {"id": ..., "status": "accepted"} per scene. Pacing (--pace/--step)
+    is applied at render time, not here — submission produces no output, so
+    pausing here would just look like a hang.
     """
     import httpx  # local import
 
@@ -267,12 +268,6 @@ def submit_scenes(
     client = http_client or httpx.Client()
 
     for i, scene in enumerate(scenes):
-        if i > 0:
-            if getattr(args, "step", False):
-                input("Press Enter for next scene...")
-            elif getattr(args, "pace", 0) and args.pace > 0:
-                time.sleep(args.pace)
-
         body: dict[str, Any] = {
             "user_id": scene["user_id"],
             "protocol": scene["protocol"],
@@ -560,15 +555,40 @@ def verify_results(
                     f"Scene 6 (diana/oidc): groups resolution must be 'list_merge', "
                     f"got {groups6.get('resolution')!r}",
                 )
-            elif groups6 and _corroborated_fraction(groups6) < 0.5:
+            elif groups6 and _corroborated_fraction(groups6) < 0.25:
                 _problem(
                     5,
                     f"Scene 6 (diana/oidc): merged groups must be "
-                    f"directory-corroborated (≥ half of merged groups present in "
-                    f"both token and directory); implied corroborated fraction is "
+                    f"directory-corroborated (expected fraction ⅓: only "
+                    f"'engineering' is in both token and directory); implied "
+                    f"corroborated fraction is "
                     f"{_corroborated_fraction(groups6):.2f} — LDAP enrichment "
                     f"merged little or nothing from the directory (memberOf "
                     f"back-population broken?)",
+                )
+
+            # Scene 6 token omits a directory group (vpn-users), so the merged
+            # set must be a strict superset of the token groups.
+            token_groups6 = set(scenes[5].get("raw_attributes", {}).get("groups") or [])
+            merged_groups6 = set(na6.get("groups") or [])
+            if not (token_groups6 < merged_groups6):
+                _problem(
+                    5,
+                    f"Scene 6 (diana/oidc): merged groups must be a strict "
+                    f"superset of the token groups (directory back-population "
+                    f"must add at least one group); token={sorted(token_groups6)}, "
+                    f"merged={sorted(merged_groups6)}",
+                )
+
+            groups5_detail = _details(_na(results[4])).get("groups") or {}
+            g5_conf = float(groups5_detail.get("confidence") or 0.0)
+            g6_conf = float(groups6.get("confidence") or 0.0) if groups6 else 0.0
+            if groups6 and groups5_detail and not (g6_conf < g5_conf):
+                _problem(
+                    5,
+                    f"Scene 6 (diana/oidc): groups confidence must be < Scene 5's "
+                    f"(Scene 6's token only partially matches the directory); "
+                    f"got Scene 6 groups={g6_conf} vs Scene 5 groups={g5_conf}",
                 )
 
             if c6 >= c5_val:
@@ -745,7 +765,12 @@ def _render_scene_panel(
             "  display_name → OIDC wins: token claims hold the user's current preferred/presented name\n"
             "  department   → LDAP wins: the directory holds authoritative org structure facts\n"
             "  No single OIDC-or-LDAP rule could capture both: identity presentation "
-            "and org hierarchy come from different authoritative sources."
+            "and org hierarchy come from different authoritative sources.\n"
+            "Groups merge:\n"
+            "  The token omitted vpn-users; the directory back-populated it, so the "
+            "merged set is a superset of the token's.\n"
+            "  Only 1 of 3 merged groups appears in both sources (vs 2 of 3 in "
+            "Scene 5), so the merge confidence is lower."
         )
 
     # Build panel content
@@ -782,11 +807,15 @@ def render_results(
     verification: list[dict[str, Any]] | None,
     *,
     console: Any = None,
+    pace: float = 0.0,
+    step: bool = False,
 ) -> None:
     """Render a rich comparison table to the console.
 
     Renders per-scene bordered panels and a summary table. Uses the provided
     console if given (for testability), otherwise creates a real Console().
+    Between panels, waits for Enter when step is True, else sleeps pace
+    seconds when pace > 0.
     """
     from rich.console import Console
     from rich.table import Table
@@ -803,6 +832,12 @@ def render_results(
 
     # Render each scene
     for i, (scene, result) in enumerate(zip(scenes, results)):
+        con.print()
+        if i > 0:
+            if step:
+                input("Press Enter for next scene...")
+            elif pace and pace > 0:
+                time.sleep(pace)
         _render_scene_panel(i, scene, result, con)
 
     # Summary table
@@ -826,15 +861,22 @@ def render_results(
         enr_label = "yes" if enr.get("applied") else "no"
 
         res_types: set[str] = set()
+        proto_set: set[str] = set()
         for detail in details.values():
             res_types.add(detail.get("resolution", "?"))
+            proto_set.update(detail.get("sources") or [])
+            if detail.get("resolution") == "priority":
+                if detail.get("winner_source"):
+                    proto_set.add(detail["winner_source"])
+                proto_set.update((detail.get("conflicting_values") or {}).keys())
         res_mix = ", ".join(sorted(res_types))
+        protocols = "/".join(sorted(proto_set)) if proto_set else protocol
 
         c_style = confidence_style(conf)
         conf_cell = Text(f"{conf:.3f}", style=c_style)
 
         scene_label = f"{i + 1} — {scene.get('user_id', '?')}/{protocol}"
-        summary.add_row(scene_label, protocol, enr_label, res_mix, conf_cell)
+        summary.add_row(scene_label, protocols, enr_label, res_mix, conf_cell)
 
     con.print(summary)
 
@@ -949,7 +991,9 @@ def main() -> None:
 
     run_preflight(ingest_url, norm_url, db_dsn)
 
+    print(f"Submitting {len(SCENES)} scene(s) to {ingest_url}...")
     event_ids = submit_scenes(SCENES, ingest_url, args)
+    print("Waiting for normalization results...")
     results = poll_results(event_ids, db_dsn, args.timeout)
     verification = verify_results(SCENES, results) if not args.skip_verify else None
 
@@ -966,7 +1010,7 @@ def main() -> None:
             cleanup_events(event_ids, db_dsn)
         sys.exit(1)
 
-    render_results(SCENES, results, verification)
+    render_results(SCENES, results, verification, pace=args.pace, step=args.step)
 
     if args.keep:
         print(f"Retained {len(event_ids)} event(s) in the database (--keep).")

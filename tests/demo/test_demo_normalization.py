@@ -381,7 +381,7 @@ class TestScenesRawAttributes:
         assert ra.get("email") == "diana@corp.com", f"Got email={ra.get('email')!r}"
         assert ra.get("department") == "Marketing", f"Got department={ra.get('department')!r}"
         assert ra.get("employee_type") == "vendor", f"Got employee_type={ra.get('employee_type')!r}"
-        assert ra.get("groups") == ["engineering", "vpn-users", "oncall"], (
+        assert ra.get("groups") == ["engineering", "oncall"], (
             f"Got groups={ra.get('groups')!r}"
         )
 

@@ -92,7 +92,7 @@ def demo_mod():
 #   PriorityResolution:     resolution, resolved_value, confidence,
 #                           winner_source, conflicting_values, penalty_applied
 #   ListMergeResolution:    resolution, resolved_value, confidence,
-#                           strategy, total_unique_groups
+#                           strategy, total_unique_groups, sources
 #
 #   EnrichmentApplied:  applied=True, source="ldap", cache_hit: bool
 #   EnrichmentSkipped:  applied=False, skip_reason: EnrichmentSkipReason
@@ -163,6 +163,7 @@ def _list_merge(
     groups: list[str],
     confidence: float,
     strategy: str = "union",
+    sources: list[str] | None = None,
 ) -> ListMergeResolution:
     return ListMergeResolution(
         resolution="list_merge",
@@ -170,6 +171,7 @@ def _list_merge(
         confidence=confidence,
         strategy=strategy,  # type: ignore[arg-type]
         total_unique_groups=len(groups),
+        sources=sources or [],  # type: ignore[arg-type]
     )
 
 
@@ -196,7 +198,7 @@ def _scene1_frank_oidc() -> dict[str, Any]:
             "primary_email": _single_source("frank@corp.com", ["oidc"], 0.95),
             "department": _single_source("Engineering", ["oidc"], 0.70),
             "employee_type": _single_source("FTE", ["oidc"], 0.60),
-            "groups": _list_merge(["engineering", "vpn-users"], 0.70),
+            "groups": _list_merge(["engineering", "vpn-users"], 0.70, sources=["oidc"]),
         },
         enrichment=_skipped_enrichment("no_ldap_match"),
     )
@@ -223,7 +225,7 @@ def _scene2_frank_saml() -> dict[str, Any]:
             "primary_email": _single_source("frank@corp.com", ["saml"], 0.75),
             "department": _single_source("Engineering", ["saml"], 0.50),
             "employee_type": _single_source("FTE", ["saml"], 0.80),
-            "groups": _list_merge(["engineering", "vpn-users"], 0.70),
+            "groups": _list_merge(["engineering", "vpn-users"], 0.70, sources=["saml"]),
         },
         enrichment=_skipped_enrichment("no_ldap_match"),
     )
@@ -250,7 +252,7 @@ def _scene3_grace_ldap() -> dict[str, Any]:
             "primary_email": _single_source("grace@corp.com", ["ldap"], 0.65),
             "department": _single_source("R&D", ["ldap"], 0.90),
             "employee_type": _single_source("contractor", ["ldap"], 0.95),
-            "groups": _list_merge(["admins", "engineering"], 0.70),
+            "groups": _list_merge(["admins", "engineering"], 0.70, sources=["ldap"]),
         },
         enrichment=_skipped_enrichment("ldap_event"),
     )
@@ -280,7 +282,7 @@ def _scene4_mallory_saml() -> dict[str, Any]:
             # department single_source with penalty applied: saml weight=0.50 − 0.20 = 0.30
             "department": _single_source("Sorcery", ["saml"], 0.30),
             # employee_type absent: "wizard" was discarded to None upstream
-            "groups": _list_merge(["temp-access"], 0.60),
+            "groups": _list_merge(["temp-access"], 0.60, sources=["saml"]),
         },
         enrichment=_skipped_enrichment("no_ldap_match"),
     )
@@ -309,7 +311,9 @@ def _scene5_alice_oidc_enriched() -> dict[str, Any]:
             "primary_email": _unanimous("alice@corp.com", ["ldap", "oidc"], 0.95),
             "department": _unanimous("Engineering", ["ldap", "oidc"], 0.90),
             "employee_type": _unanimous("FTE", ["ldap", "oidc"], 0.95),
-            "groups": _list_merge(["engineering", "product-admins", "vpn-users"], 0.90),
+            "groups": _list_merge(
+                ["engineering", "product-admins", "vpn-users"], 0.90, sources=["ldap", "oidc"]
+            ),
         },
         enrichment=_applied_enrichment(cache_hit=False),
     )
@@ -319,7 +323,9 @@ def _scene5_alice_oidc_enriched() -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 # Scene 6 (index 5) — diana/oidc with LDAP enrichment applied.
 # display_name: priority winner=oidc; department: priority winner=ldap;
-# groups: list_merge; C(6) < C(5).
+# groups: list_merge — token omits vpn-users, directory back-populates it
+# (merged set is a strict superset of the token; 1 of 3 corroborated → 0.80,
+# below Scene 5's 0.90); C(6) < C(5).
 # ---------------------------------------------------------------------------
 
 
@@ -332,7 +338,7 @@ def _scene6_diana_oidc_conflict() -> dict[str, Any]:
         employee_type="vendor",
         groups=["engineering", "oncall", "vpn-users"],
         source_protocol="oidc",
-        normalization_confidence=0.79,  # priority resolutions lower confidence
+        normalization_confidence=0.74,  # priority resolutions + partial group overlap lower confidence
         resolution_details={
             # display_name: oidc wins priority over ldap; penalty_applied=True
             # confidence = 0.70 * 0.8 = 0.56
@@ -352,7 +358,9 @@ def _scene6_diana_oidc_conflict() -> dict[str, Any]:
                 confidence=0.72,
             ),
             "employee_type": _single_source("vendor", ["oidc"], 0.60),
-            "groups": _list_merge(["engineering", "oncall", "vpn-users"], 0.90),
+            "groups": _list_merge(
+                ["engineering", "oncall", "vpn-users"], 0.80, sources=["ldap", "oidc"]
+            ),
         },
         enrichment=_applied_enrichment(cache_hit=False),
     )
@@ -920,11 +928,14 @@ class TestVerifyResultsGroupsCorroboration:
     """verify_results rejects Scenes 5–6 group merges with no directory corroboration.
 
     Spec §5.5: multi-source list_merge confidence is 0.7 + 0.3 × (fraction of
-    merged groups present in more than one source). Scenes 5–6 expect 2 of 3
-    merged groups corroborated by the directory (fraction ⅔); a token-only
-    union (fraction 0, confidence 0.70) means LDAP enrichment merged nothing
-    from the directory — e.g. memberOf back-population is broken — and must
-    fail verification instead of rendering silently.
+    merged groups present in more than one source). Scene 5 expects 2 of 3
+    merged groups corroborated (fraction ⅔, threshold ≥ ½); Scene 6's token
+    omits vpn-users so only 1 of 3 corroborates (fraction ⅓, threshold ≥ ¼).
+    A token-only union (fraction 0, confidence 0.70) means LDAP enrichment
+    merged nothing from the directory — e.g. memberOf back-population is
+    broken — and must fail verification instead of rendering silently.
+    Scene 6 must additionally show back-population: merged groups a strict
+    superset of the token groups, and groups confidence < Scene 5's.
     """
 
     def test_scene5_token_only_union_is_rejected(self, demo_mod) -> None:
@@ -1002,6 +1013,76 @@ class TestVerifyResultsGroupsCorroboration:
         assert not any("corroborat" in p["message"] for p in problems), (
             f"Expected no corroboration problem at corroborated fraction ½ "
             f"(groups confidence 0.85), got: {problems}"
+        )
+
+    def test_scene6_one_third_fraction_is_accepted(self, demo_mod) -> None:
+        """Scene 6 groups confidence 0.80 (corroborated fraction ⅓) produces no problem.
+
+        WHY: Scene 6's token omits vpn-users, so only engineering corroborates —
+        fraction ⅓ is the expected healthy value and must pass the ≥ ¼ threshold.
+        """
+        from demo_normalization_flow import SCENES
+
+        results = _six_results()
+        wrapped = _wrap_results(results)
+
+        problems = demo_mod.verify_results(SCENES, wrapped)
+
+        assert not any(
+            p["scene"] == 5 and "corroborat" in p["message"] for p in problems
+        ), (
+            f"Expected no Scene-6 corroboration problem at fraction ⅓ "
+            f"(groups confidence 0.80), got: {problems}"
+        )
+
+    def test_scene6_groups_confidence_not_below_scene5_is_rejected(self, demo_mod) -> None:
+        """Scene 6 groups confidence equal to Scene 5's produces a problem.
+
+        WHY: Scene 6's token only partially matches the directory, so its merge
+        confidence must sit strictly below Scene 5's fuller-overlap merge.
+        """
+        from demo_normalization_flow import SCENES
+
+        bad_scene6 = _scene6_diana_oidc_conflict()
+        bad_scene6["resolution_details"]["groups"] = _list_merge(
+            ["engineering", "oncall", "vpn-users"], 0.90, sources=["ldap", "oidc"]
+        ).model_dump(mode="json")
+
+        results = _six_results()
+        results[5] = bad_scene6
+        wrapped = _wrap_results(results)
+
+        problems = demo_mod.verify_results(SCENES, wrapped)
+
+        assert any(
+            p["scene"] == 5 and "groups confidence" in p["message"] for p in problems
+        ), (
+            f"Expected a Scene-6 problem when groups confidence (0.90) is not "
+            f"below Scene 5's (0.90), got: {problems}"
+        )
+
+    def test_scene6_non_superset_groups_rejected(self, demo_mod) -> None:
+        """Scene 6 merged groups equal to the token groups produces a problem.
+
+        WHY: the directory must back-populate vpn-users (absent from the token);
+        a merged set that matches the token exactly means enrichment added nothing.
+        """
+        from demo_normalization_flow import SCENES
+
+        bad_scene6 = _scene6_diana_oidc_conflict()
+        bad_scene6["groups"] = ["engineering", "oncall"]
+
+        results = _six_results()
+        results[5] = bad_scene6
+        wrapped = _wrap_results(results)
+
+        problems = demo_mod.verify_results(SCENES, wrapped)
+
+        assert any(
+            p["scene"] == 5 and "superset" in p["message"] for p in problems
+        ), (
+            f"Expected a Scene-6 strict-superset problem when merged groups "
+            f"equal the token groups, got: {problems}"
         )
 
 
