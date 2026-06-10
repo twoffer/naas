@@ -2,8 +2,8 @@
 # submit_scenes, poll_results, verify_results, render_results, cleanup_events,
 # SQL query constants, and the confidence_style color helper.
 #
-# All tests target behavior that is currently stubbed with NotImplementedError.
-# They define the implementer's success criteria.
+# All functions are exercised through injectable seams (http_client, console,
+# db_execute) — no live services required.
 
 from __future__ import annotations
 
@@ -916,7 +916,7 @@ class TestVerifyResultsScene5GroupsListMerge:
 # ===========================================================================
 # CLASS 2 — SQL query constants
 #
-# The implementer must define these as module-level constants:
+# demo_normalization.py defines these as module-level constants:
 #   POLL_QUERY  — parameterized SELECT for polling normalized results
 #   CLEANUP_QUERY — parameterized DELETE for cleanup
 #
@@ -928,8 +928,8 @@ class TestSqlQueryConstants:
     """poll_results and cleanup_events use exact parameterized SQL queries.
 
     Spec §5.5: The queries must be parameterized to prevent SQL injection.
-    The exact strings are asserted here so the implementer cannot deviate
-    to a different column list, table name, or parameter style.
+    The exact strings are asserted here so any drift in column list, table
+    name, or parameter style is caught.
     """
 
     EXPECTED_POLL_QUERY = (
@@ -944,9 +944,8 @@ class TestSqlQueryConstants:
         inspectable for audits; an inlined string is harder to find and review.
         """
         assert hasattr(demo_mod, "POLL_QUERY"), (
-            "demo_normalization.py must define a module-level POLL_QUERY constant. "
-            "Implementer: add POLL_QUERY = 'SELECT id, protocol, normalized_attributes "
-            "FROM events WHERE id = ANY(%(ids)s)' at module level."
+            "demo_normalization.py must define a module-level POLL_QUERY constant "
+            "so the parameterized polling query is auditable."
         )
 
     def test_poll_query_exact_string(self, demo_mod) -> None:
@@ -968,9 +967,8 @@ class TestSqlQueryConstants:
         WHY: Same rationale as POLL_QUERY — named constants are auditable.
         """
         assert hasattr(demo_mod, "CLEANUP_QUERY"), (
-            "demo_normalization.py must define a module-level CLEANUP_QUERY constant. "
-            "Implementer: add CLEANUP_QUERY = 'DELETE FROM events WHERE id = ANY(%(ids)s)'"
-            " at module level."
+            "demo_normalization.py must define a module-level CLEANUP_QUERY constant "
+            "so the parameterized cleanup query is auditable."
         )
 
     def test_cleanup_query_exact_string(self, demo_mod) -> None:
@@ -1022,9 +1020,8 @@ class TestSqlQueryConstants:
 #
 # submit_scenes(scenes, ingest_url, args) -> list[str]
 #
-# Injectable seam: the implementer must either accept an httpx.Client as an
-# optional parameter OR use httpx as a module-level import that can be
-# monkeypatched. The preferred design is:
+# Injectable seam: submit_scenes accepts an optional httpx.Client so tests
+# can verify the POST contract without network access:
 #
 #   def submit_scenes(
 #       scenes, ingest_url, args, *, http_client=None
@@ -1178,7 +1175,7 @@ class TestSubmitScenes:
 #
 # render_results(scenes, results, verification) -> None
 #
-# Injectable seam: the implementer must accept an optional `console` parameter
+# Injectable seam: render_results accepts an optional `console` parameter
 # so tests can capture output without stdout:
 #
 #   def render_results(
@@ -1369,8 +1366,8 @@ class TestConfidenceStyleHelper:
       0.50 – 0.79 → amber (yellow/orange)
       < 0.50 → red
 
-    The implementer must expose a module-level confidence_style() helper
-    so tests (and other callers) can verify color logic independently.
+    confidence_style() is exposed as a module-level helper so tests
+    (and other callers) can verify color logic independently.
 
     Injectable seam: confidence_style(value: float) -> str
       Returns a Rich markup style string, e.g. "green", "yellow", "red",
@@ -1382,11 +1379,11 @@ class TestConfidenceStyleHelper:
 
         WHY: A named helper is testable in isolation and can be reused
         across the render function without duplicating threshold logic.
-        Implementer: add def confidence_style(value: float) -> str at module level.
         """
         assert hasattr(demo_mod, "confidence_style") and callable(demo_mod.confidence_style), (
-            "demo_normalization.py must define a module-level callable confidence_style(value: float) -> str. "
-            "Implementer: expose this function so the render loop can be tested independently."
+            "demo_normalization.py must define a module-level callable "
+            "confidence_style(value: float) -> str so the render loop can be "
+            "tested independently."
         )
 
     def test_confidence_style_at_0_80_is_green(self, demo_mod) -> None:
@@ -1492,7 +1489,7 @@ class TestConfidenceStyleHelper:
 #
 # cleanup_events(event_ids: list[str], db_dsn: str, *, db_execute=None) -> None
 #
-# Injectable seam: the implementer must accept an optional db_execute
+# Injectable seam: cleanup_events accepts an optional db_execute
 # callable so tests can verify the DELETE without a live DB:
 #
 #   def cleanup_events(
@@ -1627,9 +1624,7 @@ class TestCleanupEvents:
             with patch("argparse.ArgumentParser.parse_args", return_value=test_args):
                 demo_mod.main()
 
-        mock_cleanup.assert_not_called(), (
-            "cleanup_events must NOT be called when --keep flag is set"
-        )
+        mock_cleanup.assert_not_called()
 
     def test_cleanup_events_called_when_keep_not_set(self, demo_mod) -> None:
         """When args.keep=False (default), cleanup_events is called with the event IDs.
@@ -1670,9 +1665,7 @@ class TestCleanupEvents:
             with patch("argparse.ArgumentParser.parse_args", return_value=test_args):
                 demo_mod.main()
 
-        mock_cleanup.assert_called_once(), (
-            "cleanup_events must be called once when --keep is not set"
-        )
+        mock_cleanup.assert_called_once()
         call_args = mock_cleanup.call_args
         actual_ids = call_args[0][0] if call_args[0] else call_args[1].get("event_ids", [])
         assert actual_ids == submitted_ids, (

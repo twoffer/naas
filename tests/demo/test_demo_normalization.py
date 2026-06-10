@@ -4,10 +4,9 @@
 # Spec §: demo CLI scaffold — SCENES constant, CLI flags, static file content,
 # naas_shared soft-import, and absence of meta-language tokens.
 #
-# The module-level symbol that holds the six crafted login events is SCENES.
-# The implementer MUST name it exactly SCENES (a list of six dicts, each with
-# keys: user_id, protocol, client_ip, source, is_synthetic, raw_attributes,
-# and optionally caption).
+# The module-level symbol holding the six crafted login events is SCENES —
+# a list of six dicts, each with keys: user_id, protocol, client_ip, source,
+# is_synthetic, raw_attributes, and optionally caption.
 
 # stdlib
 import ast

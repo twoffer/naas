@@ -407,7 +407,7 @@ class TestSpec33ConfidenceExample:
         assert result.normalization_confidence == pytest.approx(expected, rel=1e-3), (
             f"Expected normalization_confidence≈{expected:.4f} for §3.3 scenario, "
             f"got {result.normalization_confidence!r}. "
-            "§5.5.2 formula with updated §5.6 display_name weights."
+            "§5.5.2 formula with the §5.6 display_name weights."
         )
 
     def test_normalization_confidence_is_clamped_to_unit_interval(self) -> None:
@@ -422,8 +422,8 @@ class TestSpec33ConfidenceExample:
 
         cfg = _load_real_config()
         # All attributes with highest-weight unanimous sources → sum ≤ 1.0
-        # With max weights: 0.15×0.90 + 0.25×0.95 + 0.20×0.90 + 0.25×0.95 + 0.15×0.80
-        #   = 0.135 + 0.2375 + 0.18 + 0.2375 + 0.12 = 0.91 — stays within bounds
+        # With max weights: 0.15×0.85 + 0.25×0.95 + 0.20×0.90 + 0.25×0.95 + 0.15×0.80
+        #   = 0.1275 + 0.2375 + 0.18 + 0.2375 + 0.12 = 0.9025 — stays within bounds
         result = resolve(
             attribute_sources={
                 "display_name": {"ldap": "Alice Smith"},

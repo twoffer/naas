@@ -12,8 +12,9 @@
 #
 # Idempotency: "already exists" errors on module load are suppressed with
 # || true so the script succeeds on repeated runs. Exact olcOverlay ordinals
-# ({0}memberof, {1}refint, etc.) vary by osixia build and are verified live
-# by the integration validator — the ordinals below are the typical defaults.
+# ({0}memberof, {1}refint, etc.) vary by osixia build — the ordinals below are
+# the typical defaults; confirm the live values when debugging with:
+#   ldapsearch -Y EXTERNAL -Q -H ldapi:/// -b cn=config olcOverlay=\*
 #
 # Picking up changes to this script requires an image rebuild and a fresh
 # ldap-data volume: docker compose build openldap && docker compose down -v openldap && docker compose up -d openldap
@@ -43,7 +44,7 @@ EOF
 # ---------------------------------------------------------------------------
 # Step 2: Add the memberof overlay to the mdb database
 # The olcOverlay DN ordinal ({0}memberof) is the typical first-overlay slot;
-# the integration validator confirms the live ordinal on each deployment.
+# confirm the live ordinal against cn=config when debugging (see header).
 # ---------------------------------------------------------------------------
 ldapmodify -Y EXTERNAL -H ldapi:/// <<EOF || true
 dn: olcOverlay={0}memberof,olcDatabase={1}mdb,cn=config

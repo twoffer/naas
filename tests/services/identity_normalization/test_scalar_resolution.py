@@ -562,7 +562,8 @@ class TestPriorityResolution:
         """display_name: priority=[oidc,saml,ldap] → oidc wins over ldap.
 
         confidence = weight_for('display_name','oidc') × 0.8 = 0.70 × 0.8 = 0.56.
-        WHY: §5.6 updated priority to [oidc, saml, ldap] — OIDC now wins conflicts.
+        WHY: §5.6 priority is [oidc, saml, ldap] — the IdP-curated display name
+        wins conflicts.
         """
         from app.resolution import resolve
         from naas_shared.models import PriorityResolution

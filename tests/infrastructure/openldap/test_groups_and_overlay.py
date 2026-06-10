@@ -1,6 +1,7 @@
 # Verifies infrastructure/openldap group entries in bootstrap.ldif,
-# memberof-overlay.sh existence and content, the Dockerfile COPY line
-# for memberof-overlay.sh, and the SPEC_0 §5.3 mirror of those additions.
+# memberof-overlay.sh content, the 00-memberof-overlay.ldif overlay
+# reconfiguration, the Dockerfile COPY lines, and the SPEC_0 §5.3
+# documentation mirror.
 #
 # Spec §5.3: four groupOfNames entries (engineering, product, security,
 # vpn-users) under ou=groups,dc=corp,dc=com, each with objectClass:
@@ -34,6 +35,7 @@ def _find_repo_root() -> Path:
 REPO_ROOT = _find_repo_root()
 LDIF_FILE = REPO_ROOT / "infrastructure" / "openldap" / "bootstrap.ldif"
 OVERLAY_SCRIPT = REPO_ROOT / "infrastructure" / "openldap" / "memberof-overlay.sh"
+OVERLAY_LDIF = REPO_ROOT / "infrastructure" / "openldap" / "00-memberof-overlay.ldif"
 DOCKERFILE = REPO_ROOT / "infrastructure" / "openldap" / "Dockerfile"
 SPEC0_DOC = REPO_ROOT / "docs" / "architecture" / "SPEC_0_Project_Scaffold_and_Shared_Foundation.md"
 
@@ -116,7 +118,7 @@ def _get_line_index(lines: list[str], dn_value: str) -> int | None:
 def ldif_lines() -> list[str]:
     assert LDIF_FILE.exists(), (
         f"bootstrap.ldif not found at {LDIF_FILE}. "
-        "This file must exist before running these tests."
+        "The OpenLDAP container cannot seed users or groups without it."
     )
     return _load_ldif_lines()
 
@@ -179,8 +181,7 @@ class TestLdifGroupEntries:
         the overlay cannot operate on the entry.
         """
         key = f"cn={cn},ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.skip(f"Group {cn!r} not yet in LDIF — covered by test_group_dn_present")
+        assert key in ldif_blocks, f"Group entry 'dn: {key}' missing from LDIF"
         block = ldif_blocks[key]
         objectclasses = [oc.lower() for oc in block.get("objectclass", [])]
         assert "groupofnames" in objectclasses, (
@@ -197,8 +198,7 @@ class TestLdifGroupEntries:
         with 'Object class violation'.
         """
         key = f"cn={cn},ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.skip(f"Group {cn!r} not yet in LDIF")
+        assert key in ldif_blocks, f"Group entry 'dn: {key}' missing from LDIF"
         block = ldif_blocks[key]
         members = block.get("member", [])
         assert len(members) >= 1, (
@@ -213,8 +213,7 @@ class TestLdifGroupEntries:
         integrity errors when the refint overlay validates the member attribute.
         """
         key = f"cn={cn},ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.skip(f"Group {cn!r} not yet in LDIF")
+        assert key in ldif_blocks, f"Group entry 'dn: {key}' missing from LDIF"
         block = ldif_blocks[key]
         member_pattern = re.compile(
             r"^uid=[^,]+,ou=users,dc=corp,dc=com$", re.IGNORECASE
@@ -380,8 +379,7 @@ class TestLdifGroupOrdering:
 
         assert user_lines, "No user dn: entries found in LDIF"
         assert group_lines, (
-            "No group dn: entries (cn=...,ou=groups,dc=corp,dc=com) found in LDIF — "
-            "group entries have not been added yet"
+            "No group dn: entries (cn=...,ou=groups,dc=corp,dc=com) found in LDIF"
         )
 
         last_user_line = max(user_lines)
@@ -413,7 +411,7 @@ class TestLdifGroupOrdering:
             f"'{ou_groups_dn}' not found in LDIF"
         )
         assert group_lines, (
-            "No group dn: entries found — group entries have not been added yet"
+            "No group dn: entries (cn=...,ou=groups,dc=corp,dc=com) found in LDIF"
         )
 
         first_group_line = min(group_lines)
@@ -471,8 +469,7 @@ class TestLdifMemberDnResolution:
             f"referenced by group {group_cn!r}"
         )
         assert group_line is not None, (
-            f"Group entry 'dn: {group_dn}' not found in LDIF — "
-            "group entries have not been added yet"
+            f"Group entry 'dn: {group_dn}' not found in LDIF"
         )
         assert user_line < group_line, (
             f"User 'dn: {user_dn}' at line {user_line} must appear before "
@@ -485,13 +482,12 @@ class TestLdifMemberDnResolution:
 # ---------------------------------------------------------------------------
 
 
-class TestLdifExistingUsersPreserved:
-    """Tests that all five pre-existing user entries remain present and unmodified
-    after group entries are added.
+class TestLdifUserEntriesIntact:
+    """Tests that all five user entries are present with their required
+    attributes alongside the group entries.
 
-    The group entries are appended to the file — they must not cause any of the
-    five user entries to be removed or their required attributes to disappear.
-    This is a regression guard.
+    Users and groups share one file — a bad edit to the group section could
+    remove a user entry or its required attributes. This is a regression guard.
     """
 
     @pytest.fixture(autouse=True)
@@ -499,36 +495,39 @@ class TestLdifExistingUsersPreserved:
         assert LDIF_FILE.exists(), f"bootstrap.ldif missing at {LDIF_FILE}"
 
     @pytest.mark.parametrize("uid", ["alice", "bob", "charlie", "diana", "eve"])
-    def test_user_entry_still_present(self, ldif_blocks, uid):
-        """All five users must still have dn: uid=<uid>,ou=users,dc=corp,dc=com entries.
+    def test_user_entry_present(self, ldif_blocks, uid):
+        """All five users must have dn: uid=<uid>,ou=users,dc=corp,dc=com entries.
 
-        Adding group entries must not remove or displace user entries.
+        Group entries in the same file must never remove or displace user entries.
         """
         key = f"uid={uid},ou=users,dc=corp,dc=com"
         assert key in ldif_blocks, (
-            f"User entry for {uid!r} missing from LDIF after group additions. "
+            f"User entry for {uid!r} missing from LDIF. "
             f"Available DNs: {[k for k in ldif_blocks if 'ou=users' in k]!r}"
         )
 
     @pytest.mark.parametrize("uid", ["alice", "bob", "charlie", "diana", "eve"])
-    def test_user_still_has_objectclass_inetorgperson(self, ldif_blocks, uid):
-        """Each user must still have objectClass: inetOrgPerson after group additions."""
+    def test_user_has_objectclass_inetorgperson(self, ldif_blocks, uid):
+        """Each user entry must declare objectClass: inetOrgPerson."""
         key = f"uid={uid},ou=users,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.skip(f"User {uid!r} not in LDIF — covered by test_user_entry_still_present")
+        assert key in ldif_blocks, f"User entry 'dn: {key}' missing from LDIF"
         objectclasses = [oc.lower() for oc in ldif_blocks[key].get("objectclass", [])]
         assert "inetorgperson" in objectclasses, (
-            f"User {uid!r}: objectClass: inetOrgPerson missing after group additions"
+            f"User {uid!r}: objectClass: inetOrgPerson missing, "
+            f"got objectClass={ldif_blocks[key].get('objectclass', [])!r}"
         )
 
     @pytest.mark.parametrize("uid", ["alice", "bob", "charlie", "diana", "eve"])
-    def test_user_still_has_mail(self, ldif_blocks, uid):
-        """Each user must still have a mail: attribute after group additions."""
+    def test_user_has_mail(self, ldif_blocks, uid):
+        """Each user entry must have a mail: attribute.
+
+        mail is the LDAP correlation attribute for cross-protocol enrichment —
+        a user without it cannot be matched by primary_email.
+        """
         key = f"uid={uid},ou=users,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.skip(f"User {uid!r} not in LDIF")
+        assert key in ldif_blocks, f"User entry 'dn: {key}' missing from LDIF"
         assert "mail" in ldif_blocks[key] and ldif_blocks[key]["mail"], (
-            f"User {uid!r}: mail attribute missing after group additions"
+            f"User {uid!r}: mail attribute missing"
         )
 
     def test_total_dn_count_includes_ous_users_and_groups(self, ldif_blocks):
@@ -565,7 +564,7 @@ class TestMemberofOverlayScript:
         """
         assert OVERLAY_SCRIPT.exists(), (
             f"memberof-overlay.sh not found at {OVERLAY_SCRIPT}. "
-            "The file must be created as part of this chunk."
+            "Without it the memberof overlay is never configured in slapd."
         )
 
     def test_script_has_shell_shebang(self):
@@ -657,18 +656,114 @@ class TestMemberofOverlayScript:
 
 
 # ---------------------------------------------------------------------------
-# Class: Dockerfile additions for memberof-overlay.sh
+# Class: 00-memberof-overlay.ldif (overlay reconfiguration)
+# ---------------------------------------------------------------------------
+
+
+class TestMemberofOverlayLdif:
+    """Tests that infrastructure/openldap/00-memberof-overlay.ldif reconfigures
+    the image-default memberof overlay for the groupOfNames/member schema.
+
+    osixia/openldap:1.5.0 ships a default memberof overlay configured for
+    groupOfUniqueNames/uniqueMember. bootstrap.ldif uses groupOfNames/member,
+    so without this reconfiguration the default overlay never fires and
+    memberOf back-links are never populated on user entries.
+    """
+
+    @pytest.fixture(scope="class")
+    def overlay_ldif_lines(self) -> list[str]:
+        """Non-comment, non-blank lines of 00-memberof-overlay.ldif, stripped."""
+        assert OVERLAY_LDIF.exists(), (
+            f"00-memberof-overlay.ldif not found at {OVERLAY_LDIF}. "
+            "Without it the image-default memberof overlay stays configured for "
+            "groupOfUniqueNames/uniqueMember and memberOf is never populated."
+        )
+        return [
+            ln.strip()
+            for ln in OVERLAY_LDIF.read_text(encoding="utf-8").splitlines()
+            if ln.strip() and not ln.strip().startswith("#")
+        ]
+
+    def test_filename_sorts_before_bootstrap_ldif(self):
+        """The '00-' prefix must keep the file sorted before bootstrap.ldif.
+
+        osixia processes ldif/custom/*.ldif via `find | sort`, so the overlay
+        reconfiguration must sort first to be active before the group entries
+        from bootstrap.ldif are loaded.
+        """
+        assert OVERLAY_LDIF.name < LDIF_FILE.name, (
+            f"{OVERLAY_LDIF.name!r} must sort before {LDIF_FILE.name!r} so the "
+            "overlay is reconfigured before bootstrap.ldif adds the group entries."
+        )
+
+    def test_targets_default_memberof_overlay_dn(self, overlay_ldif_lines):
+        """The modify must target the image-default memberof overlay entry.
+
+        dn: olcOverlay={0}memberof,olcDatabase={1}mdb,cn=config is where the
+        osixia image pre-configures the overlay; modifying any other DN leaves
+        the active overlay untouched.
+        """
+        expected_dn = "dn: olcOverlay={0}memberof,olcDatabase={1}mdb,cn=config"
+        assert expected_dn in overlay_ldif_lines, (
+            f"Expected '{expected_dn}' in 00-memberof-overlay.ldif, "
+            f"got lines: {overlay_ldif_lines!r}"
+        )
+
+    def test_uses_changetype_modify(self, overlay_ldif_lines):
+        """The LDIF must use changetype: modify, never changetype: add.
+
+        The image already has a memberof overlay entry — an add would collide
+        with it. modify/replace is also idempotent across container restarts.
+        """
+        assert "changetype: modify" in overlay_ldif_lines, (
+            f"Expected 'changetype: modify' in 00-memberof-overlay.ldif, "
+            f"got lines: {overlay_ldif_lines!r}"
+        )
+        assert "changetype: add" not in overlay_ldif_lines, (
+            "00-memberof-overlay.ldif must not use 'changetype: add' — the "
+            "image-default overlay entry already exists and an add would collide."
+        )
+
+    def test_replaces_group_oc_with_groupofnames(self, overlay_ldif_lines):
+        """olcMemberOfGroupOC must be replaced with groupOfNames.
+
+        This is the objectClass the overlay watches for group entries; left at
+        the image default (groupOfUniqueNames) it ignores bootstrap.ldif groups.
+        """
+        assert "replace: olcMemberOfGroupOC" in overlay_ldif_lines, (
+            f"Expected 'replace: olcMemberOfGroupOC', got lines: {overlay_ldif_lines!r}"
+        )
+        assert "olcMemberOfGroupOC: groupOfNames" in overlay_ldif_lines, (
+            f"Expected 'olcMemberOfGroupOC: groupOfNames', got lines: {overlay_ldif_lines!r}"
+        )
+
+    def test_replaces_member_ad_with_member(self, overlay_ldif_lines):
+        """olcMemberOfMemberAD must be replaced with member.
+
+        This is the attribute the overlay reads member DNs from; left at the
+        image default (uniqueMember) the groups' member: values are ignored.
+        """
+        assert "replace: olcMemberOfMemberAD" in overlay_ldif_lines, (
+            f"Expected 'replace: olcMemberOfMemberAD', got lines: {overlay_ldif_lines!r}"
+        )
+        assert "olcMemberOfMemberAD: member" in overlay_ldif_lines, (
+            f"Expected 'olcMemberOfMemberAD: member', got lines: {overlay_ldif_lines!r}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Class: Dockerfile COPY lines
 # ---------------------------------------------------------------------------
 
 
 class TestDockerfileMemberofCopy:
-    """Tests that infrastructure/openldap/Dockerfile retains existing content
-    and adds a COPY line for memberof-overlay.sh into the osixia custom-bootstrap
-    directory.
+    """Tests the infrastructure/openldap/Dockerfile COPY lines: bootstrap.ldif,
+    memberof-overlay.sh, and 00-memberof-overlay.ldif must all be baked into
+    the osixia custom-bootstrap directory.
 
-    Spec §5.3: The Dockerfile copies bootstrap.ldif and memberof-overlay.sh into
-    /container/service/slapd/assets/config/bootstrap/. Both files must be COPY'd
-    so they are baked into the image and available at container startup.
+    Spec §5.3: The Dockerfile copies these files into
+    /container/service/slapd/assets/config/bootstrap/ so they are part of the
+    image and available at container startup.
     """
 
     @pytest.fixture(autouse=True)
@@ -679,31 +774,30 @@ class TestDockerfileMemberofCopy:
     def dockerfile_content(self) -> str:
         return DOCKERFILE.read_text(encoding="utf-8")
 
-    def test_dockerfile_retains_from_osixia_openldap(self, dockerfile_content):
-        """Dockerfile must retain 'FROM osixia/openldap:1.5.0'.
+    def test_dockerfile_from_osixia_openldap(self, dockerfile_content):
+        """Dockerfile must use 'FROM osixia/openldap:1.5.0'.
 
-        The base image must not be changed — all overlay configuration depends on
-        the osixia/openldap:1.5.0 bootstrap mechanism and directory layout.
+        All overlay configuration depends on the osixia/openldap:1.5.0
+        bootstrap mechanism and directory layout.
         """
         assert "FROM osixia/openldap:1.5.0" in dockerfile_content, (
-            "Dockerfile must retain 'FROM osixia/openldap:1.5.0'. "
+            "Dockerfile must use 'FROM osixia/openldap:1.5.0'. "
             f"Dockerfile content:\n{dockerfile_content}"
         )
 
-    def test_dockerfile_retains_bootstrap_ldif_copy(self, dockerfile_content):
-        """Dockerfile must retain the COPY line for bootstrap.ldif.
+    def test_dockerfile_copies_bootstrap_ldif(self, dockerfile_content):
+        """Dockerfile must contain a COPY line for bootstrap.ldif.
 
-        This COPY bakes the user and group entries into the image. Removing it
-        would cause the OpenLDAP container to start with no users or groups.
+        This COPY bakes the user and group entries into the image. Without it
+        the OpenLDAP container starts with no users or groups.
         """
-        # The existing COPY line: bootstrap.ldif → osixia custom bootstrap dir
         assert "COPY bootstrap.ldif" in dockerfile_content, (
-            "Dockerfile must retain the existing 'COPY bootstrap.ldif ...' line. "
+            "Dockerfile must contain a 'COPY bootstrap.ldif ...' line. "
             f"Dockerfile content:\n{dockerfile_content}"
         )
 
-    def test_dockerfile_adds_copy_for_memberof_overlay_sh(self, dockerfile_content):
-        """Dockerfile must add a COPY line for memberof-overlay.sh.
+    def test_dockerfile_copies_memberof_overlay_sh(self, dockerfile_content):
+        """Dockerfile must contain a COPY line for memberof-overlay.sh.
 
         The overlay script must be copied into the osixia custom-bootstrap
         directory so it is executed automatically during container startup.
@@ -711,8 +805,29 @@ class TestDockerfileMemberofCopy:
         the container.
         """
         assert "COPY memberof-overlay.sh" in dockerfile_content, (
-            "Dockerfile must add 'COPY memberof-overlay.sh ...' for the overlay script. "
+            "Dockerfile must contain a 'COPY memberof-overlay.sh ...' line. "
             f"Dockerfile content:\n{dockerfile_content}"
+        )
+
+    def test_dockerfile_copies_00_memberof_overlay_ldif_into_ldif_custom(self, dockerfile_content):
+        """Dockerfile must COPY 00-memberof-overlay.ldif into ldif/custom/.
+
+        The overlay reconfiguration only takes effect if the file lands in the
+        osixia ldif/custom/ directory, where `find | sort` picks it up before
+        bootstrap.ldif.
+        """
+        copy_lines = [
+            ln for ln in dockerfile_content.splitlines()
+            if ln.strip().startswith("COPY") and "00-memberof-overlay.ldif" in ln
+        ]
+        assert copy_lines, (
+            "Dockerfile must contain a 'COPY 00-memberof-overlay.ldif ...' line. "
+            f"Dockerfile content:\n{dockerfile_content}"
+        )
+        assert "/container/service/slapd/assets/config/bootstrap/ldif/custom/" in copy_lines[0], (
+            "COPY line for 00-memberof-overlay.ldif must target "
+            "'/container/service/slapd/assets/config/bootstrap/ldif/custom/'. "
+            f"Found: {copy_lines[0]!r}"
         )
 
     def test_dockerfile_memberof_overlay_sh_copy_targets_bootstrap_dir(self, dockerfile_content):
@@ -734,7 +849,7 @@ class TestDockerfileMemberofCopy:
         # The destination must reference the osixia bootstrap assets path
         copy_line = copy_lines[0]
         assert "/container/service/slapd/assets/config/bootstrap/" in copy_line, (
-            f"COPY line for memberof-overlay.sh must target "
+            "COPY line for memberof-overlay.sh must target "
             "'/container/service/slapd/assets/config/bootstrap/'. "
             f"Found: {copy_line!r}"
         )
@@ -776,11 +891,9 @@ class TestSpec0Section53Mirror:
     """Tests that SPEC_0 §5.3 mirrors the four group entries from bootstrap.ldif
     and includes a paragraph describing the overlay configuration.
 
-    The doc mirror requirement: §5.3 must be updated to show the group entries
-    and explain the memberof/refint overlay so that the spec remains the
-    authoritative reference for what the OpenLDAP bootstrap contains.
-
-    Scope is limited to §5.3 — no other section should be modified.
+    The doc mirror requirement: §5.3 must show the group entries and explain
+    the memberof/refint overlay so that the spec remains the authoritative
+    reference for what the OpenLDAP bootstrap contains.
     """
 
     @pytest.fixture(autouse=True)

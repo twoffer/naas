@@ -87,7 +87,7 @@ class TestCommittedYamlWeights:
 
     All values in this class are labelled [TRANSCRIBE EXACTLY] in the spec.
     A deviation means confidence scores produced by §5.5 do not match the
-    §3.3 representative payload example (normalization_confidence: 0.87).
+    §3.3 representative payload example.
     """
 
     @pytest.fixture(scope="class")
@@ -324,7 +324,7 @@ class TestCommittedYamlPriorities:
         """priority_for('display_name') == ['oidc', 'saml', 'ldap'].
 
         WHY: OIDC tokens carry the most current display name from the login provider;
-        LDAP may lag behind preferred-name changes. §5.6 updated to reflect this.
+        LDAP may lag behind preferred-name changes.
         """
         result = cfg.priority_for("display_name")
 
