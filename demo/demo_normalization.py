@@ -159,7 +159,9 @@ def _resolve_norm_url() -> str:
 def _resolve_db_dsn(args: argparse.Namespace) -> str:
     """Return the psycopg DSN for direct PostgreSQL access.
 
-    Precedence: --db-dsn flag > POSTGRES_* env vars.
+    Precedence: --db-dsn flag > POSTGRES_* env vars. Non-secret connection
+    parameters fall back to local-dev defaults; the password has no default —
+    POSTGRES_PASSWORD must be set when --db-dsn is not supplied.
     """
     if args.db_dsn:
         return args.db_dsn
@@ -168,7 +170,12 @@ def _resolve_db_dsn(args: argparse.Namespace) -> str:
     port = os.environ.get("POSTGRES_PORT", "5432")
     dbname = os.environ.get("POSTGRES_DB", "naas")
     user = os.environ.get("POSTGRES_USER", "naas")
-    password = os.environ.get("POSTGRES_PASSWORD", "naas")
+    password = os.environ.get("POSTGRES_PASSWORD")
+    if not password:
+        sys.exit(
+            "POSTGRES_PASSWORD is not set. Export it (see .env / .env.example) "
+            "or pass a full DSN via --db-dsn."
+        )
     return f"host={host} port={port} dbname={dbname} user={user} password={password}"
 
 

@@ -56,7 +56,8 @@ corresponding flags):
 - `POSTGRES_PORT` — PostgreSQL port (default: `5432`)
 - `POSTGRES_DB` — database name
 - `POSTGRES_USER` — database user
-- `POSTGRES_PASSWORD` — database password
+- `POSTGRES_PASSWORD` — database password (**required** unless `--db-dsn` is supplied;
+  the script exits with an error if neither is set)
 
 ## Note on database access
 
@@ -66,7 +67,8 @@ provide the connection credentials.
 
 When running from the host shell (not inside a container), note that:
 
-- The stack's Postgres password is `naas_dev_password`, not the script's default `naas`.
+- The stack's default Postgres password is `naas_dev_password` (see `.env.example`);
+  the script has no password default and exits if `POSTGRES_PASSWORD` is unset.
 - `POSTGRES_HOST=postgres` in `.env` is a docker-internal service alias that is not
   reachable from the host — use `localhost` instead.
 
