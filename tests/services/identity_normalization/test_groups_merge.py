@@ -275,6 +275,29 @@ class TestSingleGroupSource:
             f"Expected resolution='list_merge', got {detail.resolution!r}."
         )
 
+    def test_single_source_sources_lists_contributing_protocol(self) -> None:
+        """sources == [the one contributing protocol] for single-source groups.
+
+        WHY: §5.5 — `sources` records which protocols contributed groups
+        (consumers such as the demo render it as provenance).
+        """
+        from app.resolution import resolve
+        from naas_shared.models import ListMergeResolution
+
+        cfg = _load_real_config()
+        result = resolve(
+            attribute_sources={"groups": {"saml": ["finance-team"]}},
+            config=cfg,
+            source_protocol="saml",
+            enrichment=_skip_enrichment(),
+        )
+
+        detail = result.resolution_details["groups"]
+        assert isinstance(detail, ListMergeResolution)
+        assert detail.sources == ["saml"], (
+            f"Expected sources=['saml'] for single-source groups, got {detail.sources!r}."
+        )
+
 
 # ===========================================================================
 # CLASS 3 — Union merge strategy (multiple sources)
@@ -372,6 +395,36 @@ class TestUnionMerge:
         )
         assert detail.total_unique_groups == 3
         assert detail.strategy == "union"
+
+    def test_union_sources_lists_all_contributors_sorted(self) -> None:
+        """sources lists every contributing protocol, sorted alphabetically.
+
+        WHY: §5.5 — multi-element `sources` lists are sorted alphabetically,
+        matching the scalar variants, so output is deterministic and
+        exact-match assertable.
+        """
+        from app.resolution import resolve
+        from naas_shared.models import ListMergeResolution
+
+        cfg = _load_real_config()
+        result = resolve(
+            attribute_sources={
+                "groups": {
+                    "oidc": ["admin", "vpn-users"],
+                    "ldap": ["admin", "engineering"],
+                }
+            },
+            config=cfg,
+            source_protocol="oidc",
+            enrichment=_applied_enrichment(),
+        )
+
+        detail = result.resolution_details["groups"]
+        assert isinstance(detail, ListMergeResolution)
+        assert detail.sources == ["ldap", "oidc"], (
+            f"Expected sources=['ldap', 'oidc'] (sorted alphabetically), "
+            f"got {detail.sources!r}."
+        )
 
     def test_union_strategy_field_equals_union(self) -> None:
         """strategy field on ListMergeResolution == 'union' for default config."""

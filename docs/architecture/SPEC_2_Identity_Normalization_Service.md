@@ -131,11 +131,11 @@ The serialized `NormalizedAttributes` is the contract for the Risk Evaluator (wh
   "normalization_confidence": 0.87,
   "enrichment": { "applied": true, "source": "ldap", "cache_hit": false },
   "resolution_details": {
-    "display_name":  { "resolution": "unanimous", "resolved_value": "Alice Smith", "confidence": 0.90, "sources": ["oidc", "ldap"] },
-    "primary_email": { "resolution": "unanimous", "resolved_value": "alice@corp.com", "confidence": 0.95, "sources": ["oidc", "ldap"] },
+    "display_name":  { "resolution": "unanimous", "resolved_value": "Alice Smith", "confidence": 0.90, "sources": ["ldap", "oidc"] },
+    "primary_email": { "resolution": "unanimous", "resolved_value": "alice@corp.com", "confidence": 0.95, "sources": ["ldap", "oidc"] },
     "department":    { "resolution": "priority", "resolved_value": "Engineering", "confidence": 0.72, "winner_source": "ldap", "conflicting_values": {"oidc": "Product"}, "penalty_applied": true },
-    "employee_type": { "resolution": "unanimous", "resolved_value": "FTE", "confidence": 0.95, "sources": ["oidc", "ldap"] },
-    "groups":        { "resolution": "list_merge", "resolved_value": ["admin", "engineering", "vpn-users"], "confidence": 0.85, "strategy": "union", "total_unique_groups": 3 }
+    "employee_type": { "resolution": "unanimous", "resolved_value": "FTE", "confidence": 0.95, "sources": ["ldap", "oidc"] },
+    "groups":        { "resolution": "list_merge", "resolved_value": ["admin", "engineering", "vpn-users"], "confidence": 0.85, "strategy": "union", "total_unique_groups": 3, "sources": ["ldap", "oidc"] }
   }
 }
 ```
@@ -307,7 +307,7 @@ After extraction (and enrichment, if applied), the service holds, per unified at
 
 - **0 present sources** → the unified attribute is `None`; it contributes `0.0` to the overall confidence (§5.5.2); and **no entry is written** to `resolution_details` for it (the dict simply omits the key).
 - **Exactly 1 present source** → `SingleSourceResolution(resolution="single_source", resolved_value=<value>, confidence=<source weight for this attribute>, sources=[that one protocol])`. This is the common single-protocol path and the enriched path where only one source had the attribute.
-- **≥2 present sources, all agree** (after value normalization) → `UnanimousResolution(resolution="unanimous", resolved_value=<agreed value>, confidence=<max authority weight among the agreeing sources>, sources=[the agreeing protocols])`.
+- **≥2 present sources, all agree** (after value normalization) → `UnanimousResolution(resolution="unanimous", resolved_value=<agreed value>, confidence=<max authority weight among the agreeing sources>, sources=[the agreeing protocols])`. Every multi-element `sources` list (here and in `ListMergeResolution`) is **sorted alphabetically** — deterministic output that exact-match test assertions can rely on.
 - **≥2 present sources, disagree** → `PriorityResolution(resolution="priority", resolved_value=<winner's value>, confidence=<winner weight × 0.8>, winner_source=<protocol>, conflicting_values={losing protocol: losing value, ...}, penalty_applied=True)`. The winner is the highest-priority source (per the attribute's `priority` list) that has a value; if — pathologically — no configured-priority source has a value, the highest-weight present source wins. `conflicting_values` contains only the losing **non-null** values.
 
 **Normalization-failure penalty.** The `0.2` penalty attaches to a resolution's confidence **only when the resolved (winning) value is itself an unmapped value** (clamped to `[0.0, 1.0]`). This can happen only for `department`, whose unmapped values are retained (§5.2); it can **never** happen for `employee_type`, whose unmapped values are discarded to `None`. A source whose value was discarded — an unmapped `employee_type`, or any field simply absent — is **not** a present source for that attribute, so it neither contributes nor penalizes: a surviving valid source resolves at its own full confidence (the discarded source's failure does **not** reduce it), and if no source survives the attribute is `None` contributing `0.0`. The discarded value is recorded only as a logged warning, never as a numeric penalty carried into another source's resolution.
@@ -322,6 +322,7 @@ ListMergeResolution(
     confidence=<see below>,
     strategy=<config merge_strategy; default "union">,
     total_unique_groups=<len of merged list>,
+    sources=<source protocols that contributed groups, sorted alphabetically>,
 )
 ```
 

@@ -463,6 +463,7 @@ class ListMergeResolution(ResolutionDetailBase):
     resolved_value: list[str] = Field(default_factory=list)
     strategy: Literal["union", "intersection", "priority"]
     total_unique_groups: int = Field(ge=0)
+    sources: list[SourceProtocol] = Field(default_factory=list)
 
 
 ResolutionDetail = Annotated[
