@@ -14,7 +14,6 @@
 FROM osixia/openldap:1.5.0
 
 COPY bootstrap.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
-COPY memberof-overlay.sh /container/service/slapd/assets/config/bootstrap/memberof-overlay.sh
 # Reconfigure the built-in memberof overlay for groupOfNames/member via a custom
 # bootstrap LDIF.  osixia processes *.ldif files in ldif/custom/ via
 # ldap_add_or_modify() (uses "ldapmodify -Y EXTERNAL -H ldapi:///") which runs

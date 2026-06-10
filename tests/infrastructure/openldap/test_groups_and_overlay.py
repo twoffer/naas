@@ -1,7 +1,6 @@
 # Verifies infrastructure/openldap group entries in bootstrap.ldif,
-# memberof-overlay.sh content, the 00-memberof-overlay.ldif overlay
-# reconfiguration, the Dockerfile COPY lines, and the SPEC_0 §5.3
-# documentation mirror.
+# the 00-memberof-overlay.ldif overlay reconfiguration, the Dockerfile
+# COPY lines, and the SPEC_0 §5.3 documentation mirror.
 #
 # Spec §5.3: four groupOfNames entries (engineering, product, security,
 # vpn-users) under ou=groups,dc=corp,dc=com, each with objectClass:
@@ -34,7 +33,6 @@ def _find_repo_root() -> Path:
 
 REPO_ROOT = _find_repo_root()
 LDIF_FILE = REPO_ROOT / "infrastructure" / "openldap" / "bootstrap.ldif"
-OVERLAY_SCRIPT = REPO_ROOT / "infrastructure" / "openldap" / "memberof-overlay.sh"
 OVERLAY_LDIF = REPO_ROOT / "infrastructure" / "openldap" / "00-memberof-overlay.ldif"
 DOCKERFILE = REPO_ROOT / "infrastructure" / "openldap" / "Dockerfile"
 SPEC0_DOC = REPO_ROOT / "docs" / "architecture" / "SPEC_0_Project_Scaffold_and_Shared_Foundation.md"
@@ -542,120 +540,6 @@ class TestLdifUserEntriesIntact:
 
 
 # ---------------------------------------------------------------------------
-# Class: memberof-overlay.sh
-# ---------------------------------------------------------------------------
-
-
-class TestMemberofOverlayScript:
-    """Tests that infrastructure/openldap/memberof-overlay.sh exists and
-    contains a valid ldapmodify invocation targeting cn=config over ldapi:///
-    referencing both the memberof and refint overlays.
-
-    The memberof overlay provides reverse-link attributes on user entries
-    (memberOf: cn=engineering,...). The refint overlay maintains referential
-    integrity when members are renamed or deleted.
-    """
-
-    def test_script_file_exists(self):
-        """memberof-overlay.sh must exist at infrastructure/openldap/memberof-overlay.sh.
-
-        Without this script, the overlay is never loaded into slapd and
-        LDAP memberOf queries return no results.
-        """
-        assert OVERLAY_SCRIPT.exists(), (
-            f"memberof-overlay.sh not found at {OVERLAY_SCRIPT}. "
-            "Without it the memberof overlay is never configured in slapd."
-        )
-
-    def test_script_has_shell_shebang(self):
-        """memberof-overlay.sh must start with a shell shebang line (e.g., #!/bin/sh).
-
-        A missing shebang causes the osixia bootstrap runner to either skip the
-        script or execute it incorrectly depending on the host shell environment.
-        """
-        assert OVERLAY_SCRIPT.exists(), f"Script missing: {OVERLAY_SCRIPT}"
-        first_line = OVERLAY_SCRIPT.read_text(encoding="utf-8").splitlines()[0]
-        assert first_line.startswith("#!"), (
-            f"memberof-overlay.sh first line must be a shebang (e.g., #!/bin/sh), "
-            f"got: {first_line!r}"
-        )
-        assert "/sh" in first_line or "/bash" in first_line, (
-            f"Shebang must reference sh or bash, got: {first_line!r}"
-        )
-
-    def test_script_contains_ldapmodify(self):
-        """memberof-overlay.sh must invoke ldapmodify.
-
-        ldapmodify is the LDAP tool used to apply LDIF-format configuration
-        changes to the cn=config DIT (online config). Without ldapmodify, the
-        overlay cannot be activated at runtime.
-        """
-        assert OVERLAY_SCRIPT.exists(), f"Script missing: {OVERLAY_SCRIPT}"
-        content = OVERLAY_SCRIPT.read_text(encoding="utf-8")
-        assert "ldapmodify" in content, (
-            "memberof-overlay.sh must contain an 'ldapmodify' invocation. "
-            f"Script content (first 200 chars): {content[:200]!r}"
-        )
-
-    def test_script_targets_cn_config(self):
-        """The ldapmodify invocation must target cn=config.
-
-        OpenLDAP online configuration lives in the cn=config DIT (OLC). Overlay
-        configuration must be applied there — not to the main data DIT — so that
-        slapd loads the overlay without requiring a restart.
-        """
-        assert OVERLAY_SCRIPT.exists(), f"Script missing: {OVERLAY_SCRIPT}"
-        content = OVERLAY_SCRIPT.read_text(encoding="utf-8")
-        assert "cn=config" in content, (
-            "memberof-overlay.sh must reference 'cn=config' (OpenLDAP OLC target). "
-            f"Script content (first 400 chars): {content[:400]!r}"
-        )
-
-    def test_script_uses_ldapi_socket(self):
-        """The ldapmodify invocation must use ldapi:/// (Unix socket connection).
-
-        Within the osixia/openldap container, the cn=config DIT is only
-        accessible over ldapi:/// (the local Unix socket). Using ldap:// would
-        require the server to be fully started and port-accessible, which is
-        not guaranteed during bootstrap.
-        """
-        assert OVERLAY_SCRIPT.exists(), f"Script missing: {OVERLAY_SCRIPT}"
-        content = OVERLAY_SCRIPT.read_text(encoding="utf-8")
-        assert "ldapi:///" in content, (
-            "memberof-overlay.sh must use 'ldapi:///' for the cn=config connection. "
-            f"Script content (first 400 chars): {content[:400]!r}"
-        )
-
-    def test_script_references_memberof_overlay(self):
-        """The script must reference the 'memberof' overlay by name.
-
-        The memberof overlay module is 'memberof' in OpenLDAP module terminology.
-        Without this reference, the overlay is never loaded and LDAP memberOf
-        attributes are not populated on user entries.
-        """
-        assert OVERLAY_SCRIPT.exists(), f"Script missing: {OVERLAY_SCRIPT}"
-        content = OVERLAY_SCRIPT.read_text(encoding="utf-8")
-        assert "memberof" in content.lower(), (
-            "memberof-overlay.sh must reference the 'memberof' overlay. "
-            f"Script content (first 400 chars): {content[:400]!r}"
-        )
-
-    def test_script_references_refint_overlay(self):
-        """The script must reference the 'refint' overlay by name.
-
-        The refint (referential integrity) overlay ensures that when a user entry
-        is deleted or renamed, all group member: attributes referencing that user
-        are automatically updated. Without refint, stale member DNs accumulate.
-        """
-        assert OVERLAY_SCRIPT.exists(), f"Script missing: {OVERLAY_SCRIPT}"
-        content = OVERLAY_SCRIPT.read_text(encoding="utf-8")
-        assert "refint" in content.lower(), (
-            "memberof-overlay.sh must reference the 'refint' overlay. "
-            f"Script content (first 400 chars): {content[:400]!r}"
-        )
-
-
-# ---------------------------------------------------------------------------
 # Class: 00-memberof-overlay.ldif (overlay reconfiguration)
 # ---------------------------------------------------------------------------
 
@@ -757,9 +641,9 @@ class TestMemberofOverlayLdif:
 
 
 class TestDockerfileMemberofCopy:
-    """Tests the infrastructure/openldap/Dockerfile COPY lines: bootstrap.ldif,
-    memberof-overlay.sh, and 00-memberof-overlay.ldif must all be baked into
-    the osixia custom-bootstrap directory.
+    """Tests the infrastructure/openldap/Dockerfile COPY lines: bootstrap.ldif
+    and 00-memberof-overlay.ldif must both be baked into the osixia
+    custom-bootstrap directory.
 
     Spec §5.3: The Dockerfile copies these files into
     /container/service/slapd/assets/config/bootstrap/ so they are part of the
@@ -796,19 +680,6 @@ class TestDockerfileMemberofCopy:
             f"Dockerfile content:\n{dockerfile_content}"
         )
 
-    def test_dockerfile_copies_memberof_overlay_sh(self, dockerfile_content):
-        """Dockerfile must contain a COPY line for memberof-overlay.sh.
-
-        The overlay script must be copied into the osixia custom-bootstrap
-        directory so it is executed automatically during container startup.
-        Without this COPY, the script exists in the repo but never runs inside
-        the container.
-        """
-        assert "COPY memberof-overlay.sh" in dockerfile_content, (
-            "Dockerfile must contain a 'COPY memberof-overlay.sh ...' line. "
-            f"Dockerfile content:\n{dockerfile_content}"
-        )
-
     def test_dockerfile_copies_00_memberof_overlay_ldif_into_ldif_custom(self, dockerfile_content):
         """Dockerfile must COPY 00-memberof-overlay.ldif into ldif/custom/.
 
@@ -828,30 +699,6 @@ class TestDockerfileMemberofCopy:
             "COPY line for 00-memberof-overlay.ldif must target "
             "'/container/service/slapd/assets/config/bootstrap/ldif/custom/'. "
             f"Found: {copy_lines[0]!r}"
-        )
-
-    def test_dockerfile_memberof_overlay_sh_copy_targets_bootstrap_dir(self, dockerfile_content):
-        """The memberof-overlay.sh COPY must target the osixia custom-bootstrap directory.
-
-        The osixia/openldap entrypoint executes scripts found in
-        /container/service/slapd/assets/config/bootstrap/. The COPY destination
-        must include this path so the script runs at startup.
-        """
-        # Find the COPY line for memberof-overlay.sh and check it targets the bootstrap dir
-        copy_lines = [
-            ln for ln in dockerfile_content.splitlines()
-            if ln.strip().startswith("COPY") and "memberof-overlay.sh" in ln
-        ]
-        assert copy_lines, (
-            "No COPY line for memberof-overlay.sh found in Dockerfile. "
-            f"Dockerfile content:\n{dockerfile_content}"
-        )
-        # The destination must reference the osixia bootstrap assets path
-        copy_line = copy_lines[0]
-        assert "/container/service/slapd/assets/config/bootstrap/" in copy_line, (
-            "COPY line for memberof-overlay.sh must target "
-            "'/container/service/slapd/assets/config/bootstrap/'. "
-            f"Found: {copy_line!r}"
         )
 
 

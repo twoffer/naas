@@ -65,6 +65,9 @@ def demo_mod():
         pytest.fail(f"demo_normalization.py not found at {DEMO_SCRIPT}")
     spec = importlib.util.spec_from_file_location("demo_normalization_flow", DEMO_SCRIPT)
     mod = importlib.util.module_from_spec(spec)
+    # Register before exec so in-test `from demo_normalization_flow import ...`
+    # statements resolve (spec_from_file_location does not touch sys.modules).
+    sys.modules["demo_normalization_flow"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -910,6 +913,95 @@ class TestVerifyResultsScene5GroupsListMerge:
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 5 groups resolution is 'single_source' not 'list_merge'"
+        )
+
+
+class TestVerifyResultsGroupsCorroboration:
+    """verify_results rejects Scenes 5–6 group merges with no directory corroboration.
+
+    Spec §5.5: multi-source list_merge confidence is 0.7 + 0.3 × (fraction of
+    merged groups present in more than one source). Scenes 5–6 expect 2 of 3
+    merged groups corroborated by the directory (fraction ⅔); a token-only
+    union (fraction 0, confidence 0.70) means LDAP enrichment merged nothing
+    from the directory — e.g. memberOf back-population is broken — and must
+    fail verification instead of rendering silently.
+    """
+
+    def test_scene5_token_only_union_is_rejected(self, demo_mod) -> None:
+        """Scene 5 groups confidence 0.70 (zero corroborated fraction) produces a problem.
+
+        WHY: enrichment.applied=True with a token-only group union is exactly the
+        broken-overlay failure mode; the structural list_merge check alone cannot
+        detect it.
+        """
+        from demo_normalization_flow import SCENES
+
+        bad_scene5 = _scene5_alice_oidc_enriched()
+        bad_scene5["resolution_details"]["groups"] = _list_merge(
+            ["engineering", "product-admins", "vpn-users"], 0.70
+        ).model_dump(mode="json")
+
+        results = _six_results()
+        results[4] = bad_scene5
+        wrapped = _wrap_results(results)
+
+        problems = demo_mod.verify_results(SCENES, wrapped)
+
+        assert any(
+            p["scene"] == 4 and "corroborat" in p["message"] for p in problems
+        ), (
+            f"Expected a Scene-5 corroboration problem for a token-only group "
+            f"union (groups confidence 0.70), got: {problems}"
+        )
+
+    def test_scene6_token_only_union_is_rejected(self, demo_mod) -> None:
+        """Scene 6 groups confidence 0.70 (zero corroborated fraction) produces a problem.
+
+        WHY: the corroboration requirement applies to both enriched scenes.
+        """
+        from demo_normalization_flow import SCENES
+
+        bad_scene6 = _scene6_diana_oidc_conflict()
+        bad_scene6["resolution_details"]["groups"] = _list_merge(
+            ["engineering", "oncall", "vpn-users"], 0.70
+        ).model_dump(mode="json")
+
+        results = _six_results()
+        results[5] = bad_scene6
+        wrapped = _wrap_results(results)
+
+        problems = demo_mod.verify_results(SCENES, wrapped)
+
+        assert any(
+            p["scene"] == 5 and "corroborat" in p["message"] for p in problems
+        ), (
+            f"Expected a Scene-6 corroboration problem for a token-only group "
+            f"union (groups confidence 0.70), got: {problems}"
+        )
+
+    def test_half_corroborated_fraction_is_accepted(self, demo_mod) -> None:
+        """Scene 5 groups confidence 0.85 (corroborated fraction ½) produces no problem.
+
+        WHY: the threshold is ≥ ½ so the check stays relative — robust to which
+        2-of-3 groups corroborate — while still failing the broken-overlay states
+        (fraction 0 → 0.70, fraction ⅓ → 0.80).
+        """
+        from demo_normalization_flow import SCENES
+
+        scene5 = _scene5_alice_oidc_enriched()
+        scene5["resolution_details"]["groups"] = _list_merge(
+            ["engineering", "product-admins", "vpn-users"], 0.85
+        ).model_dump(mode="json")
+
+        results = _six_results()
+        results[4] = scene5
+        wrapped = _wrap_results(results)
+
+        problems = demo_mod.verify_results(SCENES, wrapped)
+
+        assert not any("corroborat" in p["message"] for p in problems), (
+            f"Expected no corroboration problem at corroborated fraction ½ "
+            f"(groups confidence 0.85), got: {problems}"
         )
 
 

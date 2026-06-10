@@ -1,5 +1,6 @@
 """Root scaffold: .env.example, directory structure, and required configuration files."""
 
+import re
 from pathlib import Path
 
 # third-party
@@ -37,11 +38,6 @@ REPO_ROOT = _find_repo_root()
 @pytest.fixture(scope="module")
 def env_example_path() -> Path:
     return REPO_ROOT / ".env.example"
-
-
-@pytest.fixture(scope="module")
-def env_path() -> Path:
-    return REPO_ROOT / ".env"
 
 
 @pytest.fixture(scope="module")
@@ -170,45 +166,71 @@ class TestEnvExampleRequiredVars:
 
 
 # ---------------------------------------------------------------------------
-# .env — existence and identity with .env.example
+# .env.example — coverage of docker-compose ${VAR} references
 # ---------------------------------------------------------------------------
+#
+# Note: we deliberately do NOT assert anything about the local .env file.
+# .env is gitignored (it does not exist on a fresh clone) and is expected to
+# drift from .env.example — e.g. POSTGRES_HOST=localhost for bare-metal runs,
+# per SPEC_0's "Docker network DNS" note.  Pinning .env to equal .env.example
+# would punish exactly the documented local-override workflow.  The real
+# anti-staleness invariant lives below: the committed template must cover
+# everything docker compose interpolates.
 
 
-class TestDotEnvFile:
+@pytest.fixture(scope="module")
+def env_example_keys(env_example_text) -> set:
+    """Variable names defined as `KEY=...` lines in .env.example."""
+    keys = set()
+    for line in env_example_text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key = stripped.split("=", 1)[0].strip()
+        if key:
+            keys.add(key)
+    return keys
+
+
+@pytest.fixture(scope="module")
+def compose_env_references() -> set:
+    """Every variable interpolated via ${VAR} (incl. ${VAR:-default}) in
+    docker-compose.yml — i.e. the values docker compose substitutes from the
+    environment (sourced from .env)."""
+    compose_path = REPO_ROOT / "docker-compose.yml"
+    if not compose_path.exists():
+        pytest.skip("docker-compose.yml not found")
+    text = compose_path.read_text(encoding="utf-8")
+    return set(re.findall(r"\$\{([A-Z_][A-Z0-9_]*)", text))
+
+
+class TestEnvExampleCoversComposeReferences:
     """
-    .env is the gitignored local copy of .env.example.  It must be byte-for-byte
-    identical so that `docker-compose up` works out of the box after a fresh
-    clone + `cp .env.example .env`.  The spec states they ship identical.
+    .env.example must define every variable that docker-compose.yml
+    interpolates via ${VAR}.  This is the real anti-staleness guard: it fails
+    when a new compose interpolation is added without a matching .env.example
+    entry, which would silently break `docker compose up` after a fresh
+    `cp .env.example .env` (compose would substitute an empty string).
     """
 
-    def test_dot_env_exists(self, env_path):
-        """
-        .env must exist.  New contributors should not need a manual copy step.
-        .env ships pre-populated from .env.example.
-        """
-        assert env_path.exists(), f".env not found at {env_path}"
-
-    def test_dot_env_is_a_file(self, env_path):
-        """Guard against .env/ directory collision."""
-        assert env_path.is_file(), f"{env_path} exists but is not a regular file"
-
-    def test_dot_env_identical_to_env_example(self, env_path, env_example_path):
-        """
-        .env and .env.example must be byte-for-byte identical.
-        Any divergence means .env.example is stale, which silently breaks
-        new contributor onboarding.
-        """
-        assert env_example_path.exists(), (
-            ".env.example must exist to compare against .env"
+    def test_compose_has_env_references(self, compose_env_references):
+        """Sanity check so the coverage assertion below is never vacuous: if
+        the regex stops matching any ${VAR}, fail loudly rather than pass."""
+        assert compose_env_references, (
+            "No ${VAR} interpolations found in docker-compose.yml — the "
+            "coverage check would be vacuously true."
         )
-        assert env_path.exists(), ".env must exist to compare against .env.example"
 
-        env_example_bytes = env_example_path.read_bytes()
-        env_bytes = env_path.read_bytes()
-
-        assert env_bytes == env_example_bytes, (
-            ".env and .env.example differ — they must be byte-for-byte identical. "
-            f".env.example is {len(env_example_bytes)} bytes, .env is {len(env_bytes)} bytes."
+    def test_env_example_covers_all_compose_references(
+        self, compose_env_references, env_example_keys
+    ):
+        """Every ${VAR} in docker-compose.yml must have a KEY= line in
+        .env.example."""
+        missing = sorted(compose_env_references - env_example_keys)
+        assert not missing, (
+            "docker-compose.yml interpolates variables with no entry in "
+            f".env.example: {missing}. Add them to .env.example so a fresh "
+            "`cp .env.example .env` yields a working stack."
         )
 
 

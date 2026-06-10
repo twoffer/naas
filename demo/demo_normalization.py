@@ -8,12 +8,10 @@ comparison table using rich.
 from __future__ import annotations
 
 import argparse
-import gc as _gc
 import json
 import os
 import sys
 import time
-import types as _types_reg
 from typing import Any
 
 
@@ -370,6 +368,13 @@ def verify_results(
     def _details(na: dict[str, Any]) -> dict[str, Any]:
         return na.get("resolution_details") or {}
 
+    def _corroborated_fraction(groups_detail: dict[str, Any]) -> float:
+        # Multi-source list_merge confidence is 0.7 + 0.3 × (fraction of merged
+        # groups present in more than one source), so the corroborated fraction
+        # is recoverable from the confidence without exact-number assertions.
+        conf = float(groups_detail.get("confidence") or 0.0)
+        return (conf - 0.7) / 0.3
+
     try:
         # Check 1: Scenes 1–4 (indices 0–3): enrichment must not be applied.
         for idx in range(4):
@@ -488,6 +493,16 @@ def verify_results(
                     f"Scene 5 (alice/oidc enriched): groups resolution must be "
                     f"'list_merge', got {groups5.get('resolution')!r}",
                 )
+            elif groups5 and _corroborated_fraction(groups5) < 0.5:
+                _problem(
+                    4,
+                    f"Scene 5 (alice/oidc enriched): merged groups must be "
+                    f"directory-corroborated (≥ half of merged groups present in "
+                    f"both token and directory); implied corroborated fraction is "
+                    f"{_corroborated_fraction(groups5):.2f} — LDAP enrichment "
+                    f"merged little or nothing from the directory (memberOf "
+                    f"back-population broken?)",
+                )
 
             if c5 <= c1_val:
                 _problem(
@@ -544,6 +559,16 @@ def verify_results(
                     5,
                     f"Scene 6 (diana/oidc): groups resolution must be 'list_merge', "
                     f"got {groups6.get('resolution')!r}",
+                )
+            elif groups6 and _corroborated_fraction(groups6) < 0.5:
+                _problem(
+                    5,
+                    f"Scene 6 (diana/oidc): merged groups must be "
+                    f"directory-corroborated (≥ half of merged groups present in "
+                    f"both token and directory); implied corroborated fraction is "
+                    f"{_corroborated_fraction(groups6):.2f} — LDAP enrichment "
+                    f"merged little or nothing from the directory (memberOf "
+                    f"back-population broken?)",
                 )
 
             if c6 >= c5_val:
@@ -949,28 +974,6 @@ def main() -> None:
     else:
         cleanup_events(event_ids, db_dsn)
 
-
-# ---------------------------------------------------------------------------
-# sys.modules self-registration
-#
-# When this file is loaded via importlib.util.spec_from_file_location with a
-# custom module name (e.g. "demo_normalization_flow"), the loader does NOT
-# add the module to sys.modules automatically. Any subsequent
-# `from demo_normalization_flow import ...` call in the same process fails
-# unless we register the module under its current __name__ here.
-#
-# Strategy: find the ModuleType object whose __dict__ IS our globals(),
-# then register it under __name__ in sys.modules.
-# ---------------------------------------------------------------------------
-if __name__ not in sys.modules:
-    _my_globals = globals()
-    for _referrer in _gc.get_referrers(_my_globals):
-        if (
-            isinstance(_referrer, _types_reg.ModuleType)
-            and _referrer.__dict__ is _my_globals
-        ):
-            sys.modules[__name__] = _referrer
-            break
 
 if __name__ == "__main__":
     main()
