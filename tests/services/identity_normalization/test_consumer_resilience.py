@@ -533,7 +533,7 @@ class TestPoolSearchUnbindOnBrokenConnection:
             return await adapter.enrich("primary_email", "bob@corp.com")
 
         try:
-            result = _run(asyncio.wait_for(_second_call(), timeout=2.0))
+            _run(asyncio.wait_for(_second_call(), timeout=2.0))
         except asyncio.TimeoutError:
             pytest.fail(
                 "Second enrich() call timed out — the pool slot was not freed after "
@@ -809,7 +809,7 @@ class TestClassifyLdapError:
         self, monkeypatch
     ) -> None:
         """ValueError (non-LDAP) must classify as 'ldap_unexpected_error'."""
-        fake = _inject_correct_hierarchy_ldap(monkeypatch)
+        _inject_correct_hierarchy_ldap(monkeypatch)
         from app.adapters.ldap import _classify_ldap_error
 
         exc = ValueError("not an ldap error at all")

@@ -9,18 +9,18 @@ Scenarios:
      - Poll PostgreSQL until normalized_attributes is non-NULL (timeout 60s)
      - Parse result as NormalizedAttributes (validates schema conformance)
      - Assert enrichment was applied (EnrichmentApplied, source="ldap")
-     - Assert display_name, primary_email, department, employee_type match
 
   2. LDAP-protocol event for charlie@corp.com:
-     - Ingest via event-ingestion
-     - Poll until normalized_attributes appears
      - Assert enrichment.applied is False with skip_reason="ldap_event"
      - LDAP events must never trigger cross-protocol enrichment (design invariant)
 
   3. OIDC event for an unknown user (no LDAP match):
-     - Ingest via event-ingestion
-     - Poll until normalized_attributes appears
      - Assert enrichment.applied is False with skip_reason="no_ldap_match"
+
+Each scenario's event is ingested and polled exactly ONCE in a module-scoped
+fixture; the tests are independent assertions over that shared normalized
+result. Connection parameters come from the compose_stack fixture (resolved
+from .env) — nothing is hardcoded here.
 
 Users from infrastructure/openldap/bootstrap.ldif used here:
   alice  — mail: alice@corp.com, department: Engineering, FTE, groups: engineering, vpn-users
@@ -44,10 +44,74 @@ pytestmark = [
 # Shared constants
 # ---------------------------------------------------------------------------
 
-_INGEST_URL = "http://localhost:8001/events/ingest"
 _POLL_INTERVAL_S = 2.0
 _POLL_TIMEOUT_S = 60.0
 _FIXED_TIMESTAMP = "2024-01-15T10:30:00+00:00"
+
+
+# ---------------------------------------------------------------------------
+# Event payload builders
+# ---------------------------------------------------------------------------
+
+
+def _make_alice_oidc_event() -> dict:
+    """OIDC event for alice — present in OpenLDAP, enrichment applies."""
+    return {
+        "user_id": "alice",
+        "client_ip": "192.168.1.1",
+        "protocol": "oidc",
+        "timestamp": _FIXED_TIMESTAMP,
+        "source": "api",
+        "is_synthetic": True,
+        "is_historical": False,
+        "raw_attributes": {
+            "name": "Alice Smith",
+            "email": "alice@corp.com",
+            "department": "eng",
+            "employee_type": "FTE",
+            "groups": ["engineering", "vpn-users"],
+        },
+    }
+
+
+def _make_charlie_ldap_event() -> dict:
+    """LDAP-protocol event for charlie — enrichment must be skipped."""
+    return {
+        "user_id": "charlie",
+        "client_ip": "192.168.1.1",
+        "protocol": "ldap",
+        "timestamp": _FIXED_TIMESTAMP,
+        "source": "api",
+        "is_synthetic": True,
+        "is_historical": False,
+        "raw_attributes": {
+            "cn": "Charlie Brown",
+            "mail": "charlie@corp.com",
+            "departmentNumber": "Security",
+            "employeeType": "contractor",
+            "memberOf": ["cn=security,ou=groups,dc=corp,dc=com"],
+        },
+    }
+
+
+def _make_unknown_user_oidc_event() -> dict:
+    """OIDC event for a user with no LDAP entry — no_ldap_match expected."""
+    return {
+        "user_id": "unknown-user-xyz",
+        "client_ip": "192.168.1.1",
+        "protocol": "oidc",
+        "timestamp": _FIXED_TIMESTAMP,
+        "source": "api",
+        "is_synthetic": True,
+        "is_historical": False,
+        "raw_attributes": {
+            "name": "Unknown Person",
+            "email": "nobody@nowhere-xyz-fake.example",
+            "department": "Unknown",
+            "employee_type": "FTE",
+            "groups": [],
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -55,18 +119,18 @@ _FIXED_TIMESTAMP = "2024-01-15T10:30:00+00:00"
 # ---------------------------------------------------------------------------
 
 
-def _post_event(payload: dict, timeout: int = 15) -> str:
+def _post_event(ingest_url: str, payload: dict, timeout: int = 15) -> str:
     """POST to event-ingestion, return the server-assigned event UUID string."""
     body = json.dumps(payload).encode()
     req = urllib.request.Request(
-        _INGEST_URL,
+        ingest_url,
         data=body,
         headers={"Content-Type": "application/json"},
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         data = json.loads(resp.read())
-    assert resp.status == 202, f"Expected 202, got {resp.status}. Body: {data}"
+        assert resp.status == 202, f"Expected 202, got {resp.status}. Body: {data}"
     return data["id"]
 
 
@@ -111,22 +175,15 @@ def pg_connection(compose_stack: dict):
     """Synchronous psycopg3 connection shared across all tests in this module."""
     import psycopg  # noqa: PLC0415
 
-    info = compose_stack["pg_conninfo"]
-    conn = psycopg.connect(
-        host=info["host"],
-        port=info["port"],
-        dbname=info["dbname"],
-        user=info["user"],
-        password=info["password"],
-    )
+    conn = psycopg.connect(**compose_stack["pg_conninfo"])
     conn.autocommit = True
     yield conn
     conn.close()
 
 
-@pytest.fixture
-def cleanup_event_ids(pg_connection):
-    """Accumulate event UUIDs; delete all on teardown."""
+@pytest.fixture(scope="module")
+def module_cleanup_ids(pg_connection):
+    """Accumulate event UUIDs across the module; delete all at module teardown."""
     ids: list[str] = []
     yield ids
     if ids:
@@ -135,6 +192,49 @@ def cleanup_event_ids(pg_connection):
                 "DELETE FROM events WHERE id = ANY(%s::uuid[])",
                 (ids,),
             )
+
+
+def _ingest_and_normalize(
+    compose_stack: dict, pg_connection, module_cleanup_ids: list, payload: dict
+) -> dict:
+    """Ingest one event and return its normalized_attributes dict (shared path)."""
+    ingest_url = compose_stack["event_ingestion_url"] + "/events/ingest"
+    event_id = _post_event(ingest_url, payload)
+    # Register before polling so a poll timeout still cleans up the row.
+    module_cleanup_ids.append(event_id)
+    try:
+        return _poll_normalized_attributes(pg_connection, event_id)
+    except TimeoutError as exc:
+        pytest.fail(str(exc))
+
+
+@pytest.fixture(scope="module")
+def alice_attrs(compose_stack: dict, pg_connection, module_cleanup_ids: list) -> dict:
+    """Normalized result for the alice OIDC event (ingested once per module)."""
+    return _ingest_and_normalize(
+        compose_stack, pg_connection, module_cleanup_ids, _make_alice_oidc_event()
+    )
+
+
+@pytest.fixture(scope="module")
+def charlie_attrs(compose_stack: dict, pg_connection, module_cleanup_ids: list) -> dict:
+    """Normalized result for the charlie LDAP event (ingested once per module)."""
+    return _ingest_and_normalize(
+        compose_stack, pg_connection, module_cleanup_ids, _make_charlie_ldap_event()
+    )
+
+
+@pytest.fixture(scope="module")
+def unknown_user_attrs(
+    compose_stack: dict, pg_connection, module_cleanup_ids: list
+) -> dict:
+    """Normalized result for the unknown-user OIDC event (ingested once per module)."""
+    return _ingest_and_normalize(
+        compose_stack,
+        pg_connection,
+        module_cleanup_ids,
+        _make_unknown_user_oidc_event(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -178,202 +278,52 @@ class TestOidcEventWithLdapEnrichment:
       groups: engineering, vpn-users (via groupOfNames)
     """
 
-    def test_normalized_attributes_populated(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
-    ) -> None:
+    def test_normalized_attributes_populated(self, alice_attrs: dict) -> None:
         """normalized_attributes must be non-NULL within 60s of ingestion."""
-        event = {
-            "user_id": "alice",
-            "client_ip": "192.168.1.1",
-            "protocol": "oidc",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "name": "Alice Smith",
-                "email": "alice@corp.com",
-                "department": "eng",
-                "employee_type": "FTE",
-                "groups": ["engineering", "vpn-users"],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
+        assert alice_attrs is not None, "normalized_attributes is None for alice event"
 
-        try:
-            attrs = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        assert attrs is not None, f"normalized_attributes is None for event {event_id}"
-
-    def test_normalized_attributes_parses_as_model(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
-    ) -> None:
+    def test_normalized_attributes_parses_as_model(self, alice_attrs: dict) -> None:
         """normalized_attributes dict must parse via NormalizedAttributes.model_validate().
 
         Validates the schema contract between the normalization service (writer)
         and all consumers (Risk Evaluator, Dashboard — readers). A ValidationError
         here indicates a schema divergence.
         """
-        event = {
-            "user_id": "alice",
-            "client_ip": "192.168.1.1",
-            "protocol": "oidc",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "name": "Alice Smith",
-                "email": "alice@corp.com",
-                "department": "eng",
-                "employee_type": "FTE",
-                "groups": ["engineering", "vpn-users"],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
         try:
-            attrs_dict = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        try:
-            _validate_normalized_attributes(attrs_dict)
+            _validate_normalized_attributes(alice_attrs)
         except Exception as exc:
             pytest.fail(
                 f"NormalizedAttributes.model_validate() raised {type(exc).__name__}: {exc}\n"
-                f"Raw dict: {attrs_dict}"
+                f"Raw dict: {alice_attrs}"
             )
 
-    def test_oidc_enrichment_applied(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
-    ) -> None:
+    def test_oidc_enrichment_applied(self, alice_attrs: dict) -> None:
         """OIDC event for an LDAP-known user must have enrichment.applied=True.
 
         This is the core cross-protocol enrichment invariant: OIDC events trigger
         an OpenLDAP lookup keyed on primary_email (the configured correlation field).
         alice@corp.com exists in bootstrap.ldif → enrichment must be applied.
         """
-        event = {
-            "user_id": "alice",
-            "client_ip": "192.168.1.1",
-            "protocol": "oidc",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "name": "Alice Smith",
-                "email": "alice@corp.com",
-                "department": "eng",
-                "employee_type": "FTE",
-                "groups": ["engineering", "vpn-users"],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
-        try:
-            attrs_dict = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        enrichment = attrs_dict.get("enrichment", {})
+        enrichment = alice_attrs.get("enrichment", {})
         assert enrichment.get("applied") is True, (
             f"Expected enrichment.applied=True for OIDC alice event, "
-            f"got: {enrichment}. Full attrs: {attrs_dict}"
+            f"got: {enrichment}. Full attrs: {alice_attrs}"
         )
         assert enrichment.get("source") == "ldap", (
             f"Expected enrichment.source='ldap', got: {enrichment.get('source')!r}"
         )
 
-    def test_oidc_normalized_primary_email(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
-    ) -> None:
+    def test_oidc_normalized_primary_email(self, alice_attrs: dict) -> None:
         """Normalized primary_email for alice must be alice@corp.com."""
-        event = {
-            "user_id": "alice",
-            "client_ip": "192.168.1.1",
-            "protocol": "oidc",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "name": "Alice Smith",
-                "email": "alice@corp.com",
-                "department": "eng",
-                "employee_type": "FTE",
-                "groups": ["engineering", "vpn-users"],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
-        try:
-            attrs_dict = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        assert attrs_dict.get("primary_email") == "alice@corp.com", (
+        assert alice_attrs.get("primary_email") == "alice@corp.com", (
             f"Expected primary_email='alice@corp.com', "
-            f"got {attrs_dict.get('primary_email')!r}"
+            f"got {alice_attrs.get('primary_email')!r}"
         )
 
-    def test_oidc_source_protocol_is_oidc(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
-    ) -> None:
+    def test_oidc_source_protocol_is_oidc(self, alice_attrs: dict) -> None:
         """source_protocol in normalized attributes must be 'oidc'."""
-        event = {
-            "user_id": "alice",
-            "client_ip": "192.168.1.1",
-            "protocol": "oidc",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "name": "Alice Smith",
-                "email": "alice@corp.com",
-                "department": "eng",
-                "employee_type": "FTE",
-                "groups": ["engineering", "vpn-users"],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
-        try:
-            attrs_dict = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        assert attrs_dict.get("source_protocol") == "oidc", (
-            f"Expected source_protocol='oidc', got {attrs_dict.get('source_protocol')!r}"
+        assert alice_attrs.get("source_protocol") == "oidc", (
+            f"Expected source_protocol='oidc', got {alice_attrs.get('source_protocol')!r}"
         )
 
 
@@ -391,46 +341,15 @@ class TestLdapEventEnrichmentSkipped:
     """
 
     def test_ldap_event_normalized_attributes_populated(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
+        self, charlie_attrs: dict
     ) -> None:
         """LDAP-protocol events must also produce normalized_attributes."""
-        event = {
-            "user_id": "charlie",
-            "client_ip": "192.168.1.1",
-            "protocol": "ldap",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "cn": "Charlie Brown",
-                "mail": "charlie@corp.com",
-                "departmentNumber": "Security",
-                "employeeType": "contractor",
-                "memberOf": ["cn=security,ou=groups,dc=corp,dc=com"],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
-        try:
-            attrs = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        assert attrs is not None, (
-            f"normalized_attributes is None for LDAP event {event_id}"
+        assert charlie_attrs is not None, (
+            "normalized_attributes is None for LDAP charlie event"
         )
 
     def test_ldap_event_enrichment_skipped_with_ldap_event_reason(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
+        self, charlie_attrs: dict
     ) -> None:
         """LDAP event enrichment must be skipped with skip_reason='ldap_event'.
 
@@ -438,32 +357,7 @@ class TestLdapEventEnrichmentSkipped:
         performing a secondary LDAP lookup would be redundant and could mask
         attribute manipulation in the primary LDAP payload.
         """
-        event = {
-            "user_id": "charlie",
-            "client_ip": "192.168.1.1",
-            "protocol": "ldap",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "cn": "Charlie Brown",
-                "mail": "charlie@corp.com",
-                "departmentNumber": "Security",
-                "employeeType": "contractor",
-                "memberOf": ["cn=security,ou=groups,dc=corp,dc=com"],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
-        try:
-            attrs_dict = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        enrichment = attrs_dict.get("enrichment", {})
+        enrichment = charlie_attrs.get("enrichment", {})
 
         assert enrichment.get("applied") is False, (
             f"Expected enrichment.applied=False for LDAP event, got: {enrichment}"
@@ -473,40 +367,10 @@ class TestLdapEventEnrichmentSkipped:
             f"Full enrichment: {enrichment}"
         )
 
-    def test_ldap_event_parses_as_model(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
-    ) -> None:
+    def test_ldap_event_parses_as_model(self, charlie_attrs: dict) -> None:
         """LDAP event normalized_attributes must also parse via NormalizedAttributes."""
-        event = {
-            "user_id": "charlie",
-            "client_ip": "192.168.1.1",
-            "protocol": "ldap",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "cn": "Charlie Brown",
-                "mail": "charlie@corp.com",
-                "departmentNumber": "Security",
-                "employeeType": "contractor",
-                "memberOf": ["cn=security,ou=groups,dc=corp,dc=com"],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
         try:
-            attrs_dict = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        try:
-            _validate_normalized_attributes(attrs_dict)
+            _validate_normalized_attributes(charlie_attrs)
         except Exception as exc:
             pytest.fail(
                 f"NormalizedAttributes.model_validate() raised {type(exc).__name__}: {exc}"
@@ -527,38 +391,10 @@ class TestOidcEventNoLdapMatch:
     """
 
     def test_unknown_user_enrichment_skipped_with_no_ldap_match(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
+        self, unknown_user_attrs: dict
     ) -> None:
         """OIDC event with unknown email must have skip_reason='no_ldap_match'."""
-        event = {
-            "user_id": "unknown-user-xyz",
-            "client_ip": "192.168.1.1",
-            "protocol": "oidc",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "name": "Unknown Person",
-                "email": "nobody@nowhere-xyz-fake.example",
-                "department": "Unknown",
-                "employee_type": "FTE",
-                "groups": [],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
-        try:
-            attrs_dict = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        enrichment = attrs_dict.get("enrichment", {})
+        enrichment = unknown_user_attrs.get("enrichment", {})
 
         assert enrichment.get("applied") is False, (
             f"Expected enrichment.applied=False for unknown user, got: {enrichment}"
@@ -569,48 +405,20 @@ class TestOidcEventNoLdapMatch:
         )
 
     def test_unknown_user_normalization_still_produces_result(
-        self,
-        compose_stack: dict,
-        pg_connection,
-        cleanup_event_ids: list,
+        self, unknown_user_attrs: dict
     ) -> None:
         """Graceful degradation: failed enrichment must not prevent normalization.
 
         A missing LDAP match is not an error — normalization proceeds with
         primary-source-only data. The result must still parse as NormalizedAttributes.
         """
-        event = {
-            "user_id": "unknown-user-xyz",
-            "client_ip": "192.168.1.1",
-            "protocol": "oidc",
-            "timestamp": _FIXED_TIMESTAMP,
-            "source": "api",
-            "is_synthetic": True,
-            "is_historical": False,
-            "raw_attributes": {
-                "name": "Unknown Person",
-                "email": "nobody@nowhere-xyz-fake.example",
-                "department": "Unknown",
-                "employee_type": "FTE",
-                "groups": [],
-            },
-        }
-        event_id = _post_event(event)
-        cleanup_event_ids.append(event_id)
-
-        try:
-            attrs_dict = _poll_normalized_attributes(pg_connection, event_id)
-        except TimeoutError as exc:
-            pytest.fail(str(exc))
-            return  # unreachable — pytest.fail() raises; satisfies type checkers
-
-        assert attrs_dict is not None, (
+        assert unknown_user_attrs is not None, (
             "normalized_attributes must not be None even when LDAP has no match"
         )
 
         # Must parse as valid model
         try:
-            _validate_normalized_attributes(attrs_dict)
+            _validate_normalized_attributes(unknown_user_attrs)
         except Exception as exc:
             pytest.fail(
                 f"NormalizedAttributes.model_validate() raised for no-LDAP-match "

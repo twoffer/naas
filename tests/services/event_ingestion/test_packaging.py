@@ -109,7 +109,7 @@ class TestRequirementsTxt:
         content = _requirements_text()
         lines = [line.strip().lower() for line in content.splitlines()
                  if line.strip() and not line.strip().startswith("#")]
-        fastapi_lines = [l for l in lines if l.startswith("fastapi")]
+        fastapi_lines = [line for line in lines if line.startswith("fastapi")]
         assert fastapi_lines, (
             f"requirements.txt must list 'fastapi' (with or without version pin). "
             f"Found lines: {lines}"
@@ -125,7 +125,7 @@ class TestRequirementsTxt:
         content = _requirements_text()
         lines = [line.strip().lower() for line in content.splitlines()
                  if line.strip() and not line.strip().startswith("#")]
-        uvicorn_lines = [l for l in lines if l.startswith("uvicorn")]
+        uvicorn_lines = [line for line in lines if line.startswith("uvicorn")]
         assert uvicorn_lines, (
             f"requirements.txt must list 'uvicorn' (with or without [standard]). "
             f"Found lines: {lines}"
@@ -142,7 +142,7 @@ class TestRequirementsTxt:
         content = _requirements_text()
         lines = [line.strip().lower() for line in content.splitlines()
                  if line.strip() and not line.strip().startswith("#")]
-        sqlalchemy_lines = [l for l in lines if l.startswith("sqlalchemy")]
+        sqlalchemy_lines = [line for line in lines if line.startswith("sqlalchemy")]
         assert not sqlalchemy_lines, (
             f"requirements.txt must NOT list 'sqlalchemy' — it is a transitive dep "
             f"from naas_shared. Found: {sqlalchemy_lines}"
@@ -158,7 +158,7 @@ class TestRequirementsTxt:
         content = _requirements_text()
         lines = [line.strip().lower() for line in content.splitlines()
                  if line.strip() and not line.strip().startswith("#")]
-        asyncpg_lines = [l for l in lines if l.startswith("asyncpg")]
+        asyncpg_lines = [line for line in lines if line.startswith("asyncpg")]
         assert not asyncpg_lines, (
             f"requirements.txt must NOT list 'asyncpg' — it is a transitive dep "
             f"from naas_shared. Found: {asyncpg_lines}"
@@ -174,8 +174,8 @@ class TestRequirementsTxt:
         lines = [line.strip().lower() for line in content.splitlines()
                  if line.strip() and not line.strip().startswith("#")]
         # Match 'redis' but not something like 'fastapi-redis' (unlikely but safe)
-        redis_lines = [l for l in lines if l == "redis" or l.startswith("redis==")
-                       or l.startswith("redis>=") or l.startswith("redis~=")]
+        redis_lines = [line for line in lines if line == "redis" or line.startswith("redis==")
+                       or line.startswith("redis>=") or line.startswith("redis~=")]
         assert not redis_lines, (
             f"requirements.txt must NOT list 'redis' — it is a transitive dep "
             f"from naas_shared. Found: {redis_lines}"
@@ -213,8 +213,8 @@ class TestDockerfile:
         """
         content = _dockerfile_text()
         lines = [line.strip() for line in content.splitlines()]
-        expose_lines = [l for l in lines if l.upper().startswith("EXPOSE")]
-        assert any("8001" in l for l in expose_lines), (
+        expose_lines = [line for line in lines if line.upper().startswith("EXPOSE")]
+        assert any("8001" in line for line in expose_lines), (
             f"Dockerfile must contain 'EXPOSE 8001'. "
             f"Found EXPOSE lines: {expose_lines}"
         )
@@ -275,7 +275,7 @@ class TestDockerfile:
         # Accept both `pip install -e /app/shared/` and `pip install -e shared/`
         # and `pip install --no-cache-dir -e /app/shared/`
         has_editable_install = any(
-            "-e" in l and "shared" in l for l in install_lines
+            "-e" in line and "shared" in line for line in install_lines
         )
         assert has_editable_install, (
             f"Dockerfile must run 'pip install -e /app/shared/' (or equivalent). "

@@ -9,8 +9,9 @@ Scenarios covered:
   - The accepted event row is persisted in PostgreSQL events table
   - Row cleanup removes test-inserted rows
 
-PostgreSQL connection: psycopg (v3 sync API) to localhost:5432
-  credentials: naas / naas_dev_password / naas (from .env defaults)
+All connection parameters (URLs, PostgreSQL credentials) come from the
+compose_stack fixture, which resolves them from the same .env docker compose
+uses — nothing is hardcoded here.
 """
 
 from __future__ import annotations
@@ -23,7 +24,7 @@ from typing import Any
 
 import pytest
 
-# psycopg (v3) — pinned in requirements-dev.txt by feature-implementer.
+# psycopg (v3) — pinned in requirements-dev.txt.
 # Import guard: the test is already skipped unless --integration is set, but
 # a missing psycopg would cause an ImportError at collection time even for
 # skipped tests.  We defer the import to test-body level inside the fixture.
@@ -36,9 +37,6 @@ pytestmark = [
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_INGEST_URL = "http://localhost:8001/events/ingest"
-_HEALTH_URL = "http://localhost:8001/health"
 
 _FIXED_TIMESTAMP = "2024-01-15T10:30:00+00:00"
 
@@ -90,6 +88,16 @@ def _http_get_json(url: str, timeout: int = 15) -> tuple[int, dict]:
 
 
 @pytest.fixture(scope="module")
+def ingest_url(compose_stack: dict) -> str:
+    return compose_stack["event_ingestion_url"] + "/events/ingest"
+
+
+@pytest.fixture(scope="module")
+def health_url(compose_stack: dict) -> str:
+    return compose_stack["event_ingestion_url"] + "/health"
+
+
+@pytest.fixture(scope="module")
 def pg_connection(compose_stack: dict):
     """Open a synchronous psycopg3 connection to PostgreSQL, yield it, close it.
 
@@ -98,14 +106,7 @@ def pg_connection(compose_stack: dict):
     """
     import psycopg  # noqa: PLC0415
 
-    conninfo = compose_stack["pg_conninfo"]
-    conn = psycopg.connect(
-        host=conninfo["host"],
-        port=conninfo["port"],
-        dbname=conninfo["dbname"],
-        user=conninfo["user"],
-        password=conninfo["password"],
-    )
+    conn = psycopg.connect(**compose_stack["pg_conninfo"])
     conn.autocommit = True
     yield conn
     conn.close()
@@ -135,23 +136,23 @@ def cleanup_event_ids(pg_connection):
 class TestEventIngestionHealth:
     """GET /health must return HTTP 200 with status="healthy" when stack is up."""
 
-    def test_health_returns_200(self, compose_stack: dict) -> None:
+    def test_health_returns_200(self, health_url: str) -> None:
         """HTTP status code must be 200."""
-        status_code, _ = _http_get_json(_HEALTH_URL)
+        status_code, _ = _http_get_json(health_url)
         assert status_code == 200, (
-            f"Expected HTTP 200 from {_HEALTH_URL}, got {status_code}"
+            f"Expected HTTP 200 from {health_url}, got {status_code}"
         )
 
-    def test_health_body_status_is_healthy(self, compose_stack: dict) -> None:
+    def test_health_body_status_is_healthy(self, health_url: str) -> None:
         """Response body must contain status='healthy' when PG and Redis are up."""
-        _, body = _http_get_json(_HEALTH_URL)
+        _, body = _http_get_json(health_url)
         assert body.get("status") == "healthy", (
             f"Expected status='healthy', got {body.get('status')!r}. Full body: {body}"
         )
 
-    def test_health_body_service_name(self, compose_stack: dict) -> None:
+    def test_health_body_service_name(self, health_url: str) -> None:
         """Response body must identify the service as 'event-ingestion'."""
-        _, body = _http_get_json(_HEALTH_URL)
+        _, body = _http_get_json(health_url)
         assert body.get("service") == "event-ingestion", (
             f"Expected service='event-ingestion', got {body.get('service')!r}"
         )
@@ -165,25 +166,23 @@ class TestEventIngestionHealth:
 class TestEventIngestionLive:
     """POST /events/ingest E2E: HTTP contract + PostgreSQL persistence."""
 
-    def test_ingest_returns_202(
-        self, compose_stack: dict, cleanup_event_ids: list
-    ) -> None:
+    def test_ingest_returns_202(self, ingest_url: str, cleanup_event_ids: list) -> None:
         """POST /events/ingest must respond with HTTP 202 Accepted."""
         event = _make_login_event()
-        status_code, body = _http_post_json(_INGEST_URL, event)
+        status_code, body = _http_post_json(ingest_url, event)
         # Register for cleanup even before asserting so partial failures still clean up
         if "id" in body:
             cleanup_event_ids.append(body["id"])
         assert status_code == 202, (
-            f"Expected HTTP 202 from {_INGEST_URL}, got {status_code}. Body: {body}"
+            f"Expected HTTP 202 from {ingest_url}, got {status_code}. Body: {body}"
         )
 
     def test_ingest_response_has_uuid_id(
-        self, compose_stack: dict, cleanup_event_ids: list
+        self, ingest_url: str, cleanup_event_ids: list
     ) -> None:
         """Response body must include 'id' as a valid UUID string."""
         event = _make_login_event()
-        _, body = _http_post_json(_INGEST_URL, event)
+        _, body = _http_post_json(ingest_url, event)
         if "id" in body:
             cleanup_event_ids.append(body["id"])
         assert "id" in body, f"Response body missing 'id': {body}"
@@ -193,11 +192,11 @@ class TestEventIngestionLive:
             pytest.fail(f"Response 'id' is not a valid UUID: {body['id']!r} — {exc}")
 
     def test_ingest_response_status_is_accepted(
-        self, compose_stack: dict, cleanup_event_ids: list
+        self, ingest_url: str, cleanup_event_ids: list
     ) -> None:
         """Response body must include status='accepted'."""
         event = _make_login_event()
-        _, body = _http_post_json(_INGEST_URL, event)
+        _, body = _http_post_json(ingest_url, event)
         if "id" in body:
             cleanup_event_ids.append(body["id"])
         assert body.get("status") == "accepted", (
@@ -205,7 +204,7 @@ class TestEventIngestionLive:
         )
 
     def test_ingest_row_persisted_in_postgres(
-        self, compose_stack: dict, pg_connection, cleanup_event_ids: list
+        self, ingest_url: str, pg_connection, cleanup_event_ids: list
     ) -> None:
         """Accepted event must appear in the PostgreSQL events table.
 
@@ -213,7 +212,7 @@ class TestEventIngestionLive:
         with the server-assigned UUID, matching the posted user_id.
         """
         event = _make_login_event(user_id="alice")
-        _, body = _http_post_json(_INGEST_URL, event)
+        _, body = _http_post_json(ingest_url, event)
         event_id = body["id"]
         cleanup_event_ids.append(event_id)
 
@@ -242,7 +241,7 @@ class TestEventIngestionLive:
         )
 
     def test_ingest_ldap_protocol_event(
-        self, compose_stack: dict, pg_connection, cleanup_event_ids: list
+        self, ingest_url: str, pg_connection, cleanup_event_ids: list
     ) -> None:
         """LDAP-protocol events must also be accepted and persisted correctly."""
         event = _make_login_event(
@@ -256,7 +255,7 @@ class TestEventIngestionLive:
                 "memberOf": ["cn=security,ou=groups,dc=corp,dc=com"],
             },
         )
-        status_code, body = _http_post_json(_INGEST_URL, event)
+        status_code, body = _http_post_json(ingest_url, event)
         if "id" in body:
             cleanup_event_ids.append(body["id"])
 
@@ -275,7 +274,7 @@ class TestEventIngestionLive:
         assert row is not None, f"LDAP event {event_id} not found in events table"
         assert row[0] == "ldap", f"Protocol mismatch: expected 'ldap', got {row[0]!r}"
 
-    def test_ingest_rejects_invalid_payload_with_422(self, compose_stack: dict) -> None:
+    def test_ingest_rejects_invalid_payload_with_422(self, ingest_url: str) -> None:
         """Payload with missing required fields must be rejected with HTTP 422.
 
         FastAPI's Pydantic validation gate rejects malformed events before they
@@ -284,7 +283,7 @@ class TestEventIngestionLive:
         bad_event = {"user_id": "hacker"}  # Missing client_ip, protocol, timestamp
         body_bytes = json.dumps(bad_event).encode()
         req = urllib.request.Request(
-            _INGEST_URL,
+            ingest_url,
             data=body_bytes,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -300,7 +299,7 @@ class TestEventIngestionLive:
                 f"Expected HTTP 422 for invalid payload, got {exc.code}"
             )
 
-    def test_ingest_rejects_invalid_ip_with_422(self, compose_stack: dict) -> None:
+    def test_ingest_rejects_invalid_ip_with_422(self, ingest_url: str) -> None:
         """Event with invalid client_ip must be rejected with HTTP 422.
 
         The client_ip field has a strict IPv4 pattern validator — injecting
@@ -309,7 +308,7 @@ class TestEventIngestionLive:
         bad_event = _make_login_event(client_ip="not-an-ip")
         body_bytes = json.dumps(bad_event).encode()
         req = urllib.request.Request(
-            _INGEST_URL,
+            ingest_url,
             data=body_bytes,
             headers={"Content-Type": "application/json"},
             method="POST",
@@ -321,7 +320,7 @@ class TestEventIngestionLive:
             assert exc.code == 422, f"Expected HTTP 422 for invalid IP, got {exc.code}"
 
     def test_cleanup_removes_inserted_rows(
-        self, compose_stack: dict, pg_connection
+        self, ingest_url: str, pg_connection
     ) -> None:
         """Rows explicitly deleted via cleanup query must no longer exist.
 
@@ -329,7 +328,7 @@ class TestEventIngestionLive:
         a broken cleanup would cause cross-test contamination.
         """
         event = _make_login_event(user_id="cleanup-test-user")
-        _, body = _http_post_json(_INGEST_URL, event)
+        _, body = _http_post_json(ingest_url, event)
         event_id = body["id"]
 
         # Manually delete (simulates cleanup fixture)

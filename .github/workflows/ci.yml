@@ -15,6 +15,8 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Third-party actions are pinned to full commit SHAs (supply-chain hardening):
+# a moved or compromised version tag cannot inject code into this workflow.
 jobs:
   # ── Unit tests ─────────────────────────────────────────────────────────────
   # Fast, hermetic — no docker required.  Runs on every push and PR.
@@ -22,10 +24,10 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -38,6 +40,9 @@ jobs:
           cp .env.example .env
           pip install -r requirements-dev.txt -e shared/
 
+      - name: Lint (ruff)
+        run: ruff check .
+
       - name: Run unit tests
         run: python -m pytest tests/ -m "not integration" -q
 
@@ -49,10 +54,10 @@ jobs:
     needs: unit
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6
         with:
           python-version: "3.12"
           cache: pip
@@ -68,12 +73,15 @@ jobs:
       - name: Run integration tests
         run: python -m pytest tests/integration --integration -v
 
+      # The harness runs the stack under the dedicated compose project
+      # "naas-it" (see tests/integration/conftest.py) — logs and teardown
+      # must target that project.
       - name: Dump docker compose logs on failure
         if: failure()
-        run: docker compose logs --no-color
+        run: docker compose -p naas-it -f docker-compose.yml -f docker-compose.test.yml logs --no-color
 
       - name: Upload test logs
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
           name: integration-test-logs
@@ -82,4 +90,4 @@ jobs:
 
       - name: Tear down docker stack
         if: always()
-        run: docker compose -f docker-compose.yml -f docker-compose.test.yml down -v --remove-orphans || true
+        run: docker compose -p naas-it -f docker-compose.yml -f docker-compose.test.yml down -v --remove-orphans || true

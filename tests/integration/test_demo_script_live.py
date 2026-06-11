@@ -9,16 +9,13 @@ The demo script:
   3. Renders a Rich comparison table showing before/after attribute values
   4. Cleans up its own inserted rows (DELETE FROM events WHERE id = ANY(...))
 
-This test runs the demo as a subprocess using sys.executable (same Python
-interpreter as the test runner). The CI runner / local developer ensures
-demo dependencies (rich, httpx, psycopg) are installed in the invoking
-environment — this test does NOT install them.
+The demo runs exactly ONCE per module (module-scoped fixture) using
+sys.executable; every test asserts against that single captured run. The CI
+runner / local developer ensures demo dependencies (rich, httpx, psycopg) are
+installed in the invoking environment — this test does NOT install them.
 
-Assertions:
-  - Exit code 0 (full run succeeded)
-  - Output contains evidence of the comparison table or success indication
-  - Output contains "passed" or the normalization result summary expected by
-    the demo's render_results function
+Connection parameters (--ingest-url, --db-dsn) come from the compose_stack
+fixture, which resolves them from the same .env docker compose uses.
 
 The demo cleans up its own event rows — no explicit cleanup needed here.
 """
@@ -27,26 +24,8 @@ from __future__ import annotations
 
 import subprocess
 import sys
-from pathlib import Path
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Repo-root discovery
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Cannot locate repo root from {Path(__file__).resolve()}")
-
-
-REPO_ROOT = _find_repo_root()
-DEMO_SCRIPT = REPO_ROOT / "demo" / "demo_normalization.py"
 
 # ---------------------------------------------------------------------------
 # Module-level markers
@@ -57,6 +36,68 @@ pytestmark = [
     # 300s: 6 events × (ingest + normalization + LDAP enrichment) + render
     pytest.mark.timeout(300),
 ]
+
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def pg_connection(compose_stack: dict):
+    """Synchronous psycopg3 connection for this module."""
+    import psycopg  # noqa: PLC0415
+
+    conn = psycopg.connect(**compose_stack["pg_conninfo"])
+    conn.autocommit = True
+    yield conn
+    conn.close()
+
+
+@pytest.fixture(scope="module")
+def demo_run(compose_stack: dict, pg_connection) -> dict:
+    """Run demo_normalization.py once against the live stack; share the result.
+
+    Returns a dict with:
+      result   — the CompletedProcess of the single demo run
+      combined — stdout + stderr
+      start_ts — PostgreSQL's clock (SELECT now()) captured immediately before
+                 the run, so the cleanup test compares created_at against the
+                 same clock that assigned it (no host↔container skew).
+    """
+    demo_script = compose_stack["repo_root"] / "demo" / "demo_normalization.py"
+    assert demo_script.exists(), (
+        f"demo/demo_normalization.py not found at {demo_script}."
+    )
+
+    with pg_connection.cursor() as cur:
+        cur.execute("SELECT now()")
+        start_ts = cur.fetchone()[0]
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(demo_script),
+            "--ingest-url",
+            compose_stack["event_ingestion_url"],
+            "--db-dsn",
+            compose_stack["pg_dsn"],
+            "--timeout",
+            "60",
+            "--pace",
+            "0",  # No inter-event sleep — faster CI run
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(compose_stack["repo_root"]),
+        timeout=290,  # inner timeout < outer pytest timeout (300s)
+    )
+
+    return {
+        "result": result,
+        "combined": result.stdout + result.stderr,
+        "start_ts": start_ts,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -78,47 +119,14 @@ class TestDemoScriptLive:
 
         Fail clearly rather than getting a confusing subprocess FileNotFoundError.
         """
-        assert DEMO_SCRIPT.exists(), (
-            f"demo/demo_normalization.py not found at {DEMO_SCRIPT}. "
-            "Feature-implementer must create this file."
+        demo_script = compose_stack["repo_root"] / "demo" / "demo_normalization.py"
+        assert demo_script.exists(), (
+            f"demo/demo_normalization.py not found at {demo_script}."
         )
 
-    def test_demo_exits_zero(self, compose_stack: dict) -> None:
-        """demo_normalization.py must exit with code 0 against the live stack.
-
-        Runs with --skip-verify suppressed so the comparison table renders
-        even if an edge-case user's normalization confidence is lower than
-        expected. The demo cleans up its own rows regardless of --skip-verify.
-
-        The demo reads PostgreSQL directly (no query API yet). The db-dsn
-        matches the compose defaults exposed on localhost.
-        """
-        assert DEMO_SCRIPT.exists(), f"demo script not found at {DEMO_SCRIPT}"
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(DEMO_SCRIPT),
-                "--ingest-url",
-                "http://localhost:8001",
-                "--db-dsn",
-                (
-                    "host=localhost port=5432 dbname=naas "
-                    "user=naas password=naas_dev_password"
-                ),
-                "--timeout",
-                "60",
-                "--pace",
-                "0",  # No inter-event sleep — faster CI run
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(REPO_ROOT),
-            timeout=290,  # inner timeout < outer pytest timeout (300s)
-        )
-
-        combined = result.stdout + result.stderr
-
+    def test_demo_exits_zero(self, demo_run: dict) -> None:
+        """demo_normalization.py must exit with code 0 against the live stack."""
+        result = demo_run["result"]
         assert result.returncode == 0, (
             f"demo_normalization.py exited with code {result.returncode}.\n"
             f"--- stdout ---\n{result.stdout}\n"
@@ -137,6 +145,7 @@ class TestDemoScriptLive:
             "diana",  # Known user that always appears (scene 5)
             "frank",  # Known user that always appears (scenes 0, 1)
         ]
+        combined = demo_run["combined"]
         found_markers = [m for m in output_markers if m.lower() in combined.lower()]
         assert found_markers, (
             f"Demo output did not contain any expected content markers "
@@ -144,42 +153,19 @@ class TestDemoScriptLive:
             f"Combined output:\n{combined}"
         )
 
-    def test_demo_output_mentions_all_protocols(self, compose_stack: dict) -> None:
+    def test_demo_output_mentions_all_protocols(self, demo_run: dict) -> None:
         """Demo output must reference all three protocols processed.
 
         The six SCENES cover oidc (×3), saml (×2), ldap (×1). The output
         table or logging should mention all three protocol names.
         """
-        assert DEMO_SCRIPT.exists(), f"demo script not found at {DEMO_SCRIPT}"
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(DEMO_SCRIPT),
-                "--ingest-url",
-                "http://localhost:8001",
-                "--db-dsn",
-                (
-                    "host=localhost port=5432 dbname=naas "
-                    "user=naas password=naas_dev_password"
-                ),
-                "--timeout",
-                "60",
-                "--pace",
-                "0",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(REPO_ROOT),
-            timeout=290,
-        )
-
+        result = demo_run["result"]
         assert result.returncode == 0, (
             f"Demo exited {result.returncode}.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
 
-        combined = result.stdout + result.stderr
+        combined = demo_run["combined"]
         for protocol in ("oidc", "saml", "ldap"):
             assert protocol in combined.lower(), (
                 f"Protocol '{protocol}' not found in demo output. "
@@ -187,59 +173,30 @@ class TestDemoScriptLive:
                 f"Combined output:\n{combined}"
             )
 
-    def test_demo_cleans_up_its_rows(self, compose_stack: dict, pg_connection) -> None:
+    def test_demo_cleans_up_its_rows(self, demo_run: dict, pg_connection) -> None:
         """demo_normalization.py must delete the events it inserts.
 
         The demo's cleanup_events function runs unconditionally (inside a
         finally block). This test verifies no orphaned rows remain after a
         successful run.
 
-        Strategy: record the start timestamp immediately before the demo run,
-        then assert that no events for the demo's fixed user_ids (frank, grace,
-        mallory, alice, diana) with source='api' and is_synthetic=True exist
-        with a created_at >= that start time after the run completes.
+        Strategy: the demo_run fixture records PostgreSQL's own clock
+        immediately before the run; assert that no events for the demo's fixed
+        user_ids (frank, grace, mallory, alice, diana) with source='api' and
+        is_synthetic=True exist with created_at >= that instant.
 
         Using the demo's specific user_ids rather than a global count avoids
         false failures from other integration tests inserting events with the
         same source/is_synthetic combination.
         """
-        import datetime
-
-        assert DEMO_SCRIPT.exists(), f"demo script not found at {DEMO_SCRIPT}"
-
-        # Fixed user_ids submitted by the demo's SCENES list (frank appears twice).
-        demo_user_ids = ["frank", "grace", "mallory", "alice", "diana"]
-
-        # Capture the wall-clock instant before the demo submits anything.
-        # Use UTC so the comparison is timezone-safe regardless of PG session TZ.
-        start_ts = datetime.datetime.now(datetime.timezone.utc)
-
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(DEMO_SCRIPT),
-                "--ingest-url",
-                "http://localhost:8001",
-                "--db-dsn",
-                (
-                    "host=localhost port=5432 dbname=naas "
-                    "user=naas password=naas_dev_password"
-                ),
-                "--timeout",
-                "60",
-                "--pace",
-                "0",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=str(REPO_ROOT),
-            timeout=290,
-        )
-
+        result = demo_run["result"]
         assert result.returncode == 0, (
             f"Demo exited {result.returncode}. Cannot verify cleanup.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
+
+        # Fixed user_ids submitted by the demo's SCENES list (frank appears twice).
+        demo_user_ids = ["frank", "grace", "mallory", "alice", "diana"]
 
         with pg_connection.cursor() as cur:
             cur.execute(
@@ -248,7 +205,7 @@ class TestDemoScriptLive:
                 "   AND source = %s"
                 "   AND is_synthetic = %s"
                 "   AND created_at >= %s",
-                (demo_user_ids, "api", True, start_ts),
+                (demo_user_ids, "api", True, demo_run["start_ts"]),
             )
             orphaned = cur.fetchall()
 
@@ -257,26 +214,3 @@ class TestDemoScriptLive:
             f"cleanup_events ran: {[(str(r[0]), r[1]) for r in orphaned]}. "
             "cleanup_events must delete all submitted event rows."
         )
-
-
-# ---------------------------------------------------------------------------
-# Fixture: pg_connection for cleanup verification test
-# ---------------------------------------------------------------------------
-
-
-@pytest.fixture(scope="module")
-def pg_connection(compose_stack: dict):
-    """Synchronous psycopg3 connection for this module."""
-    import psycopg  # noqa: PLC0415
-
-    info = compose_stack["pg_conninfo"]
-    conn = psycopg.connect(
-        host=info["host"],
-        port=info["port"],
-        dbname=info["dbname"],
-        user=info["user"],
-        password=info["password"],
-    )
-    conn.autocommit = True
-    yield conn
-    conn.close()

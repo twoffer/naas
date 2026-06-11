@@ -9,7 +9,7 @@ tests that import the LDAP adapter are skipped on the host dev machine
 because python-ldap cannot be installed there. Running the suite inside the
 image gives those tests real coverage.
 
-Contract for the test-runner service (implemented by feature-implementer):
+Contract for the test-runner service (docker-compose.test.yml):
   - Service name: test-runner
   - Profile: test (started only via --profile test)
   - Base image: services/identity-normalization/Dockerfile
@@ -20,33 +20,16 @@ Contract for the test-runner service (implemented by feature-implementer):
         --ignore=tests/integration
         --ignore=tests/infrastructure/test_docker_compose.py
 
-The test-runner service is started via docker-compose.test.yml which overlays
-onto docker-compose.yml via -f flags. The suite uses docker compose v2 plugin
-syntax throughout (never docker-compose hyphenated binary).
+The compose invocation (project name + -f overlay flags) comes from the
+compose_stack fixture's compose_cmd, so the test-runner joins the same
+isolated "naas-it" compose project as the rest of the harness.
 """
 
 from __future__ import annotations
 
 import subprocess
-from pathlib import Path
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Repo-root discovery (self-contained — cannot import from conftest)
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Cannot locate repo root from {Path(__file__).resolve()}")
-
-
-REPO_ROOT = _find_repo_root()
 
 # ---------------------------------------------------------------------------
 # Module-level markers
@@ -78,11 +61,7 @@ class TestInContainerUnitSuite:
         """All unit tests must pass when run inside the identity-normalization image.
 
         Shells out to:
-          docker compose
-            -f docker-compose.yml
-            -f docker-compose.test.yml
-            --profile test
-            run --rm test-runner
+          <compose_cmd> --profile test run --rm test-runner
 
         The compose_stack fixture ensures infrastructure (postgres, redis,
         openldap) is already up, so the test-runner can connect to them.
@@ -94,20 +73,9 @@ class TestInContainerUnitSuite:
             vacuously empty and did execute).
         """
         result = subprocess.run(
-            [
-                "docker",
-                "compose",
-                "-f",
-                "docker-compose.yml",
-                "-f",
-                "docker-compose.test.yml",
-                "--profile",
-                "test",
-                "run",
-                "--rm",
-                "test-runner",
-            ],
-            cwd=str(REPO_ROOT),
+            compose_stack["compose_cmd"]
+            + ["--profile", "test", "run", "--rm", "test-runner"],
+            cwd=str(compose_stack["repo_root"]),
             capture_output=True,
             text=True,
             timeout=590,  # inner timeout < outer pytest timeout (600s)
