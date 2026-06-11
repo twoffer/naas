@@ -1,0 +1,22 @@
+services:
+  test-runner:
+    # Reuse the identity-normalization image so python-ldap (C extension) is
+    # available — it is the only image in this repo with gcc + libldap2-dev.
+    # The image tag naas-identity-normalization:local is explicitly declared on
+    # the identity-normalization service in docker-compose.yml, so both services
+    # share the same built image — no divergent rebuild occurs.
+    build:
+      context: .
+      dockerfile: services/identity-normalization/Dockerfile
+    image: naas-identity-normalization:local
+    profiles:
+      - test
+    # Mount the whole repo read-only.  docs/architecture/ must be present so
+    # the _find_repo_root() helper in tests/conftest.py can locate the root.
+    volumes:
+      - .:/workspace:ro
+    working_dir: /workspace
+    environment:
+      # Prevent Python from writing .pyc files into the read-only mount.
+      PYTHONDONTWRITEBYTECODE: "1"
+    command: ["sh", "-c", "pip install --quiet -r requirements-dev.txt && python -m pytest tests/ --ignore=tests/integration --ignore=tests/infrastructure/test_docker_compose.py -p no:cacheprovider --rootdir /workspace -o cache_dir=/tmp/.pytest_cache"]

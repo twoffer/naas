@@ -27,6 +27,10 @@ Naming & placement conventions are NORMATIVE in the agent definition's TEST STAN
 
 - [patterns_demo_flow_tests.md](patterns_demo_flow_tests.md) — Injectable seam design for submit/poll/verify/render/cleanup, real NormalizedAttributes field names, scene index alignment, SQL constant names, confidence_style thresholds, Rich Console capture pattern. Notes 2/53 tests correctly passing before impl (main() --keep orchestration already coded).
 
+## Integration Tests
+
+- [patterns_integration_tests.md](patterns_integration_tests.md) — Live-docker integration harness: skip gate placement (pytest_addoption MUST be in tests/conftest.py), compose_stack fixture, app health polling, psycopg3 fixture, subprocess timeout discipline, normalization polling loop, marker registered in pyproject.toml markers
+
 ## Service Tests
 
 - [patterns_service_tdd.md](patterns_service_tdd.md) — event-ingestion service patterns: sys.path injection for app.main, mock patching for FastAPI health endpoint tests, ORM column-type assertions (INET/JSONB), negative requirements.txt assertions

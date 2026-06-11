@@ -3,3 +3,6 @@ timeout = 60
 timeout_method = "thread"
 addopts = "--import-mode=importlib"
 consider_namespace_packages = true
+markers = [
+    "integration: live-docker integration test (skip by default; opt in via --integration flag or NAAS_RUN_INTEGRATION=1 env var)",
+]

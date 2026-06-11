@@ -38,6 +38,7 @@ dashboard/dist/
 
 # Logs
 *.log
+tests/integration/.logs/
 
 # Claude Code
 .claude/*
