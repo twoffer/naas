@@ -47,15 +47,16 @@ python demo/demo_normalization.py
 
 ## Environment variables
 
-The following environment variables configure service endpoints (overridden by the
-corresponding flags):
+The following environment variables configure service endpoints (`INGEST_URL` is
+overridden by `--ingest-url`; the `POSTGRES_*` variables are overridden by `--db-dsn`;
+`NORM_URL` has no corresponding flag):
 
 - `INGEST_URL` — event ingestion service base URL (default: `http://localhost:8001`)
 - `NORM_URL` — identity normalization service base URL (default: `http://localhost:8002`)
 - `POSTGRES_HOST` — PostgreSQL host (default: `localhost`)
 - `POSTGRES_PORT` — PostgreSQL port (default: `5432`)
-- `POSTGRES_DB` — database name
-- `POSTGRES_USER` — database user
+- `POSTGRES_DB` — database name (default: `naas`)
+- `POSTGRES_USER` — database user (default: `naas`)
 - `POSTGRES_PASSWORD` — database password (**required** unless `--db-dsn` is supplied;
   the script exits with an error if neither is set)
 
