@@ -12,3 +12,8 @@ mypy==1.14.1
 httpx==0.28.1
 psycopg[binary]==3.3.4
 rich==13.9.4
+# Unit tests import services/*/app code. Almost all of its deps arrive via
+# `pip install -e shared/` (declared by naas-shared); pyyaml is the one
+# exception — identity-normalization's config loader imports yaml at module
+# level. Service requirements.txt files remain container-runtime-only.
+pyyaml==6.0.3
