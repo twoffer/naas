@@ -32,7 +32,14 @@ jobs:
           cache-dependency-path: requirements-dev.txt
 
       - name: Install dependencies
-        run: pip install -r requirements-dev.txt -e shared/
+        run: |
+          pip install -r requirements-dev.txt -e shared/
+          pip install -r services/event-ingestion/requirements.txt
+          # identity-normalization: exclude python-ldap (needs gcc + libldap2-dev).
+          # The service lazy-imports `ldap` so the test suite stays importable
+          # without it — mirrors the project's dev-venv convention exactly.
+          grep -vE '^python-ldap' services/identity-normalization/requirements.txt > /tmp/idnorm-req.txt
+          pip install -r /tmp/idnorm-req.txt
 
       - name: Run unit tests
         run: python -m pytest tests/ -m "not integration" -q
