@@ -320,7 +320,7 @@ class TestFilterUsesEscapedValue:
         )
 
         assert len(search_calls) >= 1, (
-            f"search_s must be called for a valid correlation_field"
+            "search_s must be called for a valid correlation_field"
         )
         filter_str = search_calls[0]
 

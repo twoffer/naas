@@ -320,8 +320,8 @@ class TestCoerceStrList:
         )
         # Explicitly confirm no character-by-character iteration occurred
         assert result != list("admin"), (
-            f"coerce_str_list('admin') must NOT iterate the string character-by-character. "
-            f"['a','d','m','i','n'] is NOT an acceptable result."
+            "coerce_str_list('admin') must NOT iterate the string character-by-character. "
+            "['a','d','m','i','n'] is NOT an acceptable result."
         )
 
     def test_int_returns_empty_list(self) -> None:
@@ -421,7 +421,9 @@ class TestFieldRule:
         """rule.transform must return the second constructor argument."""
         from app.adapters._mapping import FieldRule
 
-        fn = lambda x: x
+        def fn(x):
+            return x
+
         rule = FieldRule(("name",), fn)
 
         assert rule.transform is fn, (
@@ -470,7 +472,7 @@ class TestFieldRule:
         """FieldRule(('a', 'b'), fn).source_keys must contain both keys."""
         from app.adapters._mapping import FieldRule
 
-        rule = FieldRule(("first_name", "last_name"), lambda f, l: f"{f} {l}")
+        rule = FieldRule(("first_name", "last_name"), lambda f, last: f"{f} {last}")
 
         assert rule.source_keys == ("first_name", "last_name"), (
             f"Multi-key FieldRule must store all keys in source_keys. "

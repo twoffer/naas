@@ -7,3 +7,13 @@ pytest-mock==3.14.0
 pytest-timeout==2.3.1
 ruff==0.9.3
 mypy==1.14.1
+# Integration test harness deps — pinned to match demo/requirements.txt so the
+# invoking environment is self-contained without coupling to demo/ at runtime.
+httpx==0.28.1
+psycopg[binary]==3.3.4
+rich==13.9.4
+# Unit tests import services/*/app code. Almost all of its deps arrive via
+# `pip install -e shared/` (declared by naas-shared); pyyaml is the one
+# exception — identity-normalization's config loader imports yaml at module
+# level. Service requirements.txt files remain container-runtime-only.
+pyyaml==6.0.3

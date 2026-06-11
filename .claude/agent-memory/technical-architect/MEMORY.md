@@ -25,6 +25,10 @@
 
 - [Demo normalization decomposition](spec_demo_normalization.md) — osixia cn=config overlay mechanism (a changetype:modify LDIF in ldif/custom/ IS applied to cn=config via ldapmodify -Y EXTERNAL; the shell-script assumption was wrong, no refint shipped); which identity-normalization tests assert the old display_name default and need reconciliation; SPEC_2 §3.3 drift still open (illustrative, flagged in §5.6); standalone demo HTTP+SQL contract; spec doc never committed.
 
+## Integration Tests / CI
+
+- [E2E integration tests + GitHub Actions](integration_tests_e2e.md) — live compose stack tests: 3-layer gating (dir+marker+opt-in), in-container unit runner on the python-ldap image via profile-gated test-runner, app-readiness polling beyond `--wait`, down -v teardown, pytest-timeout vs subprocess.run caveat, CI two-job (unit gates integration).
+
 ## Chunking Strategy
 
 - Chunk sizing: ~200-500 lines new code, 30-45 min agent work

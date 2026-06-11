@@ -120,6 +120,7 @@ services:
     build:
       context: .
       dockerfile: services/identity-normalization/Dockerfile
+    image: naas-identity-normalization:local
     container_name: naas-identity-normalization
     env_file: .env
     ports:

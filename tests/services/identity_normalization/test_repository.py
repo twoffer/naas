@@ -145,7 +145,6 @@ class TestRepositoryWriteUPDATEContract:
         factory = _make_mock_factory(session)
         repo = PostgresNormalizationRepository(session_factory=factory)
         normalized = _make_normalized()
-        expected_json = normalized.model_dump(mode="json")
 
         _run(repo.write(_UUID, normalized))
 
