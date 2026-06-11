@@ -216,6 +216,29 @@ def _resolve_db_dsn(args: argparse.Namespace) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Shared console — single output medium for status lines and scene panels
+# ---------------------------------------------------------------------------
+
+_console: Any = None
+
+
+def get_console() -> Any:
+    """Return the shared Rich Console used for all demo output.
+
+    Lazily created on first use so the module stays importable without
+    paying the rich import cost up front (matching the local-import style
+    used for httpx/psycopg). Status lines and scene panels share this one
+    console so the recording has a single, consistent output medium.
+    """
+    global _console
+    if _console is None:
+        from rich.console import Console  # local import
+
+        _console = Console()
+    return _console
+
+
+# ---------------------------------------------------------------------------
 # Preflight checks
 # ---------------------------------------------------------------------------
 
@@ -369,8 +392,11 @@ def _poll_loop(
 
         if time.monotonic() >= deadline:
             unprocessed = [eid for eid in event_ids if eid not in row_map]
-            print(
-                f"Timeout: the following event IDs have not been normalized: {unprocessed}"
+            get_console().print(
+                f"Timeout: the following event IDs have not been normalized: {unprocessed}",
+                style="bold red",
+                markup=False,
+                highlight=False,
             )
             sys.exit(1)
 
@@ -999,23 +1025,22 @@ def render_results(
     """Render a rich comparison table to the console.
 
     Renders per-scene bordered panels and a summary table. Uses the provided
-    console if given (for testability), otherwise creates a real Console().
+    console if given (for testability), otherwise the shared module console.
     Between panels, waits for Enter when step is True, else sleeps pace
     seconds when pace > 0. Verification problems are reported by main()
     before rendering is reached — a failed narrative is never rendered.
     """
-    from rich.console import Console
     from rich.table import Table
     from rich.text import Text
 
-    con = console or Console()
+    con = console or get_console()
 
     # Render each scene
     for i, (scene, result) in enumerate(zip(scenes, results)):
         con.print()
         if i > 0:
             if step:
-                input("Press Enter for next scene...")
+                con.input("[dim italic]Press Enter for next scene…[/dim italic]")
             elif pace and pace > 0:
                 time.sleep(pace)
         _render_scene_panel(i, scene, result, con)
@@ -1089,9 +1114,18 @@ def cleanup_events(
             with conn.cursor() as cur:
                 cur.execute(CLEANUP_QUERY, {"ids": event_ids})
                 count = cur.rowcount
-        print(f"Cleanup: removed {count} event(s) from the database.")
+        get_console().print(
+            f"Cleanup: removed {count} event(s) from the database.",
+            style="dim",
+            highlight=False,
+        )
     except Exception as exc:  # noqa: BLE001
-        print(f"Cleanup warning: could not delete events: {exc}")
+        get_console().print(
+            f"Cleanup warning: could not delete events: {exc}",
+            style="yellow",
+            markup=False,
+            highlight=False,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -1171,31 +1205,52 @@ def main() -> None:
 
     run_preflight(ingest_url, norm_url, db_dsn)
 
-    print(f"Submitting {len(SCENES)} scene(s) to {ingest_url}...")
+    console = get_console()
+    console.print(
+        f"Submitting {len(SCENES)} scene(s) to {ingest_url}...",
+        style="dim",
+        highlight=False,
+    )
     event_ids = submit_scenes(SCENES, ingest_url)
 
     # From here on the run owns rows in the events table: whatever happens
     # (poll timeout, verification failure, render error), the finally block
     # cleans them up — unless --keep — so repeated runs don't accumulate rows.
     try:
-        print("Waiting for normalization results...")
+        console.print("Waiting for normalization results...", style="dim")
         results = poll_results(event_ids, db_dsn, args.timeout)
         problems = verify_results(SCENES, results) if not args.skip_verify else []
 
         if problems:
-            print(
+            console.print(
                 f"Verification failed with {len(problems)} problem(s). "
-                "Aborting render."
+                "Aborting render.",
+                style="bold red",
+                highlight=False,
             )
             for p in problems:
-                print(f"  Scene {p.get('scene', '?')}: {p.get('message', '')}")
+                console.print(
+                    f"  Scene {p.get('scene', '?')}: {p.get('message', '')}",
+                    style="red",
+                    markup=False,
+                    highlight=False,
+                )
             sys.exit(1)
 
-        render_results(SCENES, results, pace=args.pace, step=args.step)
+        render_results(SCENES, results, console=console, pace=args.pace, step=args.step)
     finally:
         if args.keep:
-            print(f"Retained {len(event_ids)} event(s) in the database (--keep).")
-            print(f"Retained event IDs: {event_ids}")
+            console.print(
+                f"Retained {len(event_ids)} event(s) in the database (--keep).",
+                style="dim",
+                highlight=False,
+            )
+            console.print(
+                f"Retained event IDs: {event_ids}",
+                style="dim",
+                markup=False,
+                highlight=False,
+            )
         else:
             cleanup_events(event_ids, db_dsn)
 
