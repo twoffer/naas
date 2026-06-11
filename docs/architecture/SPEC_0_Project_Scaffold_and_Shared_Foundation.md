@@ -1045,7 +1045,7 @@ If using approach 2, verify the format against Keycloak's documentation. Key pit
 
 ### 5.3 OpenLDAP Bootstrap Data
 
-This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted). The Dockerfile also copies `00-memberof-overlay.ldif` into the osixia custom-bootstrap directory so the memberof and refint overlay configuration is reconfigured at first seed:
+This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted). The Dockerfile also copies `00-memberof-overlay.ldif` into the osixia custom-bootstrap directory so the memberof overlay is reconfigured at first seed (the image-default refint overlay already tracks `member` and needs no modification — see the overlay note below):
 
 ```dockerfile
 FROM osixia/openldap:1.5.0

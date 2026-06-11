@@ -1,18 +1,19 @@
 # Tests for demo/demo_normalization.py — flow functions:
 # submit_scenes, poll_results, verify_results, render_results, cleanup_events,
-# SQL query constants, and the confidence_style color helper.
+# SQL query constants, confidence_style, and the module-level run_preflight.
 #
 # All functions are exercised through injectable seams (http_client, console,
-# db_execute) — no live services required.
+# db_execute, db_fetch) — no live services required.
 
 from __future__ import annotations
 
+import argparse
 import importlib.util
 import io
 import sys
 from pathlib import Path
 from typing import Any
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -63,11 +64,10 @@ def demo_mod():
     """Import demo_normalization.py as a live module for function access."""
     if not DEMO_SCRIPT.exists():
         pytest.fail(f"demo_normalization.py not found at {DEMO_SCRIPT}")
-    spec = importlib.util.spec_from_file_location("demo_normalization_flow", DEMO_SCRIPT)
+    spec = importlib.util.spec_from_file_location(
+        "demo_normalization_flow", DEMO_SCRIPT
+    )
     mod = importlib.util.module_from_spec(spec)
-    # Register before exec so in-test `from demo_normalization_flow import ...`
-    # statements resolve (spec_from_file_location does not touch sys.modules).
-    sys.modules["demo_normalization_flow"] = mod
     spec.loader.exec_module(mod)
     return mod
 
@@ -177,7 +177,9 @@ def _list_merge(
 
 # ---------------------------------------------------------------------------
 # Scene 1 (index 0) — frank/oidc: single source, no LDAP enrichment
-# OIDC only; enrichment skipped because ldap is not yet enriching in this scene
+# OIDC only; enrichment skipped because ldap is not yet enriching in this scene.
+# Scalar resolution_details must be single_source; groups is a list_merge with
+# exactly one contributing source (Check 1 in verify_results).
 # confidence contributions: display_name(0.70)*0.15 + primary_email(0.95)*0.25
 #   + department(0.70)*0.20 + employee_type(0.60)*0.25 + groups(0.70)*0.15
 # ---------------------------------------------------------------------------
@@ -198,7 +200,11 @@ def _scene1_frank_oidc() -> dict[str, Any]:
             "primary_email": _single_source("frank@corp.com", ["oidc"], 0.95),
             "department": _single_source("Engineering", ["oidc"], 0.70),
             "employee_type": _single_source("FTE", ["oidc"], 0.60),
-            "groups": _list_merge(["engineering", "vpn-users"], 0.70, sources=["oidc"]),
+            # The pipeline resolves groups as list_merge even for one source;
+            # verify_results Check 1 requires exactly one contributing source.
+            "groups": _list_merge(
+                ["engineering", "vpn-users"], 0.80, sources=["oidc"]
+            ),
         },
         enrichment=_skipped_enrichment("no_ldap_match"),
     )
@@ -225,7 +231,10 @@ def _scene2_frank_saml() -> dict[str, Any]:
             "primary_email": _single_source("frank@corp.com", ["saml"], 0.75),
             "department": _single_source("Engineering", ["saml"], 0.50),
             "employee_type": _single_source("FTE", ["saml"], 0.80),
-            "groups": _list_merge(["engineering", "vpn-users"], 0.70, sources=["saml"]),
+            # Single-source groups are still a list_merge (see Scene 1 note).
+            "groups": _list_merge(
+                ["engineering", "vpn-users"], 0.60, sources=["saml"]
+            ),
         },
         enrichment=_skipped_enrichment("no_ldap_match"),
     )
@@ -252,7 +261,10 @@ def _scene3_grace_ldap() -> dict[str, Any]:
             "primary_email": _single_source("grace@corp.com", ["ldap"], 0.65),
             "department": _single_source("R&D", ["ldap"], 0.90),
             "employee_type": _single_source("contractor", ["ldap"], 0.95),
-            "groups": _list_merge(["admins", "engineering"], 0.70, sources=["ldap"]),
+            # Single-source groups are still a list_merge (see Scene 1 note).
+            "groups": _list_merge(
+                ["admins", "engineering"], 0.70, sources=["ldap"]
+            ),
         },
         enrichment=_skipped_enrichment("ldap_event"),
     )
@@ -272,7 +284,7 @@ def _scene4_mallory_saml() -> dict[str, Any]:
         display_name="Mallory Quinn",
         primary_email="mallory@corp.com",
         department="Sorcery",  # retained, unmapped
-        employee_type=None,    # wizard discarded to None
+        employee_type=None,  # wizard discarded to None
         groups=["temp-access"],
         source_protocol="saml",
         normalization_confidence=0.52,  # penalized: dept confidence low, employee_type=0
@@ -282,6 +294,7 @@ def _scene4_mallory_saml() -> dict[str, Any]:
             # department single_source with penalty applied: saml weight=0.50 − 0.20 = 0.30
             "department": _single_source("Sorcery", ["saml"], 0.30),
             # employee_type absent: "wizard" was discarded to None upstream
+            # Single-source groups are still a list_merge (see Scene 1 note).
             "groups": _list_merge(["temp-access"], 0.60, sources=["saml"]),
         },
         enrichment=_skipped_enrichment("no_ldap_match"),
@@ -312,7 +325,9 @@ def _scene5_alice_oidc_enriched() -> dict[str, Any]:
             "department": _unanimous("Engineering", ["ldap", "oidc"], 0.90),
             "employee_type": _unanimous("FTE", ["ldap", "oidc"], 0.95),
             "groups": _list_merge(
-                ["engineering", "product-admins", "vpn-users"], 0.90, sources=["ldap", "oidc"]
+                ["engineering", "product-admins", "vpn-users"],
+                0.90,
+                sources=["ldap", "oidc"],
             ),
         },
         enrichment=_applied_enrichment(cache_hit=False),
@@ -332,9 +347,9 @@ def _scene5_alice_oidc_enriched() -> dict[str, Any]:
 def _scene6_diana_oidc_conflict() -> dict[str, Any]:
     """diana/oidc — LDAP enrichment; display_name priority winner=oidc; department priority winner=ldap."""
     na = NormalizedAttributes(
-        display_name="Di Prince",   # oidc wins (priority=[oidc,saml,ldap])
+        display_name="Di Prince",  # oidc wins (priority=[oidc,saml,ldap])
         primary_email="diana@corp.com",
-        department="Engineering",   # ldap wins (priority=[ldap,oidc,saml])
+        department="Engineering",  # ldap wins (priority=[ldap,oidc,saml])
         employee_type="vendor",
         groups=["engineering", "oncall", "vpn-users"],
         source_protocol="oidc",
@@ -416,8 +431,8 @@ def _wrap_results(
 #   - results: list of DB rows from poll_results
 #              (each row: {id, protocol, normalized_attributes: <dict>})
 #   - Returns: a list of problem dicts (empty list = all checks passed).
-#     Each problem dict must contain at least "scene" (int index or label)
-#     and "message" (str describing the failed expectation).
+#     Each problem dict must contain at least "scene" (1-based int; -1 for
+#     internal errors) and "message" (str, self-contained — no scene prefix).
 #   - Never raises on invalid payloads — returns problems instead.
 #   - Performs NO I/O (no DB, no HTTP): pure function, unit-testable.
 # ===========================================================================
@@ -436,10 +451,8 @@ class TestVerifyResultsAcceptsConformingPayload:
         WHY: The happy path must validate cleanly — a false positive would cause
         the demo to report failures when the pipeline is working correctly.
         """
-        from demo_normalization_flow import SCENES
-
         results = _wrap_results(_six_results())
-        problems = demo_mod.verify_results(SCENES, results)
+        problems = demo_mod.verify_results(demo_mod.SCENES, results)
 
         assert isinstance(problems, list), (
             f"verify_results must return a list, got {type(problems)!r}"
@@ -453,10 +466,8 @@ class TestVerifyResultsAcceptsConformingPayload:
 
         WHY: Callers iterate the return value; a non-list return would crash main().
         """
-        from demo_normalization_flow import SCENES
-
         results = _wrap_results(_six_results())
-        out = demo_mod.verify_results(SCENES, results)
+        out = demo_mod.verify_results(demo_mod.SCENES, results)
 
         assert isinstance(out, list), (
             f"verify_results must always return list, got {type(out)!r}"
@@ -475,15 +486,13 @@ class TestVerifyResultsScene6DisplayNameWinner:
 
         WHY: display_name priority=[oidc,saml,ldap] means oidc must win on conflict.
         A wrong winner indicates the priority configuration is not being applied.
-        The problem message must name 'scene 6' and 'display_name'.
+        The problem must have scene=6 and reference 'display_name'.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene6 = _scene6_diana_oidc_conflict()
         # Mutate: flip the display_name winner to ldap (wrong)
         bad_scene6["resolution_details"]["display_name"] = _priority(
             "Diana Prince",
-            winner_source="ldap",          # wrong: should be oidc
+            winner_source="ldap",  # wrong: should be oidc
             conflicting={"oidc": "Di Prince"},
             confidence=0.68,
         ).model_dump(mode="json")
@@ -492,35 +501,35 @@ class TestVerifyResultsScene6DisplayNameWinner:
         results[5] = bad_scene6
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected at least one problem when Scene 6 display_name winner is 'ldap' not 'oidc'"
         )
-        # Problem must identify scene 6 and the display_name expectation
-        combined_msg = " ".join(
-            str(p.get("message", "")) + " " + str(p.get("scene", ""))
-            for p in problems
-        ).lower()
-        assert "6" in combined_msg or "diana" in combined_msg or "scene" in combined_msg, (
-            f"Problem message must reference Scene 6, got: {problems}"
+        # Problem must have scene=6 (1-based) and reference display_name
+        dn_problems = [p for p in problems if p.get("scene") == 6]
+        assert dn_problems, (
+            f"Problem must have scene=6 (1-based), got scenes: "
+            f"{[p.get('scene') for p in problems]}"
         )
+        combined_msg = " ".join(str(p.get("message", "")) for p in dn_problems).lower()
         assert "display_name" in combined_msg or "display" in combined_msg, (
-            f"Problem message must reference 'display_name', got: {problems}"
+            f"Problem message must reference 'display_name', got: {dn_problems}"
         )
 
-    def test_scene6_display_name_winner_oidc_produces_no_problem(self, demo_mod) -> None:
+    def test_scene6_display_name_winner_oidc_produces_no_problem(
+        self, demo_mod
+    ) -> None:
         """Scene 6 with display_name winner_source='oidc' (correct) produces no display_name problem.
 
         WHY: Confirms the check is not a false positive for the correct winner.
         """
-        from demo_normalization_flow import SCENES
-
         results = _wrap_results(_six_results())
-        problems = demo_mod.verify_results(SCENES, results)
+        problems = demo_mod.verify_results(demo_mod.SCENES, results)
 
         display_name_problems = [
-            p for p in problems
+            p
+            for p in problems
             if "display_name" in str(p.get("message", "")).lower()
             or "display" in str(p.get("message", "")).lower()
         ]
@@ -542,13 +551,11 @@ class TestVerifyResultsScene6DepartmentWinner:
         WHY: department priority=[ldap,oidc,saml] means ldap must win on conflict.
         A wrong winner indicates the normalization config is not being applied correctly.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene6 = _scene6_diana_oidc_conflict()
         # Mutate: flip the department winner to oidc (wrong)
         bad_scene6["resolution_details"]["department"] = _priority(
             "Marketing",
-            winner_source="oidc",          # wrong: should be ldap
+            winner_source="oidc",  # wrong: should be ldap
             conflicting={"ldap": "Engineering"},
             confidence=0.56,
         ).model_dump(mode="json")
@@ -557,14 +564,13 @@ class TestVerifyResultsScene6DepartmentWinner:
         results[5] = bad_scene6
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected at least one problem when Scene 6 department winner is 'oidc' not 'ldap'"
         )
         combined_msg = " ".join(
-            str(p.get("message", "")) + " " + str(p.get("scene", ""))
-            for p in problems
+            str(p.get("message", "")) + " " + str(p.get("scene", "")) for p in problems
         ).lower()
         assert "department" in combined_msg, (
             f"Problem message must reference 'department', got: {problems}"
@@ -584,8 +590,6 @@ class TestVerifyResultsScene6GroupsListMerge:
         WHY: With LDAP enrichment applied and groups from two sources, list_merge
         is required. single_source would mean one source was silently ignored.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene6 = _scene6_diana_oidc_conflict()
         bad_scene6["resolution_details"]["groups"] = _single_source(
             "engineering", ["oidc"], 0.70
@@ -595,7 +599,7 @@ class TestVerifyResultsScene6GroupsListMerge:
         results[5] = bad_scene6
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 6 groups resolution is 'single_source' not 'list_merge'"
@@ -619,13 +623,12 @@ class TestVerifyResultsConfidenceOrdering:
 
         WHY: Confirms the fixture is constructed correctly for the ordering contract.
         """
-        from demo_normalization_flow import SCENES
-
         results = _wrap_results(_six_results())
-        problems = demo_mod.verify_results(SCENES, results)
+        problems = demo_mod.verify_results(demo_mod.SCENES, results)
 
         ordering_problems = [
-            p for p in problems
+            p
+            for p in problems
             if "confidence" in str(p.get("message", "")).lower()
             or "ordering" in str(p.get("message", "")).lower()
         ]
@@ -639,22 +642,22 @@ class TestVerifyResultsConfidenceOrdering:
         WHY: If mallory's confidence is not lower than frank/saml's, the penalized-unmapped
         story is not being demonstrated correctly.
         """
-        from demo_normalization_flow import SCENES
-
         results = _six_results()
         # Make C(4) [mallory] equal to C(2) [frank/saml] — violates strict less-than
         results[3]["normalization_confidence"] = results[1]["normalization_confidence"]
 
         wrapped = _wrap_results(results)
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when C(4) == C(2), violating C(4) < C(2)"
         )
         combined_msg = " ".join(str(p.get("message", "")) for p in problems).lower()
-        assert "confidence" in combined_msg or "ordering" in combined_msg or "c(4)" in combined_msg, (
-            f"Problem must reference the confidence ordering, got: {problems}"
-        )
+        assert (
+            "confidence" in combined_msg
+            or "ordering" in combined_msg
+            or "c(4)" in combined_msg
+        ), f"Problem must reference the confidence ordering, got: {problems}"
 
     def test_c1_not_lt_c3_violates_ordering(self, demo_mod) -> None:
         """C(1) >= C(3) violates the ordering — produces a problem.
@@ -663,15 +666,13 @@ class TestVerifyResultsConfidenceOrdering:
         LDAP has the highest attribute weights. Frank/OIDC beating Grace/LDAP
         would indicate a weight configuration error.
         """
-        from demo_normalization_flow import SCENES
-
         results = _six_results()
         # Make C(1) [frank/oidc] higher than C(3) [grace/ldap] — violates C(1)<C(3)
         results[0]["normalization_confidence"] = 0.99  # too high
         results[2]["normalization_confidence"] = 0.50  # too low
 
         wrapped = _wrap_results(results)
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when C(1) > C(3), violating C(1) < C(3)"
@@ -683,14 +684,12 @@ class TestVerifyResultsConfidenceOrdering:
         WHY: LDAP enrichment adds multi-source unanimous agreement, raising confidence.
         If enriched OIDC did not beat unenriched OIDC, the enrichment benefit is not visible.
         """
-        from demo_normalization_flow import SCENES
-
         results = _six_results()
         # Violate C(5) > C(1) by making C(5) <= C(1)
         results[4]["normalization_confidence"] = results[0]["normalization_confidence"]
 
         wrapped = _wrap_results(results)
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when C(5) <= C(1), violating C(5) > C(1)"
@@ -703,14 +702,14 @@ class TestVerifyResultsConfidenceOrdering:
         whereas unanimous agreement produces higher confidence. The demo must show
         this contrast between Scene 5 and Scene 6.
         """
-        from demo_normalization_flow import SCENES
-
         results = _six_results()
         # Violate C(6) < C(5) by making C(6) >= C(5)
-        results[5]["normalization_confidence"] = results[4]["normalization_confidence"] + 0.05
+        results[5]["normalization_confidence"] = (
+            results[4]["normalization_confidence"] + 0.05
+        )
 
         wrapped = _wrap_results(results)
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when C(6) >= C(5), violating C(6) < C(5)"
@@ -730,9 +729,8 @@ class TestVerifyResultsScene5MustBeUnanimous:
         WHY: alice's OIDC and LDAP sources agree on all scalar attributes.
         A priority resolution means they disagreed, which violates the scene design
         and would mean the enrichment scenario is not demonstrating unanimous agreement.
+        The problem must have scene=5 (1-based) and reference 'unanimous'.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene5 = _scene5_alice_oidc_enriched()
         # Mutate display_name to priority (wrong for Scene 5)
         bad_scene5["resolution_details"]["display_name"] = _priority(
@@ -746,14 +744,22 @@ class TestVerifyResultsScene5MustBeUnanimous:
         results[4] = bad_scene5
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 5 display_name is 'priority' instead of 'unanimous'"
         )
-        combined_msg = " ".join(str(p.get("message", "")) for p in problems).lower()
-        assert "unanimous" in combined_msg or "scene 5" in combined_msg or "5" in combined_msg or "alice" in combined_msg, (
-            f"Problem must reference Scene 5 unanimous expectation, got: {problems}"
+        # Problem must have scene=5 (1-based) and mention unanimous
+        scene5_problems = [p for p in problems if p.get("scene") == 5]
+        assert scene5_problems, (
+            f"Problem must have scene=5 (1-based), got scenes: "
+            f"{[p.get('scene') for p in problems]}"
+        )
+        combined_msg = " ".join(
+            str(p.get("message", "")) for p in scene5_problems
+        ).lower()
+        assert "unanimous" in combined_msg, (
+            f"Problem must reference 'unanimous' expectation, got: {scene5_problems}"
         )
 
 
@@ -770,24 +776,32 @@ class TestVerifyResultsScene4UnmappedHandling:
 
         WHY: Non-standard employee_type values are discarded (not stored as a literal).
         If employee_type is non-None, the adapter failed to discard the unknown value.
+        The problem must have scene=4 (1-based) and reference 'employee_type'.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene4 = _scene4_mallory_saml()
-        bad_scene4["employee_type"] = "FTE"  # wrong: should be None for unmapped "wizard"
+        bad_scene4["employee_type"] = (
+            "FTE"  # wrong: should be None for unmapped "wizard"
+        )
 
         results = _six_results()
         results[3] = bad_scene4
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 4 employee_type is 'FTE' instead of None"
         )
-        combined_msg = " ".join(str(p.get("message", "")) for p in problems).lower()
-        assert "employee_type" in combined_msg or "scene 4" in combined_msg or "4" in combined_msg or "mallory" in combined_msg, (
-            f"Problem must reference Scene 4 employee_type, got: {problems}"
+        scene4_problems = [p for p in problems if p.get("scene") == 4]
+        assert scene4_problems, (
+            f"Problem must have scene=4 (1-based), got scenes: "
+            f"{[p.get('scene') for p in problems]}"
+        )
+        combined_msg = " ".join(
+            str(p.get("message", "")) for p in scene4_problems
+        ).lower()
+        assert "employee_type" in combined_msg, (
+            f"Problem must reference 'employee_type', got: {scene4_problems}"
         )
 
     def test_scene4_department_sorcery_must_be_retained(self, demo_mod) -> None:
@@ -796,9 +810,8 @@ class TestVerifyResultsScene4UnmappedHandling:
         WHY: The normalization policy retains unknown department values (with a confidence
         penalty) rather than discarding them. Discarding would lose information.
         If department is None, the retention policy is not functioning.
+        The problem must have scene=4 (1-based) and reference 'department'.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene4 = _scene4_mallory_saml()
         bad_scene4["department"] = None  # wrong: should be retained as "Sorcery"
 
@@ -806,14 +819,21 @@ class TestVerifyResultsScene4UnmappedHandling:
         results[3] = bad_scene4
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 4 department is None instead of retained 'Sorcery'"
         )
-        combined_msg = " ".join(str(p.get("message", "")) for p in problems).lower()
-        assert "department" in combined_msg or "scene 4" in combined_msg or "4" in combined_msg or "mallory" in combined_msg, (
-            f"Problem must reference Scene 4 department retention, got: {problems}"
+        scene4_problems = [p for p in problems if p.get("scene") == 4]
+        assert scene4_problems, (
+            f"Problem must have scene=4 (1-based), got scenes: "
+            f"{[p.get('scene') for p in problems]}"
+        )
+        combined_msg = " ".join(
+            str(p.get("message", "")) for p in scene4_problems
+        ).lower()
+        assert "department" in combined_msg, (
+            f"Problem must reference 'department', got: {scene4_problems}"
         )
 
 
@@ -831,8 +851,6 @@ class TestVerifyResultsScenesOneToFourAllSingleSource:
         Scenes 1–4 should have enrichment.applied=False to demonstrate the
         contrast with enriched scenes.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene1 = _scene1_frank_oidc()
         bad_scene1["enrichment"] = _applied_enrichment().model_dump(mode="json")
         # applied=True is wrong for frank/oidc which has no LDAP enrichment
@@ -841,7 +859,7 @@ class TestVerifyResultsScenesOneToFourAllSingleSource:
         results[0] = bad_scene1
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 1 has enrichment.applied=True (should be False)"
@@ -854,17 +872,17 @@ class TestVerifyResultsScenesOneToFourAllSingleSource:
         Any other skip_reason or applied=True would indicate incorrect handling of
         the native LDAP event case.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene3 = _scene3_grace_ldap()
         # Wrong skip_reason for a native ldap event
-        bad_scene3["enrichment"] = _skipped_enrichment("ldap_disabled").model_dump(mode="json")
+        bad_scene3["enrichment"] = _skipped_enrichment("ldap_disabled").model_dump(
+            mode="json"
+        )
 
         results = _six_results()
         results[2] = bad_scene3
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 3 enrichment.skip_reason is 'ldap_disabled' not 'ldap_event'"
@@ -877,20 +895,65 @@ class TestVerifyResultsScenesOneToFourAllSingleSource:
         If enrichment is skipped for these scenes, the multi-source resolution
         story cannot be demonstrated.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene5 = _scene5_alice_oidc_enriched()
-        bad_scene5["enrichment"] = _skipped_enrichment("no_ldap_match").model_dump(mode="json")
+        bad_scene5["enrichment"] = _skipped_enrichment("no_ldap_match").model_dump(
+            mode="json"
+        )
 
         results = _six_results()
         results[4] = bad_scene5
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 5 has enrichment.applied=False (should be True)"
         )
+
+    def test_scene1_scalar_resolved_multi_source_is_rejected(self, demo_mod) -> None:
+        """A non-single_source scalar in Scenes 1–4 must produce a problem.
+
+        WHY: Scenes 1–4 submit one protocol with no directory match, so a
+        unanimous/priority scalar means enrichment merged data it should not
+        have — the single-source narrative would be false.
+        """
+        bad_scene1 = _scene1_frank_oidc()
+        bad_scene1["resolution_details"]["department"] = _unanimous(
+            "Engineering", ["oidc", "ldap"], 0.90
+        ).model_dump(mode="json")
+
+        results = _six_results()
+        results[0] = bad_scene1
+        wrapped = _wrap_results(results)
+
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
+
+        assert any(
+            p["scene"] == 1 and "single_source" in p["message"] for p in problems
+        ), f"Expected a Scene 1 single_source problem for department, got: {problems}"
+
+    def test_scene1_groups_with_two_sources_is_rejected(self, demo_mod) -> None:
+        """Groups merged from more than one source in Scenes 1–4 must produce a problem.
+
+        WHY: The pipeline resolves groups as a list_merge even for a single
+        source, so the resolution type alone cannot distinguish 'no merge
+        happened' — Check 1 requires at most one contributing source.
+        """
+        bad_scene1 = _scene1_frank_oidc()
+        bad_scene1["resolution_details"]["groups"] = _list_merge(
+            ["engineering", "vpn-users"], 0.85, sources=["ldap", "oidc"]
+        ).model_dump(mode="json")
+
+        results = _six_results()
+        results[0] = bad_scene1
+        wrapped = _wrap_results(results)
+
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
+
+        assert any(
+            p["scene"] == 1 and "single-source list_merge" in p["message"]
+            for p in problems
+        ), f"Expected a Scene 1 single-source groups problem, got: {problems}"
 
 
 class TestVerifyResultsScene5GroupsListMerge:
@@ -906,8 +969,6 @@ class TestVerifyResultsScene5GroupsListMerge:
         WHY: With LDAP enrichment providing groups, the merge must be a list_merge.
         single_source would indicate LDAP groups were not merged in.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene5 = _scene5_alice_oidc_enriched()
         bad_scene5["resolution_details"]["groups"] = _single_source(
             None, ["oidc"], 0.70
@@ -917,7 +978,7 @@ class TestVerifyResultsScene5GroupsListMerge:
         results[4] = bad_scene5
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert len(problems) > 0, (
             "Expected a problem when Scene 5 groups resolution is 'single_source' not 'list_merge'"
@@ -943,10 +1004,8 @@ class TestVerifyResultsGroupsCorroboration:
 
         WHY: enrichment.applied=True with a token-only group union is exactly the
         broken-overlay failure mode; the structural list_merge check alone cannot
-        detect it.
+        detect it. The problem must have scene=5 (1-based) and mention 'corroborat'.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene5 = _scene5_alice_oidc_enriched()
         bad_scene5["resolution_details"]["groups"] = _list_merge(
             ["engineering", "product-admins", "vpn-users"], 0.70
@@ -956,22 +1015,21 @@ class TestVerifyResultsGroupsCorroboration:
         results[4] = bad_scene5
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert any(
-            p["scene"] == 4 and "corroborat" in p["message"] for p in problems
+            p["scene"] == 5 and "corroborat" in p["message"] for p in problems
         ), (
-            f"Expected a Scene-5 corroboration problem for a token-only group "
-            f"union (groups confidence 0.70), got: {problems}"
+            f"Expected a Scene-5 corroboration problem (scene=5, 1-based) for a "
+            f"token-only group union (groups confidence 0.70), got: {problems}"
         )
 
     def test_scene6_token_only_union_is_rejected(self, demo_mod) -> None:
         """Scene 6 groups confidence 0.70 (zero corroborated fraction) produces a problem.
 
         WHY: the corroboration requirement applies to both enriched scenes.
+        The problem must have scene=6 (1-based) and mention 'corroborat'.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene6 = _scene6_diana_oidc_conflict()
         bad_scene6["resolution_details"]["groups"] = _list_merge(
             ["engineering", "oncall", "vpn-users"], 0.70
@@ -981,13 +1039,13 @@ class TestVerifyResultsGroupsCorroboration:
         results[5] = bad_scene6
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert any(
-            p["scene"] == 5 and "corroborat" in p["message"] for p in problems
+            p["scene"] == 6 and "corroborat" in p["message"] for p in problems
         ), (
-            f"Expected a Scene-6 corroboration problem for a token-only group "
-            f"union (groups confidence 0.70), got: {problems}"
+            f"Expected a Scene-6 corroboration problem (scene=6, 1-based) for a "
+            f"token-only group union (groups confidence 0.70), got: {problems}"
         )
 
     def test_half_corroborated_fraction_is_accepted(self, demo_mod) -> None:
@@ -997,8 +1055,6 @@ class TestVerifyResultsGroupsCorroboration:
         2-of-3 groups corroborate — while still failing the broken-overlay states
         (fraction 0 → 0.70, fraction ⅓ → 0.80).
         """
-        from demo_normalization_flow import SCENES
-
         scene5 = _scene5_alice_oidc_enriched()
         scene5["resolution_details"]["groups"] = _list_merge(
             ["engineering", "product-admins", "vpn-users"], 0.85
@@ -1008,7 +1064,7 @@ class TestVerifyResultsGroupsCorroboration:
         results[4] = scene5
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert not any("corroborat" in p["message"] for p in problems), (
             f"Expected no corroboration problem at corroborated fraction ½ "
@@ -1021,28 +1077,27 @@ class TestVerifyResultsGroupsCorroboration:
         WHY: Scene 6's token omits vpn-users, so only engineering corroborates —
         fraction ⅓ is the expected healthy value and must pass the ≥ ¼ threshold.
         """
-        from demo_normalization_flow import SCENES
-
         results = _six_results()
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert not any(
-            p["scene"] == 5 and "corroborat" in p["message"] for p in problems
+            p["scene"] == 6 and "corroborat" in p["message"] for p in problems
         ), (
-            f"Expected no Scene-6 corroboration problem at fraction ⅓ "
+            f"Expected no Scene-6 corroboration problem (scene=6, 1-based) at fraction ⅓ "
             f"(groups confidence 0.80), got: {problems}"
         )
 
-    def test_scene6_groups_confidence_not_below_scene5_is_rejected(self, demo_mod) -> None:
+    def test_scene6_groups_confidence_not_below_scene5_is_rejected(
+        self, demo_mod
+    ) -> None:
         """Scene 6 groups confidence equal to Scene 5's produces a problem.
 
         WHY: Scene 6's token only partially matches the directory, so its merge
         confidence must sit strictly below Scene 5's fuller-overlap merge.
+        The problem must have scene=6 (1-based) and mention 'groups confidence'.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene6 = _scene6_diana_oidc_conflict()
         bad_scene6["resolution_details"]["groups"] = _list_merge(
             ["engineering", "oncall", "vpn-users"], 0.90, sources=["ldap", "oidc"]
@@ -1052,13 +1107,13 @@ class TestVerifyResultsGroupsCorroboration:
         results[5] = bad_scene6
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
         assert any(
-            p["scene"] == 5 and "groups confidence" in p["message"] for p in problems
+            p["scene"] == 6 and "groups confidence" in p["message"] for p in problems
         ), (
-            f"Expected a Scene-6 problem when groups confidence (0.90) is not "
-            f"below Scene 5's (0.90), got: {problems}"
+            f"Expected a Scene-6 problem (scene=6, 1-based) when groups confidence "
+            f"(0.90) is not below Scene 5's (0.90), got: {problems}"
         )
 
     def test_scene6_non_superset_groups_rejected(self, demo_mod) -> None:
@@ -1066,9 +1121,8 @@ class TestVerifyResultsGroupsCorroboration:
 
         WHY: the directory must back-populate vpn-users (absent from the token);
         a merged set that matches the token exactly means enrichment added nothing.
+        The problem must have scene=6 (1-based) and mention 'superset'.
         """
-        from demo_normalization_flow import SCENES
-
         bad_scene6 = _scene6_diana_oidc_conflict()
         bad_scene6["groups"] = ["engineering", "oncall"]
 
@@ -1076,13 +1130,11 @@ class TestVerifyResultsGroupsCorroboration:
         results[5] = bad_scene6
         wrapped = _wrap_results(results)
 
-        problems = demo_mod.verify_results(SCENES, wrapped)
+        problems = demo_mod.verify_results(demo_mod.SCENES, wrapped)
 
-        assert any(
-            p["scene"] == 5 and "superset" in p["message"] for p in problems
-        ), (
-            f"Expected a Scene-6 strict-superset problem when merged groups "
-            f"equal the token groups, got: {problems}"
+        assert any(p["scene"] == 6 and "superset" in p["message"] for p in problems), (
+            f"Expected a Scene-6 strict-superset problem (scene=6, 1-based) when "
+            f"merged groups equal the token groups, got: {problems}"
         )
 
 
@@ -1098,64 +1150,13 @@ class TestVerifyResultsGroupsCorroboration:
 
 
 class TestSqlQueryConstants:
-    """poll_results and cleanup_events use exact parameterized SQL queries.
+    """poll_results and cleanup_events use parameterized SQL queries.
 
     Spec §5.5: The queries must be parameterized to prevent SQL injection.
-    The exact strings are asserted here so any drift in column list, table
-    name, or parameter style is caught.
+    The valuable property is %(ids)s parameterization (asserted below);
+    the exact query text is free to evolve (column additions, ORDER BY)
+    without breaking these tests.
     """
-
-    EXPECTED_POLL_QUERY = (
-        "SELECT id, protocol, normalized_attributes FROM events WHERE id = ANY(%(ids)s)"
-    )
-    EXPECTED_CLEANUP_QUERY = "DELETE FROM events WHERE id = ANY(%(ids)s)"
-
-    def test_poll_query_constant_exists(self, demo_mod) -> None:
-        """Module must define a POLL_QUERY constant.
-
-        WHY: A named constant documents intent and makes the parameterized query
-        inspectable for audits; an inlined string is harder to find and review.
-        """
-        assert hasattr(demo_mod, "POLL_QUERY"), (
-            "demo_normalization.py must define a module-level POLL_QUERY constant "
-            "so the parameterized polling query is auditable."
-        )
-
-    def test_poll_query_exact_string(self, demo_mod) -> None:
-        """POLL_QUERY must be exactly the expected parameterized SELECT string.
-
-        WHY: The column list (id, protocol, normalized_attributes) must be exact
-        so poll_results can access the right columns. Any deviation breaks the
-        column→dict mapping.
-        """
-        assert demo_mod.POLL_QUERY == self.EXPECTED_POLL_QUERY, (
-            f"POLL_QUERY mismatch.\n"
-            f"Expected: {self.EXPECTED_POLL_QUERY!r}\n"
-            f"Got:      {demo_mod.POLL_QUERY!r}"
-        )
-
-    def test_cleanup_query_constant_exists(self, demo_mod) -> None:
-        """Module must define a CLEANUP_QUERY constant.
-
-        WHY: Same rationale as POLL_QUERY — named constants are auditable.
-        """
-        assert hasattr(demo_mod, "CLEANUP_QUERY"), (
-            "demo_normalization.py must define a module-level CLEANUP_QUERY constant "
-            "so the parameterized cleanup query is auditable."
-        )
-
-    def test_cleanup_query_exact_string(self, demo_mod) -> None:
-        """CLEANUP_QUERY must be exactly the expected parameterized DELETE string.
-
-        WHY: The DELETE must use %(ids)s parameterization, not f-string interpolation
-        of the ids list. f-string interpolation would allow SQL injection via a
-        crafted event ID.
-        """
-        assert demo_mod.CLEANUP_QUERY == self.EXPECTED_CLEANUP_QUERY, (
-            f"CLEANUP_QUERY mismatch.\n"
-            f"Expected: {self.EXPECTED_CLEANUP_QUERY!r}\n"
-            f"Got:      {demo_mod.CLEANUP_QUERY!r}"
-        )
 
     def test_poll_query_uses_parameterized_ids_not_fstring(self, demo_mod) -> None:
         """POLL_QUERY must contain '%(ids)s' — not an f-string or %-interpolation placeholder.
@@ -1169,7 +1170,7 @@ class TestSqlQueryConstants:
         assert "%(ids)s" in query, (
             f"POLL_QUERY must use %(ids)s parameterization, got: {query!r}"
         )
-        # Must NOT contain bare %s (positional) or f-string braces
+        # Must NOT contain f-string braces
         assert "{ids}" not in query, (
             f"POLL_QUERY must not use {{ids}} f-string syntax, got: {query!r}"
         )
@@ -1191,18 +1192,11 @@ class TestSqlQueryConstants:
 # ===========================================================================
 # CLASS 3 — submit_scenes: POST contract
 #
-# submit_scenes(scenes, ingest_url, args) -> list[str]
+# submit_scenes(scenes, ingest_url, *, http_client=None) -> list[str]
 #
 # Injectable seam: submit_scenes accepts an optional httpx.Client so tests
-# can verify the POST contract without network access:
-#
-#   def submit_scenes(
-#       scenes, ingest_url, args, *, http_client=None
-#   ) -> list[str]:
-#       client = http_client or httpx.Client()
-#       ...
-#
-# Tests use unittest.mock to patch httpx.Client or accept a mock client.
+# can verify the POST contract without network access.
+# Error messages are 1-based: "Failed to submit scene {i+1} ({user_id}): ..."
 # ===========================================================================
 
 
@@ -1224,9 +1218,7 @@ class TestSubmitScenes:
     def _make_mock_client(self, event_ids: list[str]) -> MagicMock:
         """Build a mock httpx.Client where .post() returns successive responses."""
         client = MagicMock()
-        client.post.side_effect = [
-            self._make_mock_response(eid) for eid in event_ids
-        ]
+        client.post.side_effect = [self._make_mock_response(eid) for eid in event_ids]
         client.__enter__ = MagicMock(return_value=client)
         client.__exit__ = MagicMock(return_value=False)
         return client
@@ -1237,16 +1229,11 @@ class TestSubmitScenes:
         WHY: The exact endpoint path must match what event-ingestion exposes.
         A different path (e.g. /ingest or /event) would receive a 404.
         """
-        from demo_normalization_flow import SCENES
-
         event_ids = [f"uuid-{i}" for i in range(6)]
         mock_client = self._make_mock_client(event_ids)
-        args = MagicMock()
-        args.pace = 0
-        args.step = False
 
-        result = demo_mod.submit_scenes(
-            SCENES, "http://localhost:8001", args, http_client=mock_client
+        demo_mod.submit_scenes(
+            demo_mod.SCENES, "http://localhost:8001", http_client=mock_client
         )
 
         assert mock_client.post.call_count == 6, (
@@ -1265,16 +1252,18 @@ class TestSubmitScenes:
         WHY: poll_results and cleanup_events depend on IDs being in scene order.
         Out-of-order IDs would corrupt the scenes→results alignment.
         """
-        from demo_normalization_flow import SCENES
-
-        event_ids = ["id-alice", "id-bob", "id-charlie", "id-dave", "id-eve", "id-frank"]
+        event_ids = [
+            "id-alice",
+            "id-bob",
+            "id-charlie",
+            "id-dave",
+            "id-eve",
+            "id-frank",
+        ]
         mock_client = self._make_mock_client(event_ids)
-        args = MagicMock()
-        args.pace = 0
-        args.step = False
 
         result = demo_mod.submit_scenes(
-            SCENES, "http://localhost:8001", args, http_client=mock_client
+            demo_mod.SCENES, "http://localhost:8001", http_client=mock_client
         )
 
         assert result == event_ids, (
@@ -1287,16 +1276,11 @@ class TestSubmitScenes:
         WHY: poll_results and cleanup_events both consume the return value as
         list[str]. A list of UUID objects or mixed types would fail string ops.
         """
-        from demo_normalization_flow import SCENES
-
         event_ids = [f"evt-{i}" for i in range(6)]
         mock_client = self._make_mock_client(event_ids)
-        args = MagicMock()
-        args.pace = 0
-        args.step = False
 
         result = demo_mod.submit_scenes(
-            SCENES, "http://localhost:8001", args, http_client=mock_client
+            demo_mod.SCENES, "http://localhost:8001", http_client=mock_client
         )
 
         assert isinstance(result, list), f"Expected list, got {type(result)!r}"
@@ -1312,16 +1296,11 @@ class TestSubmitScenes:
         WHY: The ingest service validates user_id, protocol, client_ip, source,
         is_synthetic, and raw_attributes. Missing fields trigger a 422 rejection.
         """
-        from demo_normalization_flow import SCENES
-
         event_ids = [f"eid-{i}" for i in range(6)]
         mock_client = self._make_mock_client(event_ids)
-        args = MagicMock()
-        args.pace = 0
-        args.step = False
 
         demo_mod.submit_scenes(
-            SCENES, "http://localhost:8001", args, http_client=mock_client
+            demo_mod.SCENES, "http://localhost:8001", http_client=mock_client
         )
 
         # Check first call body contains scene 0 fields
@@ -1344,18 +1323,256 @@ class TestSubmitScenes:
 
 
 # ===========================================================================
-# CLASS 4 — render_results: Rich output content checks
+# CLASS 3b — TestSubmitScenesErrors: error path for submit_scenes
 #
-# render_results(scenes, results, verification) -> None
+# A failing POST must raise SystemExit whose message names the 1-based scene
+# number and the user_id of the failing scene.
+# ===========================================================================
+
+
+class TestSubmitScenesErrors:
+    """submit_scenes exits with a 1-based scene reference on POST failure.
+
+    WHY: The error message must name the failing scene number (1-based) and
+    user_id so the operator can immediately identify which scene caused the
+    failure without parsing ambiguous 0-based indices.
+    """
+
+    def test_submit_scenes_http_error_exits_with_scene_and_user(self, demo_mod) -> None:
+        """A POST that raises on raise_for_status exits with 1-based scene + user_id.
+
+        WHY: The revised error format "Failed to submit scene {i+1} ({user_id}): ..."
+        must reference 1-based numbering. Scene index 0 is Scene 1 in the message.
+        """
+        import httpx
+
+        bad_resp = MagicMock()
+        bad_resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "422", request=MagicMock(), response=MagicMock()
+        )
+        mock_client = MagicMock()
+        mock_client.post.return_value = bad_resp
+        mock_client.close = MagicMock()
+
+        with pytest.raises(SystemExit) as exc_info:
+            demo_mod.submit_scenes(
+                demo_mod.SCENES, "http://localhost:8001", http_client=mock_client
+            )
+
+        msg = str(exc_info.value)
+        # The first scene (index 0) must be reported as "scene 1"
+        assert "1" in msg, f"Error must name 1-based scene number, got: {msg!r}"
+        assert "frank" in msg.lower(), (
+            f"Error must name the user_id of the failing scene, got: {msg!r}"
+        )
+
+    def test_submit_scenes_network_error_exits_with_scene_and_user(
+        self, demo_mod
+    ) -> None:
+        """A POST that raises a network exception exits with 1-based scene + user_id.
+
+        WHY: Any exception from client.post (network failure, timeout) must be caught
+        and reported with the same 1-based scene format.
+        """
+        mock_client = MagicMock()
+        mock_client.post.side_effect = ConnectionError("refused")
+        mock_client.close = MagicMock()
+
+        with pytest.raises(SystemExit) as exc_info:
+            demo_mod.submit_scenes(
+                demo_mod.SCENES, "http://localhost:8001", http_client=mock_client
+            )
+
+        msg = str(exc_info.value)
+        assert "1" in msg, f"Error must name 1-based scene number, got: {msg!r}"
+        assert "frank" in msg.lower(), (
+            f"Error must name the user_id of the failing scene, got: {msg!r}"
+        )
+
+
+# ===========================================================================
+# CLASS 4 — poll_results: db_fetch seam coverage
+#
+# poll_results(event_ids, db_dsn, timeout, *, db_fetch=None) -> list[dict]
+#
+# If db_fetch(query, params) -> rows is provided, no psycopg needed.
+# Rows are tuples: (id, protocol, normalized_attributes).
+# str-typed normalized_attributes are json.loads-ed.
+# Results are returned in event_ids submission order.
+# On timeout: prints unprocessed ids and sys.exit(1).
+# Live DB error: sys.exit with "Database error during polling".
+# ===========================================================================
+
+
+class TestPollResults:
+    """poll_results exercises the db_fetch injectable seam.
+
+    WHY: Using the db_fetch seam lets tests verify parse/ordering/timeout logic
+    without a live PostgreSQL connection.
+    """
+
+    def test_poll_returns_parsed_results_dict_passthrough(self, demo_mod) -> None:
+        """poll_results returns parsed results when all rows are present as dicts.
+
+        WHY: When normalized_attributes is already a dict (psycopg JSONB), it must
+        pass through without double-parsing.
+        """
+        event_ids = ["id-0", "id-1", "id-2"]
+        na_dicts = [_scene1_frank_oidc(), _scene2_frank_saml(), _scene3_grace_ldap()]
+        rows = [
+            (event_ids[i], na_dicts[i]["source_protocol"], na_dicts[i])
+            for i in range(3)
+        ]
+
+        def db_fetch(query: str, params: dict) -> list:
+            return rows
+
+        results = demo_mod.poll_results(event_ids, "unused", 10.0, db_fetch=db_fetch)
+
+        assert len(results) == 3
+        for i, result in enumerate(results):
+            assert result["id"] == event_ids[i]
+            assert isinstance(result["normalized_attributes"], dict)
+
+    def test_poll_returns_parsed_results_json_string(self, demo_mod) -> None:
+        """poll_results json.loads str-typed normalized_attributes.
+
+        WHY: Some DB drivers return JSONB columns as strings. The function must
+        deserialize them so callers always receive dict-typed normalized_attributes.
+        """
+        import json
+
+        event_ids = ["id-0", "id-1"]
+        na_dicts = [_scene1_frank_oidc(), _scene2_frank_saml()]
+        rows = [
+            (event_ids[i], na_dicts[i]["source_protocol"], json.dumps(na_dicts[i]))
+            for i in range(2)
+        ]
+
+        def db_fetch(query: str, params: dict) -> list:
+            return rows
+
+        results = demo_mod.poll_results(event_ids, "unused", 10.0, db_fetch=db_fetch)
+
+        assert len(results) == 2
+        for result in results:
+            assert isinstance(result["normalized_attributes"], dict), (
+                "normalized_attributes must be deserialized from JSON string"
+            )
+
+    def test_poll_returns_results_in_submission_order(self, demo_mod) -> None:
+        """poll_results returns results in event_ids submission order even when db returns different order.
+
+        WHY: render_results aligns scenes[i] with results[i] by index; out-of-order
+        results would swap scenes in the output.
+        """
+        event_ids = ["id-a", "id-b", "id-c"]
+        na_dicts = [_scene1_frank_oidc(), _scene2_frank_saml(), _scene3_grace_ldap()]
+        # DB returns rows in reverse order
+        rows = [
+            ("id-c", na_dicts[2]["source_protocol"], na_dicts[2]),
+            ("id-a", na_dicts[0]["source_protocol"], na_dicts[0]),
+            ("id-b", na_dicts[1]["source_protocol"], na_dicts[1]),
+        ]
+
+        def db_fetch(query: str, params: dict) -> list:
+            return rows
+
+        results = demo_mod.poll_results(event_ids, "unused", 10.0, db_fetch=db_fetch)
+
+        assert [r["id"] for r in results] == event_ids, (
+            f"Results must be in submission order {event_ids!r}, "
+            f"got {[r['id'] for r in results]!r}"
+        )
+
+    def test_poll_retries_until_all_complete(self, demo_mod, monkeypatch) -> None:
+        """Rows with NULL normalized_attributes are not complete; second poll completes.
+
+        WHY: The poll loop retries on partial results (rows with NULL
+        normalized_attributes are present but not ready). The sleep between
+        polls is monkeypatched to avoid slowing the test.
+        """
+        event_ids = ["id-0", "id-1"]
+        na_dict = _scene1_frank_oidc()
+
+        call_count = 0
+
+        def db_fetch(query: str, params: dict) -> list:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # First call: id-0 ready, id-1 not ready (NULL)
+                return [("id-0", "oidc", na_dict)]
+            # Second call: both ready
+            return [
+                ("id-0", "oidc", na_dict),
+                ("id-1", "saml", _scene2_frank_saml()),
+            ]
+
+        monkeypatch.setattr(demo_mod.time, "sleep", lambda _: None)
+
+        results = demo_mod.poll_results(event_ids, "unused", 30.0, db_fetch=db_fetch)
+
+        assert call_count == 2, f"Expected 2 db_fetch calls, got {call_count}"
+        assert len(results) == 2
+
+    def test_poll_timeout_exits_with_code_1_and_prints_unprocessed(
+        self, demo_mod, monkeypatch, capsys
+    ) -> None:
+        """Timeout with incomplete rows exits with code 1 and prints the unprocessed ids.
+
+        WHY: A timeout must be distinguishable from a clean finish. sys.exit(1)
+        propagates to main()'s finally block for cleanup. The printed message
+        must name the stuck ids so the operator can investigate.
+        """
+        event_ids = ["id-0", "id-1", "id-2"]
+        # db_fetch always returns only id-0 — id-1 and id-2 never complete
+        na_dict = _scene1_frank_oidc()
+
+        def db_fetch(query: str, params: dict) -> list:
+            return [("id-0", "oidc", na_dict)]
+
+        monkeypatch.setattr(demo_mod.time, "sleep", lambda _: None)
+
+        with pytest.raises(SystemExit) as exc_info:
+            demo_mod.poll_results(event_ids, "unused", 0.0, db_fetch=db_fetch)
+
+        assert exc_info.value.code == 1
+        captured = capsys.readouterr()
+        assert "id-1" in captured.out or "id-2" in captured.out, (
+            f"Timeout output must list unprocessed ids, got: {captured.out!r}"
+        )
+
+    def test_poll_live_path_db_error_exits_with_message(
+        self, demo_mod, monkeypatch
+    ) -> None:
+        """psycopg.connect raising exits with a message containing 'Database error during polling'.
+
+        WHY: The live-path error handler translates the raw exception into a clear
+        operator message. Without it, a DB failure surfaces as an uncaught stack trace.
+        """
+        import psycopg
+
+        monkeypatch.setattr(
+            psycopg, "connect", MagicMock(side_effect=Exception("connection refused"))
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            demo_mod.poll_results(["id-0"], "host=bad", 5.0)
+
+        msg = str(exc_info.value)
+        assert "Database error during polling" in msg, (
+            f"Exit message must contain 'Database error during polling', got: {msg!r}"
+        )
+
+
+# ===========================================================================
+# CLASS 4b — render_results: Rich output content checks
+#
+# render_results(scenes, results, *, console=None, pace=0.0, step=False) -> None
 #
 # Injectable seam: render_results accepts an optional `console` parameter
-# so tests can capture output without stdout:
-#
-#   def render_results(
-#       scenes, results, verification, *, console=None
-#   ) -> None:
-#       con = console or rich.console.Console()
-#       ...
+# so tests can capture output without stdout.
 #
 # Tests use rich.console.Console(file=io.StringIO(), force_terminal=False)
 # to capture rendered text.
@@ -1382,25 +1599,27 @@ class TestRenderResultsScene4UnmappedAnnotations:
     2. employee_type 'wizard' was discarded to None (enum-safe policy)
     """
 
-    def test_scene4_render_notes_department_sorcery_retained_with_penalty(self, demo_mod) -> None:
+    def test_scene4_render_notes_department_sorcery_retained_with_penalty(
+        self, demo_mod
+    ) -> None:
         """Scene 4 rendering mentions 'Sorcery' retained with a penalty.
 
         WHY: Without this annotation, the user sees 'Sorcery' in the output
         with no explanation. The annotation makes the normalization policy explicit.
         """
-        from demo_normalization_flow import SCENES
-
         con, buf = _make_capture_console()
         results = _wrap_results(_six_results())
 
-        demo_mod.render_results(SCENES, results, verification=None, console=con)
+        demo_mod.render_results(demo_mod.SCENES, results, console=con)
 
         output = buf.getvalue().lower()
         assert "sorcery" in output, (
             "Scene 4 render must include 'Sorcery' department value in output"
         )
         # Must indicate the value was retained (not discarded)
-        has_retained = any(word in output for word in ["retained", "kept", "preserved", "penalty"])
+        has_retained = any(
+            word in output for word in ["retained", "kept", "preserved", "penalty"]
+        )
         assert has_retained, (
             f"Scene 4 render must note that 'Sorcery' was retained (with penalty). "
             f"Output did not contain 'retained'/'kept'/'preserved'/'penalty'. "
@@ -1413,12 +1632,10 @@ class TestRenderResultsScene4UnmappedAnnotations:
         WHY: Without this annotation, employee_type=None looks like missing data
         rather than a deliberate enum-safe discard policy.
         """
-        from demo_normalization_flow import SCENES
-
         con, buf = _make_capture_console()
         results = _wrap_results(_six_results())
 
-        demo_mod.render_results(SCENES, results, verification=None, console=con)
+        demo_mod.render_results(demo_mod.SCENES, results, console=con)
 
         output = buf.getvalue().lower()
         # wizard must appear (identifying the discarded value)
@@ -1427,7 +1644,8 @@ class TestRenderResultsScene4UnmappedAnnotations:
         )
         # Must indicate it was discarded / null / dropped
         has_discarded = any(
-            word in output for word in ["discarded", "dropped", "null", "none", "unknown"]
+            word in output
+            for word in ["discarded", "dropped", "null", "none", "unknown"]
         )
         assert has_discarded, (
             f"Scene 4 render must note that 'wizard' was discarded to null. "
@@ -1442,93 +1660,482 @@ class TestRenderResultsScene6SplitSourceAnnotation:
     Spec §5.5: Scene 6 render must explain that two different sources won
     two different attributes, and convey the reason why a single rule
     cannot capture both.
+
+    These tests render ONLY Scene 6 via _render_scene_panel to avoid false
+    positives from keyword matches in earlier scenes (e.g. 'single' appearing
+    in Scenes 1–4's single_source rows).
     """
 
-    def test_scene6_render_mentions_oidc_wins_display_name(self, demo_mod) -> None:
-        """Scene 6 rendering conveys that OIDC won display_name (preferred/presented name).
+    def test_scene6_render_mentions_why_the_split(self, demo_mod) -> None:
+        """Scene 6 rendering includes 'why the split' annotation text.
 
-        WHY: The split-source annotation must explain WHY oidc won display_name —
-        because it holds the user's current preferred/presented name.
+        WHY: The 'Why the split?' heading is the primary entry point for the
+        split-source narrative. If it is absent the entire annotation block is
+        missing. Rendering only Scene 6 ensures the match is Scene-6-specific.
         """
-        from demo_normalization_flow import SCENES
-
         con, buf = _make_capture_console()
-        results = _wrap_results(_six_results())
+        result6 = _wrap_results([_scene6_diana_oidc_conflict()])[0]
 
-        demo_mod.render_results(SCENES, results, verification=None, console=con)
+        demo_mod._render_scene_panel(5, demo_mod.SCENES[5], result6, con)
 
         output = buf.getvalue().lower()
-        # Must mention OIDC winning display_name in context of the split
-        has_oidc_display = (
-            ("oidc" in output and "display" in output)
-            or ("oidc" in output and "name" in output)
-        )
-        assert has_oidc_display, (
-            f"Scene 6 render must convey OIDC winning display_name. "
+        assert "why the split" in output, (
+            f"Scene 6 render must contain 'why the split' annotation. "
             f"Output snippet: {buf.getvalue()[:800]!r}"
         )
 
-    def test_scene6_render_mentions_ldap_wins_department(self, demo_mod) -> None:
-        """Scene 6 rendering conveys that LDAP won department (org structure facts).
+    def test_scene6_render_explains_oidc_wins_display_name(self, demo_mod) -> None:
+        """Scene 6 rendering explains why OIDC won display_name (preferred name rationale).
 
-        WHY: The annotation must explain WHY ldap won department —
-        because LDAP holds authoritative org directory information.
+        WHY: The annotation must state that OIDC holds the user's current
+        preferred/presented name — not just assert which source won.
+        Rendering only Scene 6 ensures this is the scene-6 annotation, not a
+        generic resolution-type row from an earlier scene.
         """
-        from demo_normalization_flow import SCENES
-
         con, buf = _make_capture_console()
-        results = _wrap_results(_six_results())
+        result6 = _wrap_results([_scene6_diana_oidc_conflict()])[0]
 
-        demo_mod.render_results(SCENES, results, verification=None, console=con)
+        demo_mod._render_scene_panel(5, demo_mod.SCENES[5], result6, con)
 
         output = buf.getvalue().lower()
-        has_ldap_dept = (
-            ("ldap" in output and "department" in output)
-            or ("ldap" in output and "dept" in output)
-            or ("ldap" in output and "org" in output)
+        # Must mention display_name → oidc in the rationale
+        assert "display_name" in output or "display" in output, (
+            f"Scene 6 annotation must reference display_name, "
+            f"output snippet: {buf.getvalue()[:800]!r}"
         )
-        assert has_ldap_dept, (
-            f"Scene 6 render must convey LDAP winning department. "
+        assert "oidc" in output, (
+            f"Scene 6 annotation must name oidc as the display_name winner, "
+            f"output snippet: {buf.getvalue()[:800]!r}"
+        )
+
+    def test_scene6_render_explains_ldap_wins_department(self, demo_mod) -> None:
+        """Scene 6 rendering explains why LDAP won department (org structure rationale).
+
+        WHY: The annotation must state that LDAP holds authoritative org structure
+        facts. Rendering only Scene 6 avoids matching 'ldap' from any earlier panel.
+        """
+        con, buf = _make_capture_console()
+        result6 = _wrap_results([_scene6_diana_oidc_conflict()])[0]
+
+        demo_mod._render_scene_panel(5, demo_mod.SCENES[5], result6, con)
+
+        output = buf.getvalue().lower()
+        assert "ldap" in output, (
+            f"Scene 6 annotation must name ldap as the department winner, "
+            f"output snippet: {buf.getvalue()[:800]!r}"
+        )
+        # Must reference department and org structure reasoning
+        assert "department" in output or "org" in output, (
+            f"Scene 6 annotation must reference department/org rationale, "
+            f"output snippet: {buf.getvalue()[:800]!r}"
+        )
+
+    def test_scene6_render_punchline_no_single_rule(self, demo_mod) -> None:
+        """Scene 6 rendering states that no single rule can capture both sources.
+
+        WHY: This is the core IAM insight in Scene 6 — identity presentation and
+        org hierarchy come from different authoritative sources. The script's
+        scene6_note contains 'No single OIDC-or-LDAP rule could capture both'.
+        """
+        con, buf = _make_capture_console()
+        result6 = _wrap_results([_scene6_diana_oidc_conflict()])[0]
+
+        demo_mod._render_scene_panel(5, demo_mod.SCENES[5], result6, con)
+
+        output = buf.getvalue().lower()
+        # "no single" is the distinctive punchline phrase
+        assert "no single" in output or "neither" in output or "split" in output, (
+            f"Scene 6 annotation must contain the 'no single rule' punchline, "
+            f"output snippet: {buf.getvalue()[:800]!r}"
+        )
+
+    def test_scene6_render_groups_merge_mentions_vpn_users(self, demo_mod) -> None:
+        """Scene 6 rendering mentions 'vpn-users' in the groups-merge note.
+
+        WHY: The annotation explicitly notes that the token omitted vpn-users and
+        the directory back-populated it. If this line is absent, the groups
+        back-population story is not rendered.
+        """
+        con, buf = _make_capture_console()
+        result6 = _wrap_results([_scene6_diana_oidc_conflict()])[0]
+
+        demo_mod._render_scene_panel(5, demo_mod.SCENES[5], result6, con)
+
+        output = buf.getvalue().lower()
+        assert "vpn-users" in output, (
+            f"Scene 6 annotation must mention vpn-users (back-populated by directory). "
             f"Output snippet: {buf.getvalue()[:800]!r}"
         )
 
-    def test_scene6_render_mentions_split_source_or_two_winners(self, demo_mod) -> None:
-        """Scene 6 rendering notes that two different sources won two different attributes.
 
-        WHY: This is the core narrative point for Scene 6 — different sources are
-        authoritative for different attribute types. A callout about two winners
-        makes this visible to the reader.
+# ===========================================================================
+# CLASS 5 — TestRunPreflight: preflight check branches
+#
+# run_preflight(ingest_url, norm_url, db_dsn) -> None
+#
+# Each failure branch exits non-zero. Monkeypatch httpx.get and psycopg.connect
+# on the real modules (both installed).
+# ===========================================================================
+
+
+class TestRunPreflight:
+    """run_preflight exits non-zero on any failure; returns None on success.
+
+    WHY: Preflight guards the demo from submitting events to a degraded
+    service. Each failure branch must be verified so regressions are caught
+    before the demo is run against a real environment.
+    """
+
+    def test_ingestion_health_non_200_exits(self, demo_mod, monkeypatch) -> None:
+        """Ingestion /health returning non-200 triggers sys.exit.
+
+        WHY: A 503 from event-ingestion means events will not be accepted.
         """
-        from demo_normalization_flow import SCENES
+        import httpx
 
-        con, buf = _make_capture_console()
-        results = _wrap_results(_six_results())
+        def mock_get(url: str, **kwargs: Any) -> MagicMock:
+            resp = MagicMock()
+            resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+                "503", request=MagicMock(), response=MagicMock()
+            )
+            return resp
 
-        demo_mod.render_results(SCENES, results, verification=None, console=con)
+        monkeypatch.setattr(httpx, "get", mock_get)
 
-        output = buf.getvalue().lower()
-        # Any phrasing that conveys the split: "split", "two sources", "different sources",
-        # "why", or the combination of oidc and ldap each winning
-        has_split_annotation = any(
-            phrase in output
-            for phrase in [
-                "split",
-                "two different",
-                "why",
-                "neither",
-                "single",
-                "no single",
-                "both oidc",
-                "both ldap",
-                "oidc wins",
-                "ldap wins",
-            ]
+        with pytest.raises(SystemExit):
+            demo_mod.run_preflight(
+                "http://ingest:8001", "http://norm:8002", "host=localhost"
+            )
+
+    def test_ingestion_health_unhealthy_status_exits(
+        self, demo_mod, monkeypatch
+    ) -> None:
+        """Ingestion /health returning status != 'healthy' triggers sys.exit.
+
+        WHY: An unhealthy status means the service is up but degraded — events
+        may be silently dropped or misprocessed.
+        """
+        import httpx
+
+        call_count = 0
+
+        def mock_get(url: str, **kwargs: Any) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            # First call (ingestion) returns unhealthy
+            if call_count == 1:
+                resp.json.return_value = {"status": "degraded"}
+            else:
+                resp.json.return_value = {"status": "healthy"}
+            return resp
+
+        monkeypatch.setattr(httpx, "get", mock_get)
+
+        with pytest.raises(SystemExit):
+            demo_mod.run_preflight(
+                "http://ingest:8001", "http://norm:8002", "host=localhost"
+            )
+
+    def test_normalization_health_unreachable_exits(
+        self, demo_mod, monkeypatch
+    ) -> None:
+        """Normalization /health unreachable triggers sys.exit.
+
+        WHY: An unreachable normalization service means events will pile up
+        without ever being processed.
+        """
+        import httpx
+
+        call_count = 0
+
+        def mock_get(url: str, **kwargs: Any) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                # Ingestion is healthy
+                resp = MagicMock()
+                resp.raise_for_status = MagicMock()
+                resp.json.return_value = {"status": "healthy"}
+                return resp
+            # Normalization is unreachable
+            raise httpx.ConnectError("refused")
+
+        monkeypatch.setattr(httpx, "get", mock_get)
+
+        with pytest.raises(SystemExit):
+            demo_mod.run_preflight(
+                "http://ingest:8001", "http://norm:8002", "host=localhost"
+            )
+
+    def test_db_connect_failure_exits(self, demo_mod, monkeypatch) -> None:
+        """psycopg.connect failure triggers sys.exit.
+
+        WHY: If PostgreSQL is unreachable, poll_results will fail immediately
+        after scenes are submitted — cleanup may be impossible.
+        """
+        import httpx
+        import psycopg
+
+        def mock_get(url: str, **kwargs: Any) -> MagicMock:
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {"status": "healthy"}
+            return resp
+
+        monkeypatch.setattr(httpx, "get", mock_get)
+        monkeypatch.setattr(
+            psycopg, "connect", MagicMock(side_effect=Exception("no pg"))
         )
-        assert has_split_annotation, (
-            f"Scene 6 render must include a split-source annotation "
-            f"(e.g. 'why the split?', 'two different sources won', etc.). "
-            f"Output snippet: {buf.getvalue()[:800]!r}"
+
+        with pytest.raises(SystemExit):
+            demo_mod.run_preflight(
+                "http://ingest:8001", "http://norm:8002", "host=localhost"
+            )
+
+    def test_all_healthy_returns_none(self, demo_mod, monkeypatch) -> None:
+        """All health checks passing and DB connecting successfully returns None.
+
+        WHY: Verifies the success path does not accidentally call sys.exit.
+        """
+        import httpx
+        import psycopg
+
+        def mock_get(url: str, **kwargs: Any) -> MagicMock:
+            resp = MagicMock()
+            resp.raise_for_status = MagicMock()
+            resp.json.return_value = {"status": "healthy"}
+            return resp
+
+        mock_conn = MagicMock()
+        mock_cursor = MagicMock()
+        mock_cursor.__enter__ = MagicMock(return_value=mock_cursor)
+        mock_cursor.__exit__ = MagicMock(return_value=False)
+        mock_conn.cursor.return_value = mock_cursor
+        mock_conn.__enter__ = MagicMock(return_value=mock_conn)
+        mock_conn.__exit__ = MagicMock(return_value=False)
+
+        monkeypatch.setattr(httpx, "get", mock_get)
+        monkeypatch.setattr(psycopg, "connect", MagicMock(return_value=mock_conn))
+
+        result = demo_mod.run_preflight(
+            "http://ingest:8001", "http://norm:8002", "host=localhost"
         )
+
+        assert result is None
+
+
+# ===========================================================================
+# CLASS 6 — TestMainFailurePaths: main() cleanup/exit integration
+#
+# Tests patch the module-level flow functions on demo_mod and verify that:
+# - cleanup_events is called (or not with --keep) after verification failure
+# - verification failure exits with code 1 and prints "Verification failed"
+# - --skip-verify bypasses verify_results and calls render_results
+# - render_results raising RuntimeError still triggers cleanup
+# - poll_results raising SystemExit(1) (timeout) still triggers cleanup
+# ===========================================================================
+
+
+class TestMainFailurePaths:
+    """main() try/finally ensures cleanup on every exit path after submission.
+
+    WHY: The finally block is load-bearing — it prevents ghost events from
+    accumulating in the DB across repeated demo runs. Every exit path after
+    submit_scenes must be covered.
+    """
+
+    def _run_main(
+        self,
+        demo_mod: Any,
+        monkeypatch: Any,
+        *,
+        keep: bool = False,
+        skip_verify: bool = False,
+        extra_argv: list[str] | None = None,
+    ) -> None:
+        """Invoke demo_mod.main() with controlled sys.argv and env."""
+        argv = ["demo_normalization.py", "--db-dsn", "host=localhost dbname=naas"]
+        if keep:
+            argv.append("--keep")
+        if skip_verify:
+            argv.append("--skip-verify")
+        if extra_argv:
+            argv.extend(extra_argv)
+        monkeypatch.setattr(sys, "argv", argv)
+
+    def test_verification_failure_calls_cleanup_and_exits_1(
+        self, demo_mod, monkeypatch, capsys
+    ) -> None:
+        """Verification problems → cleanup_events called once, exits with code 1.
+
+        WHY: If cleanup is skipped on verification failure, repeated runs accumulate
+        orphaned events. The exit code must be 1 (not 0) to signal failure to callers.
+        """
+        submitted_ids = ["id-0", "id-1", "id-2", "id-3", "id-4", "id-5"]
+        problems = [{"scene": 6, "message": "(diana/oidc) display_name wrong winner"}]
+
+        mock_cleanup = MagicMock()
+        monkeypatch.setattr(demo_mod, "run_preflight", MagicMock())
+        monkeypatch.setattr(
+            demo_mod, "submit_scenes", MagicMock(return_value=submitted_ids)
+        )
+        monkeypatch.setattr(
+            demo_mod,
+            "poll_results",
+            MagicMock(return_value=_wrap_results(_six_results())),
+        )
+        monkeypatch.setattr(
+            demo_mod, "verify_results", MagicMock(return_value=problems)
+        )
+        monkeypatch.setattr(demo_mod, "render_results", MagicMock())
+        monkeypatch.setattr(demo_mod, "cleanup_events", mock_cleanup)
+
+        self._run_main(demo_mod, monkeypatch)
+
+        with pytest.raises(SystemExit) as exc_info:
+            demo_mod.main()
+
+        assert exc_info.value.code == 1
+        mock_cleanup.assert_called_once()
+        captured = capsys.readouterr()
+        assert "Verification failed" in captured.out, (
+            f"Expected 'Verification failed' in output, got: {captured.out!r}"
+        )
+
+    def test_verification_failure_with_keep_skips_cleanup(
+        self, demo_mod, monkeypatch, capsys
+    ) -> None:
+        """Verification failure with --keep does NOT call cleanup_events; prints 'Retained'.
+
+        WHY: --keep is an explicit operator request to preserve events for debugging.
+        Even on verification failure, the flag must be honoured.
+        """
+        submitted_ids = ["id-0", "id-1", "id-2", "id-3", "id-4", "id-5"]
+        problems = [{"scene": 4, "message": "department missing"}]
+
+        mock_cleanup = MagicMock()
+        monkeypatch.setattr(demo_mod, "run_preflight", MagicMock())
+        monkeypatch.setattr(
+            demo_mod, "submit_scenes", MagicMock(return_value=submitted_ids)
+        )
+        monkeypatch.setattr(
+            demo_mod,
+            "poll_results",
+            MagicMock(return_value=_wrap_results(_six_results())),
+        )
+        monkeypatch.setattr(
+            demo_mod, "verify_results", MagicMock(return_value=problems)
+        )
+        monkeypatch.setattr(demo_mod, "render_results", MagicMock())
+        monkeypatch.setattr(demo_mod, "cleanup_events", mock_cleanup)
+
+        self._run_main(demo_mod, monkeypatch, keep=True)
+
+        with pytest.raises(SystemExit):
+            demo_mod.main()
+
+        mock_cleanup.assert_not_called()
+        captured = capsys.readouterr()
+        assert "Retained" in captured.out, (
+            f"Expected 'Retained' in output with --keep, got: {captured.out!r}"
+        )
+
+    def test_skip_verify_bypasses_verify_calls_render(
+        self, demo_mod, monkeypatch
+    ) -> None:
+        """--skip-verify bypasses verify_results entirely and calls render_results.
+
+        WHY: The --skip-verify flag is for running the render path without pipeline
+        validation — useful during development. It must not call verify_results.
+        """
+        submitted_ids = ["id-0", "id-1", "id-2", "id-3", "id-4", "id-5"]
+
+        mock_verify = MagicMock()
+        mock_render = MagicMock()
+        monkeypatch.setattr(demo_mod, "run_preflight", MagicMock())
+        monkeypatch.setattr(
+            demo_mod, "submit_scenes", MagicMock(return_value=submitted_ids)
+        )
+        monkeypatch.setattr(
+            demo_mod,
+            "poll_results",
+            MagicMock(return_value=_wrap_results(_six_results())),
+        )
+        monkeypatch.setattr(demo_mod, "verify_results", mock_verify)
+        monkeypatch.setattr(demo_mod, "render_results", mock_render)
+        monkeypatch.setattr(demo_mod, "cleanup_events", MagicMock())
+
+        self._run_main(demo_mod, monkeypatch, skip_verify=True)
+        demo_mod.main()
+
+        mock_verify.assert_not_called()
+        mock_render.assert_called_once()
+
+    def test_render_error_still_calls_cleanup(self, demo_mod, monkeypatch) -> None:
+        """render_results raising RuntimeError still triggers cleanup_events.
+
+        WHY: An exception in the render path must not prevent cleanup — the
+        try/finally in main() must cover this case.
+        """
+        submitted_ids = ["id-0", "id-1", "id-2", "id-3", "id-4", "id-5"]
+
+        mock_cleanup = MagicMock()
+        monkeypatch.setattr(demo_mod, "run_preflight", MagicMock())
+        monkeypatch.setattr(
+            demo_mod, "submit_scenes", MagicMock(return_value=submitted_ids)
+        )
+        monkeypatch.setattr(
+            demo_mod,
+            "poll_results",
+            MagicMock(return_value=_wrap_results(_six_results())),
+        )
+        monkeypatch.setattr(demo_mod, "verify_results", MagicMock(return_value=[]))
+        monkeypatch.setattr(
+            demo_mod,
+            "render_results",
+            MagicMock(side_effect=RuntimeError("render boom")),
+        )
+        monkeypatch.setattr(demo_mod, "cleanup_events", mock_cleanup)
+
+        self._run_main(demo_mod, monkeypatch)
+
+        with pytest.raises(RuntimeError, match="render boom"):
+            demo_mod.main()
+
+        mock_cleanup.assert_called_once()
+
+    def test_poll_timeout_still_calls_cleanup(self, demo_mod, monkeypatch) -> None:
+        """poll_results raising SystemExit(1) (simulating timeout) still triggers cleanup.
+
+        WHY: A poll timeout calls sys.exit(1) internally. main()'s finally block
+        must catch the SystemExit and still run cleanup before re-raising.
+        """
+        submitted_ids = ["id-0", "id-1", "id-2", "id-3", "id-4", "id-5"]
+
+        mock_cleanup = MagicMock()
+        monkeypatch.setattr(demo_mod, "run_preflight", MagicMock())
+        monkeypatch.setattr(
+            demo_mod, "submit_scenes", MagicMock(return_value=submitted_ids)
+        )
+        monkeypatch.setattr(
+            demo_mod, "poll_results", MagicMock(side_effect=SystemExit(1))
+        )
+        monkeypatch.setattr(demo_mod, "cleanup_events", mock_cleanup)
+
+        self._run_main(demo_mod, monkeypatch)
+
+        with pytest.raises(SystemExit) as exc_info:
+            demo_mod.main()
+
+        assert exc_info.value.code == 1
+        mock_cleanup.assert_called_once()
+
+
+# ===========================================================================
+# CLASS 7 — confidence_style: color threshold helper
+# ===========================================================================
 
 
 class TestConfidenceStyleHelper:
@@ -1553,70 +2160,12 @@ class TestConfidenceStyleHelper:
         WHY: A named helper is testable in isolation and can be reused
         across the render function without duplicating threshold logic.
         """
-        assert hasattr(demo_mod, "confidence_style") and callable(demo_mod.confidence_style), (
+        assert hasattr(demo_mod, "confidence_style") and callable(
+            demo_mod.confidence_style
+        ), (
             "demo_normalization.py must define a module-level callable "
             "confidence_style(value: float) -> str so the render loop can be "
             "tested independently."
-        )
-
-    def test_confidence_style_at_0_80_is_green(self, demo_mod) -> None:
-        """confidence_style(0.80) returns a 'green' style (boundary inclusive).
-
-        WHY: 0.80 is the lower bound of the green zone; it must not fall into amber.
-        """
-        style = demo_mod.confidence_style(0.80)
-        assert "green" in str(style).lower(), (
-            f"Expected 'green' style for confidence=0.80, got {style!r}"
-        )
-
-    def test_confidence_style_at_0_99_is_green(self, demo_mod) -> None:
-        """confidence_style(0.99) returns a 'green' style (high confidence)."""
-        style = demo_mod.confidence_style(0.99)
-        assert "green" in str(style).lower(), (
-            f"Expected 'green' style for confidence=0.99, got {style!r}"
-        )
-
-    def test_confidence_style_at_0_79_is_amber(self, demo_mod) -> None:
-        """confidence_style(0.79) returns an amber/yellow style (boundary).
-
-        WHY: 0.79 is just below the green threshold; it must not be green.
-        """
-        style = demo_mod.confidence_style(0.79)
-        has_amber = any(
-            word in str(style).lower() for word in ["yellow", "amber", "orange"]
-        )
-        assert has_amber, (
-            f"Expected amber/yellow style for confidence=0.79, got {style!r}"
-        )
-
-    def test_confidence_style_at_0_50_is_amber(self, demo_mod) -> None:
-        """confidence_style(0.50) returns an amber/yellow style (boundary inclusive).
-
-        WHY: 0.50 is the lower bound of the amber zone; it must not fall into red.
-        """
-        style = demo_mod.confidence_style(0.50)
-        has_amber = any(
-            word in str(style).lower() for word in ["yellow", "amber", "orange"]
-        )
-        assert has_amber, (
-            f"Expected amber/yellow style for confidence=0.50, got {style!r}"
-        )
-
-    def test_confidence_style_at_0_49_is_red(self, demo_mod) -> None:
-        """confidence_style(0.49) returns a 'red' style (boundary).
-
-        WHY: 0.49 is just below the amber threshold; it must not be amber.
-        """
-        style = demo_mod.confidence_style(0.49)
-        assert "red" in str(style).lower(), (
-            f"Expected 'red' style for confidence=0.49, got {style!r}"
-        )
-
-    def test_confidence_style_at_0_0_is_red(self, demo_mod) -> None:
-        """confidence_style(0.0) returns a 'red' style (minimum confidence)."""
-        style = demo_mod.confidence_style(0.0)
-        assert "red" in str(style).lower(), (
-            f"Expected 'red' style for confidence=0.0, got {style!r}"
         )
 
     @pytest.mark.parametrize(
@@ -1658,25 +2207,13 @@ class TestConfidenceStyleHelper:
 
 
 # ===========================================================================
-# CLASS 5 — cleanup_events: DB execute contract
+# CLASS 8 — cleanup_events: DB execute contract
 #
 # cleanup_events(event_ids: list[str], db_dsn: str, *, db_execute=None) -> None
 #
 # Injectable seam: cleanup_events accepts an optional db_execute
-# callable so tests can verify the DELETE without a live DB:
-#
-#   def cleanup_events(
-#       event_ids, db_dsn, *, db_execute=None
-#   ) -> None:
-#       if db_execute is not None:
-#           db_execute(CLEANUP_QUERY, {"ids": event_ids})
-#       else:
-#           with psycopg.connect(db_dsn) as conn:
-#               with conn.cursor() as cur:
-#                   cur.execute(CLEANUP_QUERY, {"ids": event_ids})
-#
-# The --keep flag decision is tested at the main() level by checking whether
-# cleanup_events is called at all (not by passing a flag to cleanup_events itself).
+# callable so tests can verify the DELETE without a live DB.
+# The --keep flag decision is tested at the main() level.
 # ===========================================================================
 
 
@@ -1695,7 +2232,9 @@ class TestCleanupEvents:
         mock_execute = MagicMock()
         event_ids = ["id-a", "id-b", "id-c"]
 
-        demo_mod.cleanup_events(event_ids, "host=localhost dbname=naas", db_execute=mock_execute)
+        demo_mod.cleanup_events(
+            event_ids, "host=localhost dbname=naas", db_execute=mock_execute
+        )
 
         mock_execute.assert_called_once()
         call_args = mock_execute.call_args
@@ -1715,8 +2254,10 @@ class TestCleanupEvents:
         )
         # ids must be in the params (either as 'ids' key or as the value)
         has_ids = (
-            (isinstance(params_arg, dict) and params_arg.get("ids") == event_ids)
-            or (isinstance(params_arg, (list, tuple)) and list(event_ids) == list(params_arg))
+            isinstance(params_arg, dict) and params_arg.get("ids") == event_ids
+        ) or (
+            isinstance(params_arg, (list, tuple))
+            and list(event_ids) == list(params_arg)
         )
         assert has_ids, (
             f"cleanup_events must bind ids={event_ids!r} as a parameter. "
@@ -1732,7 +2273,9 @@ class TestCleanupEvents:
         mock_execute = MagicMock()
         event_ids = ["e1", "e2", "e3", "e4", "e5", "e6"]
 
-        demo_mod.cleanup_events(event_ids, "host=localhost dbname=naas", db_execute=mock_execute)
+        demo_mod.cleanup_events(
+            event_ids, "host=localhost dbname=naas", db_execute=mock_execute
+        )
 
         mock_execute.assert_called_once()
         call_args = mock_execute.call_args
@@ -1782,8 +2325,6 @@ class TestCleanupEvents:
             patch.object(demo_mod, "render_results"),
             patch.object(demo_mod, "cleanup_events") as mock_cleanup,
         ):
-            import argparse
-
             # Simulate: python demo_normalization.py --keep
             test_args = argparse.Namespace(
                 keep=True,
@@ -1824,8 +2365,6 @@ class TestCleanupEvents:
             patch.object(demo_mod, "render_results"),
             patch.object(demo_mod, "cleanup_events") as mock_cleanup,
         ):
-            import argparse
-
             test_args = argparse.Namespace(
                 keep=False,
                 pace=0,
@@ -1840,7 +2379,9 @@ class TestCleanupEvents:
 
         mock_cleanup.assert_called_once()
         call_args = mock_cleanup.call_args
-        actual_ids = call_args[0][0] if call_args[0] else call_args[1].get("event_ids", [])
+        actual_ids = (
+            call_args[0][0] if call_args[0] else call_args[1].get("event_ids", [])
+        )
         assert actual_ids == submitted_ids, (
             f"cleanup_events must receive the submitted IDs {submitted_ids!r}, "
             f"got {actual_ids!r}"

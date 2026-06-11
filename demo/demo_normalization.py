@@ -35,6 +35,44 @@ POLL_QUERY = (
 CLEANUP_QUERY = "DELETE FROM events WHERE id = ANY(%(ids)s)"
 
 # ---------------------------------------------------------------------------
+# Unified-schema attribute names (render order) and the protocol-native raw
+# key that feeds each one (§2.2 of the ingestion contract). Used to align the
+# before/after table rows and to show canonicalization transforms.
+# ---------------------------------------------------------------------------
+
+UNIFIED_ATTRIBUTES = [
+    "display_name",
+    "primary_email",
+    "department",
+    "employee_type",
+    "groups",
+]
+
+RAW_KEY_BY_PROTOCOL: dict[str, dict[str, str]] = {
+    "oidc": {
+        "display_name": "name",
+        "primary_email": "email",
+        "department": "department",
+        "employee_type": "employee_type",
+        "groups": "groups",
+    },
+    "saml": {
+        "display_name": "displayName",
+        "primary_email": "email",
+        "department": "dept",
+        "employee_type": "employeeType",
+        "groups": "groups",
+    },
+    "ldap": {
+        "display_name": "cn",
+        "primary_email": "mail",
+        "department": "departmentNumber",
+        "employee_type": "employeeType",
+        "groups": "memberOf",
+    },
+}
+
+# ---------------------------------------------------------------------------
 # Ground-truth scenes — protocol-native key shapes, exact values.
 # ---------------------------------------------------------------------------
 
@@ -251,7 +289,6 @@ def confidence_style(value: float) -> str:
 def submit_scenes(
     scenes: list[dict[str, Any]],
     ingest_url: str,
-    args: argparse.Namespace,
     *,
     http_client: Any = None,
 ) -> list[str]:
@@ -265,53 +302,54 @@ def submit_scenes(
     import httpx  # local import
 
     event_ids: list[str] = []
+    owns_client = http_client is None
     client = http_client or httpx.Client()
 
-    for i, scene in enumerate(scenes):
-        body: dict[str, Any] = {
-            "user_id": scene["user_id"],
-            "protocol": scene["protocol"],
-            "client_ip": scene["client_ip"],
-            "source": scene.get("source", "api"),
-            "is_synthetic": scene.get("is_synthetic", True),
-            "raw_attributes": scene.get("raw_attributes", {}),
-            "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        }
-        try:
-            resp = client.post(f"{ingest_url}/events/ingest", json=body, timeout=10.0)
-            resp.raise_for_status()
-            data = resp.json()
-            event_ids.append(str(data["id"]))
-        except Exception as exc:  # noqa: BLE001
-            sys.exit(f"Failed to submit scene {i} ({scene['user_id']}): {exc}")
+    try:
+        for i, scene in enumerate(scenes):
+            body: dict[str, Any] = {
+                "user_id": scene["user_id"],
+                "protocol": scene["protocol"],
+                "client_ip": scene["client_ip"],
+                "source": scene.get("source", "api"),
+                "is_synthetic": scene.get("is_synthetic", True),
+                "raw_attributes": scene.get("raw_attributes", {}),
+                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            }
+            try:
+                resp = client.post(
+                    f"{ingest_url}/events/ingest", json=body, timeout=10.0
+                )
+                resp.raise_for_status()
+                data = resp.json()
+                event_ids.append(str(data["id"]))
+            except Exception as exc:  # noqa: BLE001
+                sys.exit(f"Failed to submit scene {i + 1} ({scene['user_id']}): {exc}")
+    finally:
+        if owns_client:
+            client.close()
 
     return event_ids
 
 
-def poll_results(
+def _poll_loop(
     event_ids: list[str],
-    db_dsn: str,
     timeout: float,
+    db_fetch: Any,
 ) -> list[dict[str, Any]]:
-    """Poll PostgreSQL for normalized results for the given event IDs.
+    """Drive the poll cycle against a fetch callable.
 
-    Runs POLL_QUERY on ~0.5s intervals until every captured id has
-    non-null normalized_attributes, or timeout elapses. Parses
-    normalized_attributes as plain JSON. Exits non-zero on timeout.
+    db_fetch(query, params) must return rows of (id, protocol,
+    normalized_attributes). Runs on ~0.5s intervals until every captured id
+    has non-null normalized_attributes, or timeout elapses. Parses
+    normalized_attributes as plain JSON. Exits non-zero on timeout. Returns
+    results in event_ids (submission) order.
     """
-    import psycopg  # local import
-
     deadline = time.monotonic() + timeout
     interval = 0.5
 
     while True:
-        try:
-            with psycopg.connect(db_dsn) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(POLL_QUERY, {"ids": event_ids})
-                    rows = cur.fetchall()
-        except Exception as exc:  # noqa: BLE001
-            sys.exit(f"Database error during polling: {exc}")
+        rows = db_fetch(POLL_QUERY, {"ids": event_ids})
 
         # Build a map from id -> row
         row_map: dict[str, dict[str, Any]] = {}
@@ -339,20 +377,62 @@ def poll_results(
         time.sleep(interval)
 
 
+def poll_results(
+    event_ids: list[str],
+    db_dsn: str,
+    timeout: float,
+    *,
+    db_fetch: Any = None,
+) -> list[dict[str, Any]]:
+    """Poll PostgreSQL for normalized results for the given event IDs.
+
+    Holds a single connection open for the lifetime of the poll (rather than
+    reconnecting per interval); READ COMMITTED takes a fresh snapshot per
+    statement, so each poll sees newly committed rows. If db_fetch is
+    provided (a callable(query, params) -> rows), it is used instead of a
+    live psycopg connection — enabling offline testing.
+    """
+    if db_fetch is not None:
+        return _poll_loop(event_ids, timeout, db_fetch)
+
+    import psycopg  # local import
+
+    try:
+        with psycopg.connect(db_dsn) as conn:
+
+            def _live_fetch(query: str, params: dict[str, Any]) -> list[Any]:
+                with conn.cursor() as cur:
+                    cur.execute(query, params)
+                    return cur.fetchall()
+
+            return _poll_loop(event_ids, timeout, _live_fetch)
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        sys.exit(f"Database error during polling: {exc}")
+
+
 def verify_results(
     scenes: list[dict[str, Any]],
     results: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
-    """Compare normalization results against known scene expectations.
+    """Compare normalization results against the frozen demo narrative.
 
     Pure function — no I/O. Returns a list of problem dicts, each with
-    at least 'scene' (int index) and 'message' (str). Empty list = pass.
+    'scene' (1-based scene number; -1 for internal errors) and 'message'
+    (str, self-contained — no scene prefix). Empty list = pass.
     Never raises; returns problems on invalid/unexpected payloads instead.
+
+    Checks are structural and relative — never exact confidence numbers —
+    so they are robust to minor numeric drift but catch config drift,
+    pipeline bugs, or a wrong config. An expected resolution detail that is
+    absent is a failure, not a skip: a missing detail means the pipeline did
+    not produce the narrative at all.
     """
     problems: list[dict[str, Any]] = []
 
-    def _problem(scene_idx: int, message: str) -> None:
-        problems.append({"scene": scene_idx, "message": message})
+    def _problem(scene_no: int, message: str) -> None:
+        problems.append({"scene": scene_no, "message": message})
 
     def _na(result: dict[str, Any]) -> dict[str, Any]:
         return result.get("normalized_attributes") or {}
@@ -371,7 +451,10 @@ def verify_results(
         return (conf - 0.7) / 0.3
 
     try:
-        # Check 1: Scenes 1–4 (indices 0–3): enrichment must not be applied.
+        # Check 1: Scenes 1–4: enrichment must not be applied, every scalar
+        # attribute must be a single_source resolution, and groups (which the
+        # pipeline always resolves as a list_merge, even for one source) must
+        # have at most one contributing source.
         for idx in range(4):
             if idx >= len(results):
                 continue
@@ -379,12 +462,29 @@ def verify_results(
             enr = _enrichment(na)
             if enr.get("applied") is True:
                 _problem(
-                    idx,
-                    f"Scene {idx + 1}: enrichment.applied must be False for "
-                    f"single-source scenes, got applied=True",
+                    idx + 1,
+                    "enrichment.applied must be False for single-source scenes, "
+                    "got applied=True",
                 )
+            for attr, detail in _details(na).items():
+                res = (detail or {}).get("resolution")
+                if attr == "groups":
+                    srcs = (detail or {}).get("sources") or []
+                    if res != "list_merge" or len(srcs) > 1:
+                        _problem(
+                            idx + 1,
+                            f"groups must be a single-source list_merge in a "
+                            f"single-source scene, got resolution={res!r} "
+                            f"with sources={srcs!r}",
+                        )
+                elif res != "single_source":
+                    _problem(
+                        idx + 1,
+                        f"{attr} must be a single_source resolution in a "
+                        f"single-source scene, got {res!r}",
+                    )
 
-        # Check 2: Scene 3 (index 2, grace/ldap) must have skip_reason='ldap_event'
+        # Check 2: Scene 3 (grace/ldap) must have skip_reason='ldap_event'
         if len(results) > 2:
             na3 = _na(results[2])
             enr3 = _enrichment(na3)
@@ -393,14 +493,18 @@ def verify_results(
                 or enr3.get("skip_reason") != "ldap_event"
             ):
                 _problem(
-                    2,
-                    "Scene 3: native LDAP event must have enrichment.applied=False "
-                    "with skip_reason='ldap_event', got: "
+                    3,
+                    "(grace/ldap) native LDAP event must have "
+                    "enrichment.applied=False with skip_reason='ldap_event', got: "
                     f"applied={enr3.get('applied')!r}, "
                     f"skip_reason={enr3.get('skip_reason')!r}",
                 )
 
-        # Check 3: Scene 4 (index 3, mallory/saml) unmapped handling
+        # Check 3: Scene 4 (mallory/saml) unmapped handling. The −0.2
+        # normalization-failure penalty is not persisted as a flag on
+        # single_source details, so it is verified relatively: Scene 4's
+        # department confidence must sit strictly below Scene 2's clean SAML
+        # department (same source weight, no penalty).
         if len(results) > 3:
             na4 = _na(results[3])
             dept4 = na4.get("department")
@@ -408,41 +512,64 @@ def verify_results(
 
             if dept4 is None:
                 _problem(
-                    3,
-                    "Scene 4 (mallory/saml): department 'Sorcery' must be retained "
+                    4,
+                    "(mallory/saml) department 'Sorcery' must be retained "
                     "(unmapped free-text kept with penalty); got None",
                 )
 
+            dept4_detail = _details(na4).get("department")
+            if not dept4_detail:
+                _problem(
+                    4,
+                    "(mallory/saml) department resolution detail is missing — "
+                    "expected a single_source resolution carrying the unmapped "
+                    "penalty",
+                )
+            elif len(results) > 1:
+                dept2_detail = _details(_na(results[1])).get("department")
+                if dept2_detail:
+                    d4_conf = float(dept4_detail.get("confidence") or 0.0)
+                    d2_conf = float(dept2_detail.get("confidence") or 0.0)
+                    if not (d4_conf < d2_conf):
+                        _problem(
+                            4,
+                            f"(mallory/saml) unmapped department confidence "
+                            f"({d4_conf}) must be strictly below Scene 2's clean "
+                            f"SAML department ({d2_conf}) — the −0.2 "
+                            f"normalization-failure penalty is not visible",
+                        )
+
             if et4 is not None:
                 _problem(
-                    3,
-                    f"Scene 4 (mallory/saml): employee_type 'wizard' must be discarded "
+                    4,
+                    f"(mallory/saml) employee_type 'wizard' must be discarded "
                     f"to None (enum-safe policy); got {et4!r}",
                 )
 
         # Check 4: Confidence ordering C(4) < C(2) < C(1) < C(3)
-        # indices: scene4=3, scene2=1, scene1=0, scene3=2
         if len(results) >= 4:
             c = [_na(results[i]).get("normalization_confidence", 0.0) for i in range(4)]
             c1, c2, c3, c4 = c[0], c[1], c[2], c[3]
 
             if not (c4 < c2):
                 _problem(
-                    3,
+                    4,
                     f"Confidence ordering violated: C(4)={c4} must be < C(2)={c2}",
                 )
             if not (c2 < c1):
                 _problem(
-                    1,
+                    2,
                     f"Confidence ordering violated: C(2)={c2} must be < C(1)={c1}",
                 )
             if not (c1 < c3):
                 _problem(
-                    0,
+                    1,
                     f"Confidence ordering violated: C(1)={c1} must be < C(3)={c3}",
                 )
 
-        # Check 5: Scenes 5–6 (indices 4–5) must have enrichment applied.
+        # Check 5: Scenes 5–6 must have enrichment applied, and at least one
+        # multi-source resolution (§5.5 check 5) — enrichment that ran but
+        # merged nothing would leave every attribute single_source.
         for idx in [4, 5]:
             if idx >= len(results):
                 continue
@@ -450,15 +577,26 @@ def verify_results(
             enr = _enrichment(na)
             if enr.get("applied") is not True:
                 _problem(
-                    idx,
-                    f"Scene {idx + 1}: enrichment.applied must be True "
-                    f"(LDAP enrichment expected); got {enr.get('applied')!r}",
+                    idx + 1,
+                    f"enrichment.applied must be True (LDAP enrichment expected); "
+                    f"got {enr.get('applied')!r}",
+                )
+            multi_source = [
+                attr
+                for attr, detail in _details(na).items()
+                if (detail or {}).get("resolution") != "single_source"
+            ]
+            if not multi_source:
+                _problem(
+                    idx + 1,
+                    "expected at least one multi-source resolution "
+                    "(unanimous/priority/list_merge); every attribute resolved "
+                    "single_source — enrichment merged nothing from the directory",
                 )
 
-        # Check 6: Scene 5 (index 4, alice/oidc enriched):
-        #   - multi-source resolution present
+        # Check 6: Scene 5 (alice/oidc enriched):
         #   - scalars must be unanimous (not priority)
-        #   - groups must be list_merge
+        #   - groups must be present and list_merge, directory-corroborated
         #   - C(5) > C(1)
         if len(results) >= 5:
             na5 = _na(results[4])
@@ -476,22 +614,28 @@ def verify_results(
                 detail = details5.get(attr)
                 if detail and detail.get("resolution") == "priority":
                     _problem(
-                        4,
-                        f"Scene 5 (alice/oidc enriched): {attr} resolution must be "
+                        5,
+                        f"(alice/oidc enriched) {attr} resolution must be "
                         f"'unanimous' when sources agree, got 'priority'",
                     )
 
             groups5 = details5.get("groups")
-            if groups5 and groups5.get("resolution") != "list_merge":
+            if not groups5:
                 _problem(
-                    4,
-                    f"Scene 5 (alice/oidc enriched): groups resolution must be "
+                    5,
+                    "(alice/oidc enriched) groups resolution detail is missing — "
+                    "expected a list_merge of token and directory groups",
+                )
+            elif groups5.get("resolution") != "list_merge":
+                _problem(
+                    5,
+                    f"(alice/oidc enriched) groups resolution must be "
                     f"'list_merge', got {groups5.get('resolution')!r}",
                 )
-            elif groups5 and _corroborated_fraction(groups5) < 0.5:
+            elif _corroborated_fraction(groups5) < 0.5:
                 _problem(
-                    4,
-                    f"Scene 5 (alice/oidc enriched): merged groups must be "
+                    5,
+                    f"(alice/oidc enriched) merged groups must be "
                     f"directory-corroborated (≥ half of merged groups present in "
                     f"both token and directory); implied corroborated fraction is "
                     f"{_corroborated_fraction(groups5):.2f} — LDAP enrichment "
@@ -501,14 +645,16 @@ def verify_results(
 
             if c5 <= c1_val:
                 _problem(
-                    4,
+                    5,
                     f"Confidence ordering violated: C(5)={c5} must be > C(1)={c1_val}",
                 )
 
-        # Check 7: Scene 6 (index 5, diana/oidc conflict):
+        # Check 7: Scene 6 (diana/oidc conflict) — the core check. Each
+        # expected detail must be PRESENT; a missing detail means the
+        # narrative was not produced and must fail, not pass silently.
         #   - display_name priority winner_source must be 'oidc'
         #   - department priority winner_source must be 'ldap'
-        #   - groups must be list_merge
+        #   - groups must be list_merge, corroborated, strict superset of token
         #   - C(6) < C(5)
         if len(results) >= 6:
             na6 = _na(results[5])
@@ -521,44 +667,64 @@ def verify_results(
             )
 
             dn6 = details6.get("display_name")
-            if dn6:
-                if (
-                    dn6.get("resolution") != "priority"
-                    or dn6.get("winner_source") != "oidc"
-                ):
-                    _problem(
-                        5,
-                        f"Scene 6 (diana/oidc): display_name must have priority "
-                        f"resolution with winner_source='oidc'; "
-                        f"got resolution={dn6.get('resolution')!r}, "
-                        f"winner_source={dn6.get('winner_source')!r}",
-                    )
+            if not dn6:
+                _problem(
+                    6,
+                    "(diana/oidc) display_name resolution detail is missing — "
+                    "expected a priority resolution won by 'oidc'",
+                )
+            elif (
+                dn6.get("resolution") != "priority"
+                or dn6.get("winner_source") != "oidc"
+            ):
+                _problem(
+                    6,
+                    f"(diana/oidc) display_name must have priority resolution "
+                    f"with winner_source='oidc'; "
+                    f"got resolution={dn6.get('resolution')!r}, "
+                    f"winner_source={dn6.get('winner_source')!r} — "
+                    f"config/normalization.yaml display_name.priority is not "
+                    f"[oidc, …]?",
+                )
 
             dept6 = details6.get("department")
-            if dept6:
-                if (
-                    dept6.get("resolution") != "priority"
-                    or dept6.get("winner_source") != "ldap"
-                ):
-                    _problem(
-                        5,
-                        f"Scene 6 (diana/oidc): department must have priority "
-                        f"resolution with winner_source='ldap'; "
-                        f"got resolution={dept6.get('resolution')!r}, "
-                        f"winner_source={dept6.get('winner_source')!r}",
-                    )
+            if not dept6:
+                _problem(
+                    6,
+                    "(diana/oidc) department resolution detail is missing — "
+                    "expected a priority resolution won by 'ldap'",
+                )
+            elif (
+                dept6.get("resolution") != "priority"
+                or dept6.get("winner_source") != "ldap"
+            ):
+                _problem(
+                    6,
+                    f"(diana/oidc) department must have priority resolution "
+                    f"with winner_source='ldap'; "
+                    f"got resolution={dept6.get('resolution')!r}, "
+                    f"winner_source={dept6.get('winner_source')!r} — "
+                    f"config/normalization.yaml department.priority is not "
+                    f"[ldap, …]?",
+                )
 
             groups6 = details6.get("groups")
-            if groups6 and groups6.get("resolution") != "list_merge":
+            if not groups6:
                 _problem(
-                    5,
-                    f"Scene 6 (diana/oidc): groups resolution must be 'list_merge', "
+                    6,
+                    "(diana/oidc) groups resolution detail is missing — "
+                    "expected a list_merge of token and directory groups",
+                )
+            elif groups6.get("resolution") != "list_merge":
+                _problem(
+                    6,
+                    f"(diana/oidc) groups resolution must be 'list_merge', "
                     f"got {groups6.get('resolution')!r}",
                 )
-            elif groups6 and _corroborated_fraction(groups6) < 0.25:
+            elif _corroborated_fraction(groups6) < 0.25:
                 _problem(
-                    5,
-                    f"Scene 6 (diana/oidc): merged groups must be "
+                    6,
+                    f"(diana/oidc) merged groups must be "
                     f"directory-corroborated (expected fraction ⅓: only "
                     f"'engineering' is in both token and directory); implied "
                     f"corroborated fraction is "
@@ -573,8 +739,8 @@ def verify_results(
             merged_groups6 = set(na6.get("groups") or [])
             if not (token_groups6 < merged_groups6):
                 _problem(
-                    5,
-                    f"Scene 6 (diana/oidc): merged groups must be a strict "
+                    6,
+                    f"(diana/oidc) merged groups must be a strict "
                     f"superset of the token groups (directory back-population "
                     f"must add at least one group); token={sorted(token_groups6)}, "
                     f"merged={sorted(merged_groups6)}",
@@ -585,15 +751,15 @@ def verify_results(
             g6_conf = float(groups6.get("confidence") or 0.0) if groups6 else 0.0
             if groups6 and groups5_detail and not (g6_conf < g5_conf):
                 _problem(
-                    5,
-                    f"Scene 6 (diana/oidc): groups confidence must be < Scene 5's "
+                    6,
+                    f"(diana/oidc) groups confidence must be < Scene 5's "
                     f"(Scene 6's token only partially matches the directory); "
                     f"got Scene 6 groups={g6_conf} vs Scene 5 groups={g5_conf}",
                 )
 
             if c6 >= c5_val:
                 _problem(
-                    5,
+                    6,
                     f"Confidence ordering violated: C(6)={c6} must be < C(5)={c5_val}",
                 )
 
@@ -636,21 +802,55 @@ def _render_resolution_type(detail: dict[str, Any]) -> str:
         "priority": "priority",
         "list_merge": "list_merge",
     }
-    return labels.get(res, res)
+    return labels.get(res, str(res))
 
 
 def _format_sources(detail: dict[str, Any]) -> str:
-    """Return a sources/winner string for a resolution detail."""
+    """Return a sources/winner string for a resolution detail.
+
+    Priority rows highlight the winner and render the losing
+    conflicting_values dimmed, labeled with their source.
+    """
     res = detail.get("resolution", "")
     if res == "priority":
         winner = detail.get("winner_source", "")
         conflicting = detail.get("conflicting_values", {})
         losers = ", ".join(f"{k}={v!r}" for k, v in conflicting.items())
-        return f"winner={winner} (losers: {losers})"
+        return f"winner={winner} [dim](losers: {losers})[/dim]"
     sources = detail.get("sources", [])
     if sources:
         return "/".join(sources)
     return ""
+
+
+def _abbrev_dn(value: str) -> str:
+    """Abbreviate an LDAP DN to its first RDN (e.g. 'cn=engineering,…')."""
+    if value.lower().startswith("cn=") and "," in value:
+        return value.split(",", 1)[0] + ",…"
+    return value
+
+
+def _fmt_transform(raw_value: Any, normalized: Any) -> str:
+    """Render a normalized value, showing the change visibly when the raw
+    value differs (e.g. 'eng → Engineering', 'wizard → null').
+
+    For lists the comparison is set-wise; raw DN elements are abbreviated
+    to their first RDN so 'cn=engineering,… → engineering, admins' stays
+    legible.
+    """
+    if isinstance(normalized, list):
+        raw_list = raw_value if isinstance(raw_value, list) else []
+        if raw_list and set(raw_list) != set(normalized):
+            raw_str = ", ".join(_abbrev_dn(str(x)) for x in raw_list)
+            return f"{raw_str} → {', '.join(normalized)}"
+        return ", ".join(normalized) if normalized else "—"
+    if normalized is None:
+        if raw_value is not None:
+            return f"{raw_value} → null"
+        return "null"
+    if raw_value is not None and str(raw_value) != str(normalized):
+        return f"{raw_value} → {normalized}"
+    return str(normalized)
 
 
 def _render_scene_panel(
@@ -675,34 +875,27 @@ def _render_scene_panel(
     border_style = "bold cyan" if is_scene6 else "dim"
 
     # --- Before/After table ---
+    # Rows are aligned per unified attribute: the protocol-native raw key
+    # feeding each unified attribute sits on the same row, and canonicalized
+    # values show the transform visibly (e.g. 'eng → Engineering').
     ba_table = Table(show_header=True, header_style="bold", expand=True)
-    ba_table.add_column("Protocol-native (before)", style="dim", ratio=1)
-    ba_table.add_column("Unified (after)", ratio=1)
+    ba_table.add_column("Raw / protocol-native", style="dim", ratio=1)
+    ba_table.add_column("Normalized / unified", ratio=1)
 
     def _fmt_raw(v: Any) -> str:
         if isinstance(v, list):
             return ", ".join(str(x) for x in v)
         return str(v) if v is not None else "—"
 
-    unified_pairs = [
-        ("display_name", na.get("display_name")),
-        ("primary_email", na.get("primary_email")),
-        ("department", na.get("department")),
-        ("employee_type", na.get("employee_type")),
-        ("groups", na.get("groups")),
-    ]
-    raw_items = list(raw_attrs.items())
-    max_rows = max(len(raw_items), len(unified_pairs))
-
-    for i in range(max_rows):
+    raw_key_map = RAW_KEY_BY_PROTOCOL.get(scene.get("protocol", ""), {})
+    for attr in UNIFIED_ATTRIBUTES:
+        raw_key = raw_key_map.get(attr)
         left = ""
-        if i < len(raw_items):
-            k, v = raw_items[i]
-            left = f"{k}: {_fmt_raw(v)}"
-        right = ""
-        if i < len(unified_pairs):
-            uk, uv = unified_pairs[i]
-            right = f"{uk}: {_fmt_raw(uv) if uv is not None else 'null'}"
+        raw_value = None
+        if raw_key is not None and raw_key in raw_attrs:
+            raw_value = raw_attrs[raw_key]
+            left = f"{raw_key}: {_fmt_raw(raw_value)}"
+        right = f"{attr}: {_fmt_transform(raw_value, na.get(attr))}"
         ba_table.add_row(left, right)
 
     # --- Enrichment status ---
@@ -716,13 +909,7 @@ def _render_scene_panel(
     res_table.add_column("Source(s)/Winner")
     res_table.add_column("Confidence")
 
-    for attr in [
-        "display_name",
-        "primary_email",
-        "department",
-        "employee_type",
-        "groups",
-    ]:
+    for attr in UNIFIED_ATTRIBUTES:
         detail = details.get(attr)
         if detail is None:
             continue
@@ -804,7 +991,6 @@ def _render_scene_panel(
 def render_results(
     scenes: list[dict[str, Any]],
     results: list[dict[str, Any]],
-    verification: list[dict[str, Any]] | None,
     *,
     console: Any = None,
     pace: float = 0.0,
@@ -815,20 +1001,14 @@ def render_results(
     Renders per-scene bordered panels and a summary table. Uses the provided
     console if given (for testability), otherwise creates a real Console().
     Between panels, waits for Enter when step is True, else sleeps pace
-    seconds when pace > 0.
+    seconds when pace > 0. Verification problems are reported by main()
+    before rendering is reached — a failed narrative is never rendered.
     """
     from rich.console import Console
     from rich.table import Table
     from rich.text import Text
 
     con = console or Console()
-
-    # Print verification problems if any
-    if verification:
-        con.print("[bold red]Verification problems:[/bold red]")
-        for p in verification:
-            con.print(f"  Scene {p.get('scene', '?')}: {p.get('message', '')}")
-        con.print()
 
     # Render each scene
     for i, (scene, result) in enumerate(zip(scenes, results)):
@@ -992,31 +1172,32 @@ def main() -> None:
     run_preflight(ingest_url, norm_url, db_dsn)
 
     print(f"Submitting {len(SCENES)} scene(s) to {ingest_url}...")
-    event_ids = submit_scenes(SCENES, ingest_url, args)
-    print("Waiting for normalization results...")
-    results = poll_results(event_ids, db_dsn, args.timeout)
-    verification = verify_results(SCENES, results) if not args.skip_verify else None
+    event_ids = submit_scenes(SCENES, ingest_url)
 
-    if verification:
-        from rich.console import Console as _Console
+    # From here on the run owns rows in the events table: whatever happens
+    # (poll timeout, verification failure, render error), the finally block
+    # cleans them up — unless --keep — so repeated runs don't accumulate rows.
+    try:
+        print("Waiting for normalization results...")
+        results = poll_results(event_ids, db_dsn, args.timeout)
+        problems = verify_results(SCENES, results) if not args.skip_verify else []
 
-        _Console().print(
-            f"[bold red]Verification failed with {len(verification)} problem(s). "
-            "Aborting render.[/bold red]"
-        )
-        for p in verification:
-            print(f"  Scene {p.get('scene', '?')}: {p.get('message', '')}")
-        if not args.keep:
+        if problems:
+            print(
+                f"Verification failed with {len(problems)} problem(s). "
+                "Aborting render."
+            )
+            for p in problems:
+                print(f"  Scene {p.get('scene', '?')}: {p.get('message', '')}")
+            sys.exit(1)
+
+        render_results(SCENES, results, pace=args.pace, step=args.step)
+    finally:
+        if args.keep:
+            print(f"Retained {len(event_ids)} event(s) in the database (--keep).")
+            print(f"Retained event IDs: {event_ids}")
+        else:
             cleanup_events(event_ids, db_dsn)
-        sys.exit(1)
-
-    render_results(SCENES, results, verification, pace=args.pace, step=args.step)
-
-    if args.keep:
-        print(f"Retained {len(event_ids)} event(s) in the database (--keep).")
-        print(f"Retained event IDs: {event_ids}")
-    else:
-        cleanup_events(event_ids, db_dsn)
 
 
 if __name__ == "__main__":

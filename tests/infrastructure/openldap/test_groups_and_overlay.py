@@ -28,14 +28,21 @@ def _find_repo_root() -> Path:
         if (candidate / "docs" / "architecture").is_dir():
             return candidate
         candidate = candidate.parent
-    raise RuntimeError("Could not locate repo root (looked for docs/architecture/ sentinel)")
+    raise RuntimeError(
+        "Could not locate repo root (looked for docs/architecture/ sentinel)"
+    )
 
 
 REPO_ROOT = _find_repo_root()
 LDIF_FILE = REPO_ROOT / "infrastructure" / "openldap" / "bootstrap.ldif"
 OVERLAY_LDIF = REPO_ROOT / "infrastructure" / "openldap" / "00-memberof-overlay.ldif"
 DOCKERFILE = REPO_ROOT / "infrastructure" / "openldap" / "Dockerfile"
-SPEC0_DOC = REPO_ROOT / "docs" / "architecture" / "SPEC_0_Project_Scaffold_and_Shared_Foundation.md"
+SPEC0_DOC = (
+    REPO_ROOT
+    / "docs"
+    / "architecture"
+    / "SPEC_0_Project_Scaffold_and_Shared_Foundation.md"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -53,25 +60,42 @@ def _parse_ldif_blocks(lines: list[str]) -> dict[str, dict[str, list[str]]]:
     """Parse LDIF lines into blocks keyed by dn value.
 
     Returns a dict mapping dn_value -> {attr_name: [value, ...]}.
-    Simple structural parser: handles single-valued and multi-valued
-    attribute:value pairs separated by blank lines.
+
+    RFC-2849 behaviours handled:
+    - Blank lines end the current entry and start a new one.
+    - Comment lines (starting with '#') are skipped without ending the current
+      entry — a comment inside an entry is a comment, not a record separator.
+    - Continuation lines (RFC-2849 §2.1: a line starting with a single space)
+      are folded into the preceding attribute value: the leading space is
+      stripped and the remainder is appended to the last value stored.
     """
     blocks: dict[str, dict[str, list[str]]] = {}
     current_dn: str | None = None
     current_block: dict[str, list[str]] = {}
+    last_attr: str | None = None  # tracks the attribute to fold continuations into
 
     for line in lines:
+        # RFC-2849 continuation line: starts with exactly one space
+        if line.startswith(" ") and current_dn is not None and last_attr is not None:
+            # Fold the continuation value onto the last attribute value collected
+            continuation = line[1:]  # strip the single leading space
+            if current_block.get(last_attr):
+                current_block[last_attr][-1] += continuation
+            continue
+
         stripped = line.strip()
 
-        if not stripped or stripped.startswith("#"):
+        # Blank line → end of current entry
+        if not stripped:
             if current_dn is not None:
                 blocks[current_dn] = current_block
                 current_dn = None
                 current_block = {}
+                last_attr = None
             continue
 
-        # Continuation lines (start with a space) — skip for our purposes
-        if line.startswith(" ") and current_dn is not None:
+        # Comment line → skip; does NOT end the current entry
+        if stripped.startswith("#"):
             continue
 
         if ":" not in stripped:
@@ -86,8 +110,10 @@ def _parse_ldif_blocks(lines: list[str]) -> dict[str, dict[str, list[str]]]:
                 blocks[current_dn] = current_block
             current_dn = value
             current_block = {"dn": [value]}
+            last_attr = "dn"
         elif current_dn is not None:
             current_block.setdefault(attr, []).append(value)
+            last_attr = attr
 
     if current_dn is not None:
         blocks[current_dn] = current_block
@@ -253,12 +279,15 @@ class TestLdifGroupMembership:
                 uids.add(m.group(1))
         return uids
 
-    @pytest.mark.parametrize("cn,expected_uids", [
-        ("engineering", {"alice", "diana"}),
-        ("product", {"bob"}),
-        ("security", {"charlie"}),
-        ("vpn-users", {"alice", "diana"}),
-    ])
+    @pytest.mark.parametrize(
+        "cn,expected_uids",
+        [
+            ("engineering", {"alice", "diana"}),
+            ("product", {"bob"}),
+            ("security", {"charlie"}),
+            ("vpn-users", {"alice", "diana"}),
+        ],
+    )
     def test_group_has_exact_member_set(self, ldif_blocks, cn, expected_uids):
         """Each group must contain exactly the uid set specified in Spec §5.3.
 
@@ -270,73 +299,6 @@ class TestLdifGroupMembership:
         assert actual_uids == expected_uids, (
             f"Group {cn!r}: expected members={expected_uids!r}, "
             f"got members={actual_uids!r}"
-        )
-
-    def test_engineering_member_alice(self, ldif_blocks):
-        """cn=engineering must have uid=alice,ou=users,dc=corp,dc=com as a member.
-
-        Alice is an Engineering FTE — she must appear in the engineering group
-        for the normalization service to return 'engineering' in her groups list.
-        """
-        key = "cn=engineering,ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.fail(f"Group 'engineering' not found in LDIF (key={key!r})")
-        members = ldif_blocks[key].get("member", [])
-        assert "uid=alice,ou=users,dc=corp,dc=com" in members, (
-            f"cn=engineering: alice must be a member, got members={members!r}"
-        )
-
-    def test_engineering_member_diana(self, ldif_blocks):
-        """cn=engineering must have uid=diana,ou=users,dc=corp,dc=com as a member.
-
-        Diana is an Engineering vendor — she must appear in the engineering group.
-        """
-        key = "cn=engineering,ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.fail(f"Group 'engineering' not found in LDIF (key={key!r})")
-        members = ldif_blocks[key].get("member", [])
-        assert "uid=diana,ou=users,dc=corp,dc=com" in members, (
-            f"cn=engineering: diana must be a member, got members={members!r}"
-        )
-
-    def test_product_member_bob(self, ldif_blocks):
-        """cn=product must have uid=bob,ou=users,dc=corp,dc=com as its sole member."""
-        key = "cn=product,ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.fail(f"Group 'product' not found in LDIF (key={key!r})")
-        members = ldif_blocks[key].get("member", [])
-        assert "uid=bob,ou=users,dc=corp,dc=com" in members, (
-            f"cn=product: bob must be a member, got members={members!r}"
-        )
-
-    def test_security_member_charlie(self, ldif_blocks):
-        """cn=security must have uid=charlie,ou=users,dc=corp,dc=com as its sole member."""
-        key = "cn=security,ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.fail(f"Group 'security' not found in LDIF (key={key!r})")
-        members = ldif_blocks[key].get("member", [])
-        assert "uid=charlie,ou=users,dc=corp,dc=com" in members, (
-            f"cn=security: charlie must be a member, got members={members!r}"
-        )
-
-    def test_vpn_users_member_alice(self, ldif_blocks):
-        """cn=vpn-users must have uid=alice,ou=users,dc=corp,dc=com as a member."""
-        key = "cn=vpn-users,ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.fail(f"Group 'vpn-users' not found in LDIF (key={key!r})")
-        members = ldif_blocks[key].get("member", [])
-        assert "uid=alice,ou=users,dc=corp,dc=com" in members, (
-            f"cn=vpn-users: alice must be a member, got members={members!r}"
-        )
-
-    def test_vpn_users_member_diana(self, ldif_blocks):
-        """cn=vpn-users must have uid=diana,ou=users,dc=corp,dc=com as a member."""
-        key = "cn=vpn-users,ou=groups,dc=corp,dc=com"
-        if key not in ldif_blocks:
-            pytest.fail(f"Group 'vpn-users' not found in LDIF (key={key!r})")
-        members = ldif_blocks[key].get("member", [])
-        assert "uid=diana,ou=users,dc=corp,dc=com" in members, (
-            f"cn=vpn-users: diana must be a member, got members={members!r}"
         )
 
 
@@ -373,7 +335,9 @@ class TestLdifGroupOrdering:
         )
 
         user_lines = [i for i, ln in enumerate(ldif_lines) if user_dn_pattern.match(ln)]
-        group_lines = [i for i, ln in enumerate(ldif_lines) if group_dn_pattern.match(ln)]
+        group_lines = [
+            i for i, ln in enumerate(ldif_lines) if group_dn_pattern.match(ln)
+        ]
 
         assert user_lines, "No user dn: entries found in LDIF"
         assert group_lines, (
@@ -403,11 +367,11 @@ class TestLdifGroupOrdering:
         ou_groups_line = next(
             (i for i, ln in enumerate(ldif_lines) if ln.strip() == ou_groups_dn), None
         )
-        group_lines = [i for i, ln in enumerate(ldif_lines) if group_dn_pattern.match(ln)]
+        group_lines = [
+            i for i, ln in enumerate(ldif_lines) if group_dn_pattern.match(ln)
+        ]
 
-        assert ou_groups_line is not None, (
-            f"'{ou_groups_dn}' not found in LDIF"
-        )
+        assert ou_groups_line is not None, f"'{ou_groups_dn}' not found in LDIF"
         assert group_lines, (
             "No group dn: entries (cn=...,ou=groups,dc=corp,dc=com) found in LDIF"
         )
@@ -441,15 +405,20 @@ class TestLdifMemberDnResolution:
     def _require_ldif(self):
         assert LDIF_FILE.exists(), f"bootstrap.ldif missing at {LDIF_FILE}"
 
-    @pytest.mark.parametrize("group_cn,member_uid", [
-        ("engineering", "alice"),
-        ("engineering", "diana"),
-        ("product", "bob"),
-        ("security", "charlie"),
-        ("vpn-users", "alice"),
-        ("vpn-users", "diana"),
-    ])
-    def test_member_dn_references_earlier_user_entry(self, ldif_lines, group_cn, member_uid):
+    @pytest.mark.parametrize(
+        "group_cn,member_uid",
+        [
+            ("engineering", "alice"),
+            ("engineering", "diana"),
+            ("product", "bob"),
+            ("security", "charlie"),
+            ("vpn-users", "alice"),
+            ("vpn-users", "diana"),
+        ],
+    )
+    def test_member_dn_references_earlier_user_entry(
+        self, ldif_lines, group_cn, member_uid
+    ):
         """member DN uid=<uid>,ou=users must appear in the LDIF before the group entry.
 
         This enforces the ordering contract: group entries must come after all
@@ -466,9 +435,7 @@ class TestLdifMemberDnResolution:
             f"User entry 'dn: {user_dn}' not found in LDIF — "
             f"referenced by group {group_cn!r}"
         )
-        assert group_line is not None, (
-            f"Group entry 'dn: {group_dn}' not found in LDIF"
-        )
+        assert group_line is not None, f"Group entry 'dn: {group_dn}' not found in LDIF"
         assert user_line < group_line, (
             f"User 'dn: {user_dn}' at line {user_line} must appear before "
             f"group 'dn: {group_dn}' at line {group_line}"
@@ -680,7 +647,9 @@ class TestDockerfileMemberofCopy:
             f"Dockerfile content:\n{dockerfile_content}"
         )
 
-    def test_dockerfile_copies_00_memberof_overlay_ldif_into_ldif_custom(self, dockerfile_content):
+    def test_dockerfile_copies_00_memberof_overlay_ldif_into_ldif_custom(
+        self, dockerfile_content
+    ):
         """Dockerfile must COPY 00-memberof-overlay.ldif into ldif/custom/.
 
         The overlay reconfiguration only takes effect if the file lands in the
@@ -688,14 +657,18 @@ class TestDockerfileMemberofCopy:
         bootstrap.ldif.
         """
         copy_lines = [
-            ln for ln in dockerfile_content.splitlines()
+            ln
+            for ln in dockerfile_content.splitlines()
             if ln.strip().startswith("COPY") and "00-memberof-overlay.ldif" in ln
         ]
         assert copy_lines, (
             "Dockerfile must contain a 'COPY 00-memberof-overlay.ldif ...' line. "
             f"Dockerfile content:\n{dockerfile_content}"
         )
-        assert "/container/service/slapd/assets/config/bootstrap/ldif/custom/" in copy_lines[0], (
+        assert (
+            "/container/service/slapd/assets/config/bootstrap/ldif/custom/"
+            in copy_lines[0]
+        ), (
             "COPY line for 00-memberof-overlay.ldif must target "
             "'/container/service/slapd/assets/config/bootstrap/ldif/custom/'. "
             f"Found: {copy_lines[0]!r}"
@@ -723,7 +696,9 @@ def _extract_section_53(doc_text: str) -> str:
             section_start = i
         elif section_start is not None:
             # Stop at next heading of depth <= 3 that is NOT §5.3
-            if re.match(r"^#{1,3}\s+", line) and not re.match(r"^#{1,3}\s+5\.3\b", line):
+            if re.match(r"^#{1,3}\s+", line) and not re.match(
+                r"^#{1,3}\s+5\.3\b", line
+            ):
                 section_end = i
                 break
 
@@ -760,11 +735,12 @@ class TestSpec0Section53Mirror:
         the section numbering was changed.
         """
         assert section_53, (
-            "Could not find §5.3 heading in SPEC_0. "
-            f"Document path: {SPEC0_DOC}"
+            f"Could not find §5.3 heading in SPEC_0. Document path: {SPEC0_DOC}"
         )
 
-    @pytest.mark.parametrize("group_cn", ["engineering", "product", "security", "vpn-users"])
+    @pytest.mark.parametrize(
+        "group_cn", ["engineering", "product", "security", "vpn-users"]
+    )
     def test_section_53_contains_group_entry(self, section_53, group_cn):
         """§5.3 must include the LDIF dn: line for each group.
 

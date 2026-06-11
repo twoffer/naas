@@ -11,8 +11,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-
-
 def _find_repo_root() -> Path:
     """Walk up until docs/architecture/ is found — repo root marker."""
     candidate = Path(__file__).resolve().parent
@@ -22,10 +20,10 @@ def _find_repo_root() -> Path:
         candidate = candidate.parent
     raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
 
+
 REPO_ROOT = _find_repo_root()
 
 CONFIG_PATH = REPO_ROOT / "config" / "normalization.yaml"
-
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +166,9 @@ class TestSingleGroupSource:
         )
 
         detail = result.resolution_details.get("groups")
-        assert detail is not None, "groups must appear in resolution_details when one source present."
+        assert detail is not None, (
+            "groups must appear in resolution_details when one source present."
+        )
         assert isinstance(detail, ListMergeResolution), (
             f"Expected ListMergeResolution for groups, got {type(detail)!r}."
         )
@@ -224,7 +224,9 @@ class TestSingleGroupSource:
 
         cfg = _load_real_config()
         result = resolve(
-            attribute_sources={"groups": {"oidc": ["vpn-users", "admin", "engineering"]}},
+            attribute_sources={
+                "groups": {"oidc": ["vpn-users", "admin", "engineering"]}
+            },
             config=cfg,
             source_protocol="oidc",
             enrichment=_skip_enrichment(),
@@ -244,7 +246,9 @@ class TestSingleGroupSource:
 
         cfg = _load_real_config()
         result = resolve(
-            attribute_sources={"groups": {"ldap": ["admin", "engineering", "vpn-users"]}},
+            attribute_sources={
+                "groups": {"ldap": ["admin", "engineering", "vpn-users"]}
+            },
             config=cfg,
             source_protocol="ldap",
             enrichment=_skip_enrichment(),
@@ -433,9 +437,7 @@ class TestUnionMerge:
 
         cfg = _load_real_config()
         result = resolve(
-            attribute_sources={
-                "groups": {"oidc": ["admin"], "ldap": ["engineering"]}
-            },
+            attribute_sources={"groups": {"oidc": ["admin"], "ldap": ["engineering"]}},
             config=cfg,
             source_protocol="oidc",
             enrichment=_applied_enrichment(),
@@ -462,9 +464,7 @@ class TestUnionMerge:
 
         cfg = _load_real_config()
         result = resolve(
-            attribute_sources={
-                "groups": {"oidc": ["admin"], "ldap": ["admin"]}
-            },
+            attribute_sources={"groups": {"oidc": ["admin"], "ldap": ["admin"]}},
             config=cfg,
             source_protocol="oidc",
             enrichment=_applied_enrichment(),
@@ -489,9 +489,7 @@ class TestUnionMerge:
 
         cfg = _load_real_config()
         result = resolve(
-            attribute_sources={
-                "groups": {"oidc": ["admin"], "ldap": ["engineering"]}
-            },
+            attribute_sources={"groups": {"oidc": ["admin"], "ldap": ["engineering"]}},
             config=cfg,
             source_protocol="oidc",
             enrichment=_applied_enrichment(),
@@ -675,9 +673,7 @@ class TestIntersectionMerge:
 
         cfg = _load_config_with_strategy("intersection")
         result = resolve(
-            attribute_sources={
-                "groups": {"oidc": ["admin"], "ldap": ["admin"]}
-            },
+            attribute_sources={"groups": {"oidc": ["admin"], "ldap": ["admin"]}},
             config=cfg,
             source_protocol="oidc",
             enrichment=_applied_enrichment(),
@@ -688,6 +684,199 @@ class TestIntersectionMerge:
         assert detail.confidence == pytest.approx(1.0), (
             f"Expected confidence=1.0 for intersection with all groups shared, "
             f"got {detail.confidence!r}."
+        )
+
+    def test_intersection_sources_lists_all_contributing_protocols(self) -> None:
+        """sources lists every contributing protocol for an intersection merge.
+
+        oidc=['admin', 'vpn-users'], ldap=['admin', 'engineering'],
+        saml=['admin'] → intersection=['admin'].
+        All three protocols are in the groups_map, so sources == ['ldap', 'oidc', 'saml']
+        (sorted alphabetically), matching §5.5 deterministic ordering.
+        """
+        from app.resolution import resolve
+        from naas_shared.models import ListMergeResolution
+
+        cfg = _load_config_with_strategy("intersection")
+        result = resolve(
+            attribute_sources={
+                "groups": {
+                    "oidc": ["admin", "vpn-users"],
+                    "ldap": ["admin", "engineering"],
+                    "saml": ["admin"],
+                }
+            },
+            config=cfg,
+            source_protocol="oidc",
+            enrichment=_applied_enrichment(),
+        )
+
+        detail = result.resolution_details["groups"]
+        assert isinstance(detail, ListMergeResolution), (
+            f"Expected ListMergeResolution for intersection, got {type(detail)!r}."
+        )
+        assert detail.resolved_value == ["admin"], (
+            f"Expected intersection=['admin'], got {detail.resolved_value!r}."
+        )
+        assert detail.sources == ["ldap", "oidc", "saml"], (
+            f"Expected sources=['ldap', 'oidc', 'saml'] (sorted alphabetically), "
+            f"got {detail.sources!r}."
+        )
+
+
+# ===========================================================================
+# CLASS 4b — Priority strategy sources
+# ===========================================================================
+
+
+class TestPriorityMergeSources:
+    """Priority strategy: sources lists all protocols in the groups_map.
+
+    WHY: §5.5 — sources records provenance for consumers; the priority strategy
+    selects the first non-empty source by sorted key order, but all contributing
+    protocols are still recorded in sources (matching union/intersection behaviour).
+    """
+
+    def test_priority_sources_lists_all_contributing_protocols(self) -> None:
+        """sources lists every protocol in the groups_map, not only the winner.
+
+        ldap=['engineering', 'vpn-users'] wins (sorts first), oidc=['admin']
+        is present but loses. Both must appear in sources since both contributed
+        groups to the resolution — consumers need full provenance.
+        sources must be sorted alphabetically for deterministic output.
+        """
+        from app.resolution import resolve
+        from naas_shared.models import ListMergeResolution
+
+        cfg = _load_config_with_strategy("priority")
+        result = resolve(
+            attribute_sources={
+                "groups": {
+                    "oidc": ["admin"],
+                    "ldap": ["engineering", "vpn-users"],
+                }
+            },
+            config=cfg,
+            source_protocol="oidc",
+            enrichment=_applied_enrichment(),
+        )
+
+        detail = result.resolution_details["groups"]
+        assert isinstance(detail, ListMergeResolution), (
+            f"Expected ListMergeResolution for priority strategy, got {type(detail)!r}."
+        )
+        # ldap sorts before oidc → ldap's list is selected
+        assert detail.resolved_value == ["engineering", "vpn-users"], (
+            f"Expected priority winner ldap=['engineering', 'vpn-users'], "
+            f"got {detail.resolved_value!r}."
+        )
+        assert detail.strategy == "priority", (
+            f"Expected strategy='priority', got {detail.strategy!r}."
+        )
+        assert detail.sources == ["ldap", "oidc"], (
+            f"Expected sources=['ldap', 'oidc'] (both protocols recorded, sorted), "
+            f"got {detail.sources!r}."
+        )
+
+    def test_priority_sources_three_protocols(self) -> None:
+        """sources includes all three protocols when three contribute groups.
+
+        saml sorts first (lexicographic), so saml's list wins the priority merge.
+        All three protocols still appear in sources for full provenance.
+        """
+        from app.resolution import resolve
+        from naas_shared.models import ListMergeResolution
+
+        cfg = _load_config_with_strategy("priority")
+        result = resolve(
+            attribute_sources={
+                "groups": {
+                    "oidc": ["admin"],
+                    "ldap": ["engineering"],
+                    "saml": ["finance-team", "vpn-users"],
+                }
+            },
+            config=cfg,
+            source_protocol="saml",
+            enrichment=_applied_enrichment(),
+        )
+
+        detail = result.resolution_details["groups"]
+        assert isinstance(detail, ListMergeResolution), (
+            f"Expected ListMergeResolution, got {type(detail)!r}."
+        )
+        # ldap < oidc < saml alphabetically → ldap's list selected
+        assert detail.resolved_value == ["engineering"], (
+            f"Expected priority winner ldap=['engineering'], got {detail.resolved_value!r}."
+        )
+        assert detail.sources == ["ldap", "oidc", "saml"], (
+            f"Expected sources=['ldap', 'oidc', 'saml'] (all three protocols recorded), "
+            f"got {detail.sources!r}."
+        )
+
+
+# ===========================================================================
+# CLASS 4c — Empty-list source contributing-source semantics
+# ===========================================================================
+
+
+class TestEmptySourceContributing:
+    """Document the contributing-source semantics when a source supplies an empty
+    groups list.
+
+    WHY: The resolution layer receives groups_map keyed by protocol. A source
+    that authenticated the user but reported zero group memberships is still a
+    distinct case from a source that was never consulted. Understanding whether
+    it appears in 'sources' determines how consumers interpret provenance.
+
+    Current behaviour (§_resolve_groups): sources is populated from
+    sorted(groups_map.keys()), which includes every key regardless of whether
+    the associated list is empty.  This means an empty-list source DOES appear
+    in sources — it records that the protocol was consulted but contributed no
+    groups, which is more honest provenance than silently omitting it.
+    """
+
+    def test_empty_list_source_appears_in_sources_union(self) -> None:
+        """A source with an empty groups list still appears in sources for union merge.
+
+        Rationale: the source was consulted and reported no groups; omitting it
+        from sources would falsely imply it was never queried. The resolved groups
+        contain only the non-empty source's entries.
+
+        Fixture: oidc=['admin'], ldap=[] → union merged=['admin'], sources=['ldap','oidc'].
+        """
+        from app.resolution import resolve
+        from naas_shared.models import ListMergeResolution
+
+        cfg = _load_real_config()
+        result = resolve(
+            attribute_sources={
+                "groups": {
+                    "oidc": ["admin"],
+                    "ldap": [],
+                }
+            },
+            config=cfg,
+            source_protocol="oidc",
+            enrichment=_applied_enrichment(),
+        )
+
+        detail = result.resolution_details["groups"]
+        assert isinstance(detail, ListMergeResolution), (
+            f"Expected ListMergeResolution, got {type(detail)!r}."
+        )
+        # Empty ldap list still included in sources (provenance — ldap was consulted)
+        assert "ldap" in detail.sources, (
+            f"Expected 'ldap' in sources even though ldap contributed no groups "
+            f"(honest provenance — source was consulted). Got sources={detail.sources!r}."
+        )
+        assert "oidc" in detail.sources, (
+            f"Expected 'oidc' in sources. Got sources={detail.sources!r}."
+        )
+        # Only oidc's groups appear in the resolved set
+        assert detail.resolved_value == ["admin"], (
+            f"Expected resolved_value=['admin'] (only oidc's groups), "
+            f"got {detail.resolved_value!r}."
         )
 
 
