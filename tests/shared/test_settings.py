@@ -13,6 +13,12 @@ import pytest
 class TestSettingsDefaults:
     """Settings must have defaults matching the .env.example values so that
     `docker-compose up` works out of the box.
+
+    These tests instantiate ``Settings(_env_file=None)`` so they assert the
+    in-code defaults, not whatever a developer's local (gitignored) .env
+    happens to set.  The local .env is expected to drift — e.g.
+    POSTGRES_HOST=localhost for bare-metal runs — so reading it here would
+    make the defaults untestable.
     """
 
     @pytest.fixture(autouse=True)
@@ -30,14 +36,14 @@ class TestSettingsDefaults:
         """Settings() must not raise even without a .env file."""
         from naas_shared.config import Settings
 
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s is not None
 
     def test_postgres_host_default_is_postgres(self):
         """postgres_host defaults to 'postgres' (Docker service name)."""
         from naas_shared.config import Settings
 
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s.postgres_host == "postgres", (
             f"Expected postgres_host='postgres', got {s.postgres_host!r}"
         )
@@ -46,7 +52,7 @@ class TestSettingsDefaults:
         """redis_port defaults to 6379 (standard Redis port)."""
         from naas_shared.config import Settings
 
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s.redis_port == 6379, f"Expected redis_port=6379, got {s.redis_port!r}"
 
     def test_keycloak_realm_default_is_naas_demo(self):
@@ -57,7 +63,7 @@ class TestSettingsDefaults:
         """
         from naas_shared.config import Settings
 
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s.keycloak_realm == "naas-demo", (
             f"Expected keycloak_realm='naas-demo', got {s.keycloak_realm!r}"
         )
@@ -69,7 +75,7 @@ class TestSettingsDefaults:
         """
         from naas_shared.config import Settings
 
-        s = Settings()
+        s = Settings(_env_file=None)
         assert s.llm_provider == "mock", (
             f"Expected llm_provider='mock', got {s.llm_provider!r}"
         )

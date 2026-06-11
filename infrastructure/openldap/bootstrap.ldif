@@ -59,3 +59,25 @@ uid: eve
 userPassword: password123
 departmentNumber: External
 employeeType: contractor
+
+dn: cn=engineering,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: engineering
+member: uid=alice,ou=users,dc=corp,dc=com
+member: uid=diana,ou=users,dc=corp,dc=com
+
+dn: cn=product,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: product
+member: uid=bob,ou=users,dc=corp,dc=com
+
+dn: cn=security,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: security
+member: uid=charlie,ou=users,dc=corp,dc=com
+
+dn: cn=vpn-users,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: vpn-users
+member: uid=alice,ou=users,dc=corp,dc=com
+member: uid=diana,ou=users,dc=corp,dc=com

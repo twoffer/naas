@@ -19,5 +19,8 @@ metadata:
 ## §3.3 payload is ILLUSTRATIVE, not binding
 The §3.3 example shows normalization_confidence 0.87 and groups 0.85; the §5.5 FORMULA gives ~0.889 / 0.90 for the same inputs. chunk-5 tests correctly assert the formula, not the illustrative payload values. Do not flag this divergence as a bug.
 
+## display_name authority defaults (normalization-demo chunk-2, 2026-06)
+display_name flipped to priority `[oidc, saml, ldap]` + weights `{ldap:0.85, saml:0.75, oidc:0.70}` (was priority `[ldap,saml,oidc]` / ldap 0.90). §3.3 worked example (display_name unanimous 0.90) is intentionally preserved as illustrative — §5.6 lead-in note flags this. Post-change ground truth: single-source oidc 0.70 / saml 0.75; unanimous max 0.85; priority conflict winner=oidc at 0.70×0.8=0.56. department/employee_type/primary_email unchanged (department ldap still 0.90). Do NOT re-flag the §3.3 0.90 vs new 0.85 divergence as a regression.
+
 ## conftest tempfile monkeypatch
 `tests/services/identity_normalization/conftest.py` autouse-patches `tempfile.NamedTemporaryFile` to flush-on-write, working around `test_groups_merge.py` reading the temp file via `load_config` while still inside the `with` block (unflushed buffer → empty read). Scoped fine: the config-validation tests use pytest `tmp_path` + `write_text`, NOT NamedTemporaryFile, so they are unaffected. A cleaner alternative is a one-line `f.flush()` in the helper. Non-blocking; weakens no assertion.

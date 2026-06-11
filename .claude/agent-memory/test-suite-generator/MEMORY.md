@@ -19,6 +19,14 @@ Naming & placement conventions are NORMATIVE in the agent definition's TEST STAN
 
 - [patterns_test_suite_reorg.md](patterns_test_suite_reorg.md) — importlib mode setup, dir rename strategy, boilerplate strip pitfalls, split patterns for remediation/shared-library/keycloak files, per-service conftest pattern
 
+## Demo Tests
+
+- [patterns_demo_cli_tests.md](patterns_demo_cli_tests.md) — Absent-directory guard (pytest.fail not skip), subprocess --help pattern, SCENES constant contract, soft-import AST walk, banned-token grep, ERROR vs FAIL distinction in TDD runs
+
+## Demo Flow Tests
+
+- [patterns_demo_flow_tests.md](patterns_demo_flow_tests.md) — Injectable seam design for submit/poll/verify/render/cleanup, real NormalizedAttributes field names, scene index alignment, SQL constant names, confidence_style thresholds, Rich Console capture pattern. Notes 2/53 tests correctly passing before impl (main() --keep orchestration already coded).
+
 ## Service Tests
 
 - [patterns_service_tdd.md](patterns_service_tdd.md) — event-ingestion service patterns: sys.path injection for app.main, mock patching for FastAPI health endpoint tests, ORM column-type assertions (INET/JSONB), negative requirements.txt assertions

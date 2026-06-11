@@ -196,10 +196,10 @@ class TestSingleSourceResolution:
     """
 
     def test_single_source_display_name_oidc(self) -> None:
-        """display_name from single oidc source → SingleSourceResolution, confidence=0.60.
+        """display_name from single oidc source → SingleSourceResolution, confidence=0.70.
 
-        WHY: display_name.weights.oidc == 0.60 per §5.6.  Using the default 0.8
-        would overstate OIDC authority for legal-name attributes.
+        WHY: display_name.weights.oidc == 0.70 per §5.6.  Using the default 0.8
+        would overstate OIDC authority relative to the configured weight.
         """
         from app.resolution import resolve
         from naas_shared.models import SingleSourceResolution
@@ -220,8 +220,8 @@ class TestSingleSourceResolution:
         assert detail.resolved_value == "Alice Smith", (
             f"Expected resolved_value='Alice Smith', got {detail.resolved_value!r}."
         )
-        assert detail.confidence == pytest.approx(0.60), (
-            f"Expected confidence=0.60 (display_name.weights.oidc), got {detail.confidence!r}."
+        assert detail.confidence == pytest.approx(0.70), (
+            f"Expected confidence=0.70 (display_name.weights.oidc), got {detail.confidence!r}."
         )
         assert detail.sources == ["oidc"], (
             f"Expected sources=['oidc'], got {detail.sources!r}."
@@ -299,7 +299,7 @@ class TestSingleSourceResolution:
         assert detail.resolved_value == "FTE"
 
     def test_single_source_saml_display_name_weight(self) -> None:
-        """display_name from saml → confidence == 0.70 per §5.6."""
+        """display_name from saml → confidence == 0.75 per §5.6."""
         from app.resolution import resolve
         from naas_shared.models import SingleSourceResolution
 
@@ -313,8 +313,8 @@ class TestSingleSourceResolution:
 
         detail = result.resolution_details["display_name"]
         assert isinstance(detail, SingleSourceResolution)
-        assert detail.confidence == pytest.approx(0.70), (
-            f"Expected 0.70 for display_name single-source saml, got {detail.confidence!r}."
+        assert detail.confidence == pytest.approx(0.75), (
+            f"Expected 0.75 for display_name single-source saml, got {detail.confidence!r}."
         )
 
     def test_single_source_result_has_correct_resolution_literal(self) -> None:
@@ -356,10 +356,10 @@ class TestUnanimousResolution:
     """
 
     def test_unanimous_display_name_oidc_ldap_confidence_is_max_weight(self) -> None:
-        """display_name: oidc=0.60, ldap=0.90 → unanimous confidence=max=0.90.
+        """display_name: oidc=0.70, ldap=0.85 → unanimous confidence=max=0.85.
 
-        WHY: §3.3 example shows display_name unanimous with sources [oidc, ldap],
-        confidence=0.90 (ldap weight, the higher of the two).
+        WHY: §5.6 weights are oidc=0.70, ldap=0.85. The unanimous confidence
+        is the max weight among the agreeing sources.
         """
         from app.resolution import resolve
         from naas_shared.models import UnanimousResolution
@@ -377,8 +377,8 @@ class TestUnanimousResolution:
             f"Expected UnanimousResolution for agreeing oidc+ldap, got {type(detail)!r}."
         )
         assert detail.resolved_value == "Alice Smith"
-        assert detail.confidence == pytest.approx(0.90), (
-            f"Expected confidence=0.90 (max of oidc=0.60, ldap=0.90), got {detail.confidence!r}."
+        assert detail.confidence == pytest.approx(0.85), (
+            f"Expected confidence=0.85 (max of oidc=0.70, ldap=0.85), got {detail.confidence!r}."
         )
         assert set(detail.sources) == {"oidc", "ldap"}, (
             f"Expected sources={{oidc, ldap}}, got {detail.sources!r}."
@@ -456,7 +456,7 @@ class TestUnanimousResolution:
         WHY: §5.5 specifies max weight of agreeing sources — not sum, not average.
         Three agreeing protocols are more reliable than one, but the confidence
         formula is bounded by the most authoritative source's weight.
-        For display_name: ldap=0.90, saml=0.70, oidc=0.60 → max=0.90.
+        For display_name: ldap=0.85, saml=0.75, oidc=0.70 → max=0.85.
         """
         from app.resolution import resolve
         from naas_shared.models import UnanimousResolution
@@ -473,8 +473,8 @@ class TestUnanimousResolution:
 
         detail = result.resolution_details["display_name"]
         assert isinstance(detail, UnanimousResolution)
-        assert detail.confidence == pytest.approx(0.90), (
-            f"Expected max weight=0.90 for three-way unanimous display_name, got {detail.confidence!r}."
+        assert detail.confidence == pytest.approx(0.85), (
+            f"Expected max weight=0.85 for three-way unanimous display_name, got {detail.confidence!r}."
         )
         assert set(detail.sources) == {"ldap", "saml", "oidc"}
 
@@ -558,11 +558,12 @@ class TestPriorityResolution:
             f"Expected resolution='priority', got {detail.resolution!r}."
         )
 
-    def test_display_name_priority_ldap_over_oidc(self) -> None:
-        """display_name: priority=[ldap,saml,oidc] → ldap wins over oidc.
+    def test_display_name_priority_oidc_over_ldap(self) -> None:
+        """display_name: priority=[oidc,saml,ldap] → oidc wins over ldap.
 
-        confidence = weight_for('display_name','ldap') × 0.8 = 0.90 × 0.8 = 0.72.
-        WHY: LDAP is synced from HR (legal name).  OIDC display name may be stale.
+        confidence = weight_for('display_name','oidc') × 0.8 = 0.70 × 0.8 = 0.56.
+        WHY: §5.6 priority is [oidc, saml, ldap] — the IdP-curated display name
+        wins conflicts.
         """
         from app.resolution import resolve
         from naas_shared.models import PriorityResolution
@@ -579,10 +580,14 @@ class TestPriorityResolution:
 
         detail = result.resolution_details["display_name"]
         assert isinstance(detail, PriorityResolution)
-        assert detail.winner_source == "ldap"
-        assert detail.resolved_value == "Alice Smith"
-        assert detail.confidence == pytest.approx(0.72), (
-            f"Expected 0.90×0.8=0.72 for display_name priority ldap, got {detail.confidence!r}."
+        assert detail.winner_source == "oidc", (
+            f"Expected winner_source='oidc' (priority=[oidc,saml,ldap]), got {detail.winner_source!r}."
+        )
+        assert detail.resolved_value == "alice.smith", (
+            f"Expected resolved_value='alice.smith' (oidc wins), got {detail.resolved_value!r}."
+        )
+        assert detail.confidence == pytest.approx(0.56), (
+            f"Expected 0.70×0.8=0.56 for display_name priority oidc, got {detail.confidence!r}."
         )
 
     def test_employee_type_priority_ldap_over_saml(self) -> None:

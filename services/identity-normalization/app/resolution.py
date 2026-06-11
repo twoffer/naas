@@ -305,6 +305,7 @@ def _resolve_groups(
             confidence=conf,
             strategy=strategy,  # type: ignore[arg-type]
             total_unique_groups=len(merged),
+            sources=[src],
         )
         return detail, conf
 
@@ -330,6 +331,7 @@ def _resolve_groups(
         confidence=conf,
         strategy=strategy,  # type: ignore[arg-type]
         total_unique_groups=len(merged),
+        sources=sorted(groups_map.keys()),
     )
     return detail, conf
 

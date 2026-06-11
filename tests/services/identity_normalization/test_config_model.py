@@ -11,7 +11,6 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-
 def _find_repo_root() -> Path:
     """Walk up until docs/architecture/ is found — repo root marker."""
     candidate = Path(__file__).resolve().parent
@@ -21,10 +20,10 @@ def _find_repo_root() -> Path:
         candidate = candidate.parent
     raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
 
+
 REPO_ROOT = _find_repo_root()
 
 CONFIG_PATH = REPO_ROOT / "config" / "normalization.yaml"
-
 
 
 # ===========================================================================
@@ -111,7 +110,14 @@ enrichment:
 
     @pytest.fixture()
     def full_spec_yaml(self, tmp_path: Path) -> Path:
-        """The §5.6 default config transcribed in full for accessor testing."""
+        """The §5.6 default config transcribed in full for accessor testing.
+
+        display_name was updated in config/normalization.yaml: priority changed
+        from [ldap, saml, oidc] to [oidc, saml, ldap] (cloud IdP wins on
+        conflict); weights changed to {ldap: 0.85, saml: 0.75, oidc: 0.70}
+        (compressed band; directory legal name stays most reliable for
+        confidence even though IdP wins priority).
+        """
         content = """
 defaults:
   source_weights:
@@ -121,9 +127,9 @@ defaults:
 
 attributes:
   display_name:
-    priority: [ldap, saml, oidc]
-    weights: {ldap: 0.90, saml: 0.70, oidc: 0.60}
-    rationale: "LDAP synced from HR system"
+    priority: [oidc, saml, ldap]
+    weights: {ldap: 0.85, saml: 0.75, oidc: 0.70}
+    rationale: "Cloud IdP wins display-name conflicts; weights encode source reliability for canonical record"
   primary_email:
     priority: [oidc, saml, ldap]
     weights: {oidc: 0.95, saml: 0.75, ldap: 0.65}
@@ -196,11 +202,14 @@ enrichment:
     def test_weight_for_returns_explicit_oidc_weight_for_display_name(
         self, full_spec_yaml: Path
     ) -> None:
-        """weight_for('display_name', 'oidc') == 0.60.
+        """weight_for('display_name', 'oidc') == 0.70.
 
-        WHY: display_name has lower OIDC authority (HR/LDAP is authoritative for
-        legal name). Using the default 0.8 instead of 0.60 would incorrectly
-        elevate OIDC's priority for legal-name conflicts.
+        WHY: display_name weights are intentionally decoupled from priority.
+        The cloud IdP (OIDC) wins priority on disagreement (users curate their
+        own preferred name there), but the weight is a modest 0.70 because the
+        directory's verified legal name is more reliable as a canonical record.
+        Using the global default 0.8 instead of 0.70 would over-state OIDC
+        reliability for this attribute.
         """
         from app.normalization_config import load_config
 
@@ -208,9 +217,9 @@ enrichment:
 
         result = cfg.weight_for("display_name", "oidc")
 
-        assert result == pytest.approx(0.60), (
-            f"Expected weight_for('display_name', 'oidc') == 0.60, got {result!r}. "
-            "Spec §5.6: display_name.weights.oidc == 0.60."
+        assert result == pytest.approx(0.70), (
+            f"Expected weight_for('display_name', 'oidc') == 0.70, got {result!r}. "
+            "config/normalization.yaml display_name.weights.oidc == 0.70."
         )
 
     def test_weight_for_returns_explicit_ldap_weight_for_employee_type(
@@ -254,9 +263,7 @@ enrichment:
             "Spec §5.6: groups has no weights block; accessor must use defaults.source_weights."
         )
 
-    def test_weight_for_groups_falls_back_for_saml(
-        self, full_spec_yaml: Path
-    ) -> None:
+    def test_weight_for_groups_falls_back_for_saml(self, full_spec_yaml: Path) -> None:
         """weight_for('groups', 'saml') == 0.6 (default) because groups has no weights block."""
         from app.normalization_config import load_config
 
@@ -269,9 +276,7 @@ enrichment:
             "Spec §5.6: groups.source_weights falls back to defaults.source_weights.saml == 0.6."
         )
 
-    def test_weight_for_groups_falls_back_for_oidc(
-        self, full_spec_yaml: Path
-    ) -> None:
+    def test_weight_for_groups_falls_back_for_oidc(self, full_spec_yaml: Path) -> None:
         """weight_for('groups', 'oidc') == 0.8 (default) because groups has no weights block."""
         from app.normalization_config import load_config
 
@@ -400,9 +405,7 @@ enrichment:
             f"Expected weight_for('display_name', 'oidc') == 0.8 (default), got {oidc_default!r}."
         )
 
-    def test_priority_for_returns_configured_list(
-        self, full_spec_yaml: Path
-    ) -> None:
+    def test_priority_for_returns_configured_list(self, full_spec_yaml: Path) -> None:
         """priority_for('department') == ['ldap', 'oidc', 'saml'].
 
         WHY: Priority order is used in §5.5 to pick the winner when sources disagree.
@@ -528,9 +531,7 @@ enrichment:
             "The enrichment block is required for LDAP enrichment decision-making."
         )
 
-    def test_enrichment_ldap_config_is_accessible(
-        self, full_spec_yaml: Path
-    ) -> None:
+    def test_enrichment_ldap_config_is_accessible(self, full_spec_yaml: Path) -> None:
         """cfg.enrichment.sources.ldap (or equivalent) exposes the LDAP enrichment sub-config."""
         from app.normalization_config import load_config
 

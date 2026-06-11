@@ -87,7 +87,7 @@ class TestCommittedYamlWeights:
 
     All values in this class are labelled [TRANSCRIBE EXACTLY] in the spec.
     A deviation means confidence scores produced by §5.5 do not match the
-    §3.3 representative payload example (normalization_confidence: 0.87).
+    §3.3 representative payload example.
     """
 
     @pytest.fixture(scope="class")
@@ -161,36 +161,35 @@ class TestCommittedYamlWeights:
             "Spec §5.6 [TRANSCRIBE EXACTLY]: primary_email.weights.ldap: 0.65."
         )
 
-    def test_display_name_ldap_weight_is_0_90(self, cfg) -> None:
-        """weight_for('display_name', 'ldap') == 0.90.
+    def test_display_name_ldap_weight_is_0_85(self, cfg) -> None:
+        """weight_for('display_name', 'ldap') == 0.85.
 
-        WHY: LDAP is synced from the HR system — most authoritative for legal name.
-        Rationale from §5.6: 'LDAP synced from HR system; most authoritative for
-        legal name'.
+        WHY: LDAP is synced from the HR system — authoritative for legal name.
+        Rationale from §5.6: display_name.weights.ldap: 0.85.
         """
         result = cfg.weight_for("display_name", "ldap")
 
-        assert result == pytest.approx(0.90), (
-            f"Expected weight_for('display_name', 'ldap') == 0.90, got {result!r}. "
-            "Spec §5.6 [TRANSCRIBE EXACTLY]: display_name.weights.ldap: 0.90."
+        assert result == pytest.approx(0.85), (
+            f"Expected weight_for('display_name', 'ldap') == 0.85, got {result!r}. "
+            "Spec §5.6 [TRANSCRIBE EXACTLY]: display_name.weights.ldap: 0.85."
         )
 
-    def test_display_name_saml_weight_is_0_70(self, cfg) -> None:
-        """weight_for('display_name', 'saml') == 0.70."""
+    def test_display_name_saml_weight_is_0_75(self, cfg) -> None:
+        """weight_for('display_name', 'saml') == 0.75."""
         result = cfg.weight_for("display_name", "saml")
 
-        assert result == pytest.approx(0.70), (
-            f"Expected weight_for('display_name', 'saml') == 0.70, got {result!r}. "
-            "Spec §5.6 [TRANSCRIBE EXACTLY]: display_name.weights.saml: 0.70."
+        assert result == pytest.approx(0.75), (
+            f"Expected weight_for('display_name', 'saml') == 0.75, got {result!r}. "
+            "Spec §5.6 [TRANSCRIBE EXACTLY]: display_name.weights.saml: 0.75."
         )
 
-    def test_display_name_oidc_weight_is_0_60(self, cfg) -> None:
-        """weight_for('display_name', 'oidc') == 0.60."""
+    def test_display_name_oidc_weight_is_0_70(self, cfg) -> None:
+        """weight_for('display_name', 'oidc') == 0.70."""
         result = cfg.weight_for("display_name", "oidc")
 
-        assert result == pytest.approx(0.60), (
-            f"Expected weight_for('display_name', 'oidc') == 0.60, got {result!r}. "
-            "Spec §5.6 [TRANSCRIBE EXACTLY]: display_name.weights.oidc: 0.60."
+        assert result == pytest.approx(0.70), (
+            f"Expected weight_for('display_name', 'oidc') == 0.70, got {result!r}. "
+            "Spec §5.6 [TRANSCRIBE EXACTLY]: display_name.weights.oidc: 0.70."
         )
 
     def test_employee_type_ldap_weight_is_0_95(self, cfg) -> None:
@@ -321,17 +320,17 @@ class TestCommittedYamlPriorities:
             "Spec §5.6 [TRANSCRIBE EXACTLY]: primary_email.priority: [oidc, saml, ldap]."
         )
 
-    def test_display_name_priority_is_ldap_saml_oidc(self, cfg) -> None:
-        """priority_for('display_name') == ['ldap', 'saml', 'oidc'].
+    def test_display_name_priority_is_oidc_saml_ldap(self, cfg) -> None:
+        """priority_for('display_name') == ['oidc', 'saml', 'ldap'].
 
-        WHY: Legal name is most reliably sourced from the HR system (LDAP). OIDC
-        tokens may carry a nickname or preferred name rather than the legal name.
+        WHY: OIDC tokens carry the most current display name from the login provider;
+        LDAP may lag behind preferred-name changes.
         """
         result = cfg.priority_for("display_name")
 
-        assert result == ["ldap", "saml", "oidc"], (
-            f"Expected priority_for('display_name') == ['ldap', 'saml', 'oidc'], got {result!r}. "
-            "Spec §5.6 [TRANSCRIBE EXACTLY]: display_name.priority: [ldap, saml, oidc]."
+        assert result == ["oidc", "saml", "ldap"], (
+            f"Expected priority_for('display_name') == ['oidc', 'saml', 'ldap'], got {result!r}. "
+            "Spec §5.6 [TRANSCRIBE EXACTLY]: display_name.priority: [oidc, saml, ldap]."
         )
 
     def test_employee_type_priority_is_ldap_saml_oidc(self, cfg) -> None:

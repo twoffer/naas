@@ -1,0 +1,29 @@
+# 00-memberof-overlay.ldif
+#
+# Reconfigures the built-in default memberof overlay on the mdb database so it
+# matches the groupOfNames/member schema used in bootstrap.ldif.
+#
+# Background: osixia/openldap:1.5.0 ships a default memberof overlay pre-configured
+# for groupOfUniqueNames/uniqueMember.  Our bootstrap data uses groupOfNames/member,
+# so the default overlay never fires and memberOf back-links are never populated.
+#
+# Named with "00-" prefix so it sorts BEFORE bootstrap.ldif alphabetically.
+# osixia processes ldif/custom/*.ldif via `find | sort`, so this modify executes
+# first — the overlay is reconfigured before the group entries are loaded.
+# When groups are added by bootstrap.ldif, the overlay is already active and
+# correct, causing memberOf back-links to be populated on all member user entries.
+#
+# The ldap_add_or_modify() function in startup.sh detects "changetype" and calls
+# "ldapmodify -Y EXTERNAL -Q -H ldapi:///" — SASL EXTERNAL authenticates as
+# gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth, which has cn=config
+# write access.
+#
+# The changetype:modify/replace approach avoids a second overlay entry (collision)
+# and is idempotent — re-applying it on a future start leaves the config unchanged.
+dn: olcOverlay={0}memberof,olcDatabase={1}mdb,cn=config
+changetype: modify
+replace: olcMemberOfGroupOC
+olcMemberOfGroupOC: groupOfNames
+-
+replace: olcMemberOfMemberAD
+olcMemberOfMemberAD: member

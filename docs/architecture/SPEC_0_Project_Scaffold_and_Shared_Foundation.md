@@ -463,6 +463,7 @@ class ListMergeResolution(ResolutionDetailBase):
     resolved_value: list[str] = Field(default_factory=list)
     strategy: Literal["union", "intersection", "priority"]
     total_unique_groups: int = Field(ge=0)
+    sources: list[SourceProtocol] = Field(default_factory=list)
 
 
 ResolutionDetail = Annotated[
@@ -1044,19 +1045,15 @@ If using approach 2, verify the format against Keycloak's documentation. Key pit
 
 ### 5.3 OpenLDAP Bootstrap Data
 
-This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted):
+This LDIF is baked into the custom OpenLDAP image via `infrastructure/openldap/Dockerfile` (see the ⚠️ note in §5.1 for why it is copied into the image rather than bind-mounted). The Dockerfile also copies `00-memberof-overlay.ldif` into the osixia custom-bootstrap directory so the memberof overlay is reconfigured at first seed (the image-default refint overlay already tracks `member` and needs no modification — see the overlay note below):
 
 ```dockerfile
-# infrastructure/openldap/Dockerfile
 FROM osixia/openldap:1.5.0
 COPY bootstrap.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
+COPY 00-memberof-overlay.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/00-memberof-overlay.ldif
 ```
 
 ```ldif
-# infrastructure/openldap/bootstrap.ldif
-# NOTE: The osixia/openldap image auto-creates dc=corp,dc=com from LDAP_DOMAIN.
-# This file adds the OU and users underneath.
-
 dn: ou=users,dc=corp,dc=com
 objectClass: organizationalUnit
 ou: users
@@ -1114,9 +1111,35 @@ uid: eve
 userPassword: password123
 departmentNumber: External
 employeeType: contractor
+
+dn: cn=engineering,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: engineering
+member: uid=alice,ou=users,dc=corp,dc=com
+member: uid=diana,ou=users,dc=corp,dc=com
+
+dn: cn=product,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: product
+member: uid=bob,ou=users,dc=corp,dc=com
+
+dn: cn=security,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: security
+member: uid=charlie,ou=users,dc=corp,dc=com
+
+dn: cn=vpn-users,ou=groups,dc=corp,dc=com
+objectClass: groupOfNames
+cn: vpn-users
+member: uid=alice,ou=users,dc=corp,dc=com
+member: uid=diana,ou=users,dc=corp,dc=com
 ```
 
 **Note:** 5 users instead of 3 in LDAP to demonstrate variety in `employeeType` (FTE, contractor, vendor) which feeds the normalization layer. The same alice/bob/charlie exist in both Keycloak and OpenLDAP — this is intentional to show cross-protocol identity correlation.
+
+**Group entries** appear after all user entries (LDIF is processed top-to-bottom; member DNs must reference entries that already exist). Four groups are seeded: `engineering` (alice, diana), `product` (bob), `security` (charlie), and `vpn-users` (alice, diana). The token-only groups `product-admins` and `oncall` are not directory groups and are not present here.
+
+**memberof / refint overlay configuration** — osixia/openldap:1.5.0 ships a default `memberof` overlay pre-configured for `groupOfUniqueNames`/`uniqueMember`. Our bootstrap data uses `groupOfNames`/`member`, so the default overlay must be reconfigured. `infrastructure/openldap/00-memberof-overlay.ldif` is placed in the osixia custom bootstrap LDIF directory (`ldif/custom/`). The `00-` prefix ensures it sorts alphabetically before `bootstrap.ldif`, so the overlay is reconfigured BEFORE the group entries are loaded. The osixia startup script processes `ldif/custom/*.ldif` in sorted order via `ldap_add_or_modify()` which calls `ldapmodify -Y EXTERNAL -Q -H ldapi:///` — a SASL EXTERNAL bind over the local `ldapi` socket whose peer credentials (the startup script runs as uid/gid 0) map to `gidNumber=0+uidNumber=0,cn=peercred,cn=external,cn=auth`, the identity authorized to write `cn=config`. The LDIF does a `changetype: modify`/`replace` on the existing `olcOverlay={0}memberof,olcDatabase={1}mdb,cn=config` entry to set `olcMemberOfGroupOC: groupOfNames` and `olcMemberOfMemberAD: member`. Because the overlay is correctly configured when groups are added by `bootstrap.ldif`, the memberOf back-links are populated at group-add time. The `refint` overlay (also default in the image) already tracks the `member` attribute and requires no modification. After seed, alice and diana carry `memberOf: cn=engineering,...` and `memberOf: cn=vpn-users,...`. Picking up changes to the overlay config requires an image rebuild and a fresh ldap-data volume: `docker compose build openldap && docker compose down -v openldap && docker compose up -d openldap`.
 
 ### 5.4 Shared Python Package Structure
 

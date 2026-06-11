@@ -14,3 +14,12 @@
 FROM osixia/openldap:1.5.0
 
 COPY bootstrap.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/bootstrap.ldif
+# Reconfigure the built-in memberof overlay for groupOfNames/member via a custom
+# bootstrap LDIF.  osixia processes *.ldif files in ldif/custom/ via
+# ldap_add_or_modify() (uses "ldapmodify -Y EXTERNAL -H ldapi:///") which runs
+# after the image-default overlay entry is created, so this modify lands cleanly.
+# Placed as 00-memberof-overlay.ldif so it sorts BEFORE bootstrap.ldif alphabetically.
+# osixia processes ldif/custom/ files via `find | sort`, so this modify runs first —
+# the overlay is reconfigured for groupOfNames/member before the group entries are
+# loaded, ensuring memberOf back-links are populated when groups are added.
+COPY 00-memberof-overlay.ldif /container/service/slapd/assets/config/bootstrap/ldif/custom/00-memberof-overlay.ldif
