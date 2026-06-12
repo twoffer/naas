@@ -6,22 +6,7 @@ from pathlib import Path
 # third-party
 import pytest
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery and sys.path injection
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    """Walk up until docs/architecture/ is found — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
-
-
-REPO_ROOT = _find_repo_root()
+from tests.helpers import REPO_ROOT
 
 CONFIG_PATH = REPO_ROOT / "config" / "normalization.yaml"
 

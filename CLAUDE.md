@@ -118,7 +118,7 @@ If `.venv/` exists, activate it (`source .venv/bin/activate`) before running any
 - **LLM Integration:** Persona Simulator uses configurable LLM provider (Claude API → Ollama → mock). Set via `LLM_PROVIDER` env var. Default: `mock` (no API keys needed). Events submitted via EventSink abstraction.
 - **Shared tools:** `shared/naas_shared/simulation_tools.py` contains tool definitions and executor used by persona-simulator (internal) and MCP server (external, P2).
 - **Policy Model:** Hybrid scoring — `signal_weights` (4 continuous signals: ip_reputation_risk, normalization_risk, failed_login_risk, login_recency_risk) + `conditions` (boolean expressions evaluated by Python ast-based safe evaluator). Expression language supports AND/OR/NOT/IN operators across 5 namespaces (user, device, signals, time, event).
-- **ML Model:** Bootstrap script at `scripts/train_bootstrap_model.py` generates `random_forest.pkl` from synthetic distribution profiles. Feature vector (16 columns) defined in `shared/naas_shared/ml_features.py` — shared between training and inference. Model labels are independent of rule-based scoring.
+- **ML Model:** Bootstrap script at `scripts/train_bootstrap_model.py` generates `random_forest.pkl` from synthetic distribution profiles. Feature vector (16 columns) defined in `shared/naas_shared/ml_features.py` (currently a placeholder — populated by Spec 3) — shared between training and inference. Model labels are independent of rule-based scoring.
 
 ## Agentic Pipeline
 

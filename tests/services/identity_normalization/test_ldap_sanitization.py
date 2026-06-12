@@ -1,12 +1,10 @@
 """LDAP injection sanitization in LdapAdapter.enrich(): escape_filter_chars contract."""
 
-import asyncio
 import sys
 from unittest.mock import MagicMock
 
 # third-party
 import pytest
-
 
 
 # ---------------------------------------------------------------------------
@@ -21,10 +19,13 @@ def _make_fake_ldap_module() -> MagicMock:
 
     class LDAPError(Exception):
         pass
+
     class SERVER_DOWN(LDAPError):
         pass
+
     class TIMEOUT_EXCEEDED(LDAPError):
         pass
+
     class OPERATIONS_ERROR(LDAPError):
         pass
 
@@ -88,7 +89,7 @@ class TestEscapeFilterCharsIsCalled:
     detectable way.
     """
 
-    def test_escape_filter_chars_called_with_lookup_value(
+    async def test_escape_filter_chars_called_with_lookup_value(
         self, monkeypatch
     ) -> None:
         """escape_filter_chars must be called with the raw lookup_value as argument.
@@ -103,9 +104,7 @@ class TestEscapeFilterCharsIsCalled:
             escape_calls.append(value)
             return value  # pass through
 
-        fake_ldap.filter.escape_filter_chars = MagicMock(
-            side_effect=recording_escape
-        )
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=recording_escape)
 
         conn_mock = MagicMock()
         conn_mock.simple_bind_s = MagicMock(return_value=None)
@@ -122,9 +121,7 @@ class TestEscapeFilterCharsIsCalled:
 
         lookup_value = "alice@corp.com"
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", lookup_value)
-        )
+        await adapter.enrich("primary_email", lookup_value)
 
         assert len(escape_calls) >= 1, (
             "ldap.filter.escape_filter_chars must be called at least once before "
@@ -136,7 +133,7 @@ class TestEscapeFilterCharsIsCalled:
             f"{lookup_value!r}. Recorded calls: {escape_calls}"
         )
 
-    def test_escape_filter_chars_called_before_search(self, monkeypatch) -> None:
+    async def test_escape_filter_chars_called_before_search(self, monkeypatch) -> None:
         """escape_filter_chars must be called BEFORE search_s.
 
         WHY: Calling escape after the filter is built would mean the filter was
@@ -151,9 +148,7 @@ class TestEscapeFilterCharsIsCalled:
             call_order.append("escape")
             return value
 
-        fake_ldap.filter.escape_filter_chars = MagicMock(
-            side_effect=recording_escape
-        )
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=recording_escape)
 
         conn_mock = MagicMock()
         conn_mock.simple_bind_s = MagicMock(return_value=None)
@@ -174,9 +169,7 @@ class TestEscapeFilterCharsIsCalled:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert "escape" in call_order, "escape_filter_chars must be called"
         assert "search" in call_order, "search_s must be called"
@@ -208,7 +201,7 @@ class TestFilterUsesEscapedValue:
     without relying on the exact RFC 4515 escaping algorithm.
     """
 
-    def test_filter_contains_escaped_output_not_raw_value(
+    async def test_filter_contains_escaped_output_not_raw_value(
         self, monkeypatch
     ) -> None:
         """The filter string must contain the escape_filter_chars output.
@@ -223,9 +216,7 @@ class TestFilterUsesEscapedValue:
         def marking_escape(value: str) -> str:
             return ESCAPE_MARKER + value
 
-        fake_ldap.filter.escape_filter_chars = MagicMock(
-            side_effect=marking_escape
-        )
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=marking_escape)
 
         search_calls: list = []
 
@@ -249,9 +240,7 @@ class TestFilterUsesEscapedValue:
 
         raw_lookup = "alice@corp.com"
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", raw_lookup)
-        )
+        await adapter.enrich("primary_email", raw_lookup)
 
         assert len(search_calls) >= 1, "search_s must be called"
         filter_str = search_calls[0]
@@ -266,7 +255,7 @@ class TestFilterUsesEscapedValue:
         )
 
     @pytest.mark.parametrize("dangerous_char", ["*", "(", ")", "\\"])
-    def test_ldap_metacharacters_are_not_interpolated_raw(
+    async def test_ldap_metacharacters_are_not_interpolated_raw(
         self, monkeypatch, dangerous_char: str
     ) -> None:
         """LDAP metacharacters in lookup_value must not appear raw in the filter.
@@ -315,9 +304,7 @@ class TestFilterUsesEscapedValue:
         # Craft a lookup value containing the metacharacter
         raw_lookup = f"user{dangerous_char}inject"
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", raw_lookup)
-        )
+        await adapter.enrich("primary_email", raw_lookup)
 
         assert len(search_calls) >= 1, (
             "search_s must be called for a valid correlation_field"
@@ -333,7 +320,7 @@ class TestFilterUsesEscapedValue:
             f"This is a security requirement — raw interpolation allows LDAP injection."
         )
 
-    def test_injection_attempt_does_not_bypass_correlation(
+    async def test_injection_attempt_does_not_bypass_correlation(
         self, monkeypatch
     ) -> None:
         """A classic LDAP injection payload must not produce an unbounded filter.
@@ -352,9 +339,7 @@ class TestFilterUsesEscapedValue:
         def marking_escape(value: str) -> str:
             return MARKER + value.replace("*", "").replace("(", "").replace(")", "")
 
-        fake_ldap.filter.escape_filter_chars = MagicMock(
-            side_effect=marking_escape
-        )
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=marking_escape)
 
         search_calls: list = []
 
@@ -378,9 +363,7 @@ class TestFilterUsesEscapedValue:
 
         injection_payload = "*)(uid=*))(|(uid=*"
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", injection_payload)
-        )
+        await adapter.enrich("primary_email", injection_payload)
 
         assert len(search_calls) >= 1
 
@@ -424,6 +407,7 @@ class TestBuildSearchFilterHelper:
         _inject_fake_ldap(monkeypatch)
         try:
             from app.adapters.ldap import build_search_filter
+
             return build_search_filter
         except ImportError:
             return None
@@ -444,9 +428,7 @@ class TestBuildSearchFilterHelper:
             escape_calls.append(value)
             return "ESCAPED_" + value
 
-        fake_ldap.filter.escape_filter_chars = MagicMock(
-            side_effect=recording_escape
-        )
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=recording_escape)
 
         try:
             from app.adapters.ldap import build_search_filter

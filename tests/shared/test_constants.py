@@ -7,7 +7,6 @@ Any drift causes consumers to publish to the wrong stream or consumer group.
 from __future__ import annotations
 
 
-
 class TestConstants:
     """Exact constant values from §3.3.
 

@@ -10,6 +10,7 @@ The route handlers call this service; they never perform the dual-write directly
 
 from uuid import UUID
 
+import structlog
 from naas_shared.models import LoginEventIngest, LoginEventRecord
 
 from app.ports import EventPublisher, EventRepository
@@ -18,7 +19,7 @@ from app.ports import EventPublisher, EventRepository
 class IngestionService:
     """Orchestrates the persist-then-publish dual-write for login events.
 
-    Constructor arguments are injected by the FastAPI dependency (main.py),
+    Constructor arguments are injected by the FastAPI dependency (routes.py),
     allowing fakes to be substituted in tests without any mocking framework.
     """
 
@@ -26,7 +27,7 @@ class IngestionService:
         self,
         repo: EventRepository,
         publisher: EventPublisher,
-        logger: object,
+        logger: structlog.BoundLogger,
     ) -> None:
         self._repo = repo
         self._publisher = publisher

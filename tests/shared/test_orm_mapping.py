@@ -1,32 +1,12 @@
 """naas_shared.schemas ORM mapping: Base declarative base and EventORM column contracts."""
 
 import sys
-from pathlib import Path
 
 # third-party
 import pytest
 
+from tests.helpers import REPO_ROOT
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery and sys.path injection
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find the directory containing
-    docs/architecture/ — the canonical repo root marker. Capped at 10 levels."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        "Could not locate repo root (expected a directory containing "
-        f"docs/architecture/). Started from: {Path(__file__).resolve()}"
-    )
-
-
-REPO_ROOT = _find_repo_root()
 SHARED_DIR = REPO_ROOT / "shared"
 
 if str(SHARED_DIR) not in sys.path:

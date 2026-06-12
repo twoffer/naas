@@ -28,6 +28,6 @@ def setup_logging(service_name: str, log_level: str = "INFO") -> None:
     )
 
 
-def get_logger(name: str = None) -> structlog.BoundLogger:
+def get_logger(name: str | None = None) -> structlog.BoundLogger:
     """Get a structlog logger. Bind correlation_id in middleware."""
     return structlog.get_logger(name or __name__)

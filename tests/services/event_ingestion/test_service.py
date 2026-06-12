@@ -1,6 +1,5 @@
 """Event ingestion service integration: dual-write to PostgreSQL and Redis Stream."""
 
-import asyncio
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -13,6 +12,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Shared test data helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_event(**overrides: Any):
     """Build a LoginEventIngest with sensible defaults.
@@ -40,6 +40,7 @@ def _make_event(**overrides: Any):
 # ---------------------------------------------------------------------------
 # Fakes satisfying the EventRepository / EventPublisher protocols
 # ---------------------------------------------------------------------------
+
 
 class FakeRepo:
     """In-memory fake implementing the EventRepository Protocol interface.
@@ -82,6 +83,31 @@ class FakePublisher:
         self.published_records.append(record)
         if self._should_raise:
             raise RuntimeError("Simulated Redis publish failure")
+
+
+class FailingRepo:
+    """In-memory fake implementing the EventRepository Protocol that always fails.
+
+    Appends to the shared call_log (proving the call reached persist/persist_many)
+    and then raises RuntimeError to simulate a DB failure.
+
+    WHY a separate fake rather than a flag on FakeRepo: the failure semantics
+    are fundamentally different — the spec §5.5 step 3 says a commit failure must
+    propagate so the request returns 5xx and nothing enters the pipeline.  A
+    FailingRepo makes the intent unambiguous and the call_log ordering assertions
+    straightforward.
+    """
+
+    def __init__(self, call_log: list):
+        self._call_log = call_log
+
+    async def persist(self, record) -> None:
+        self._call_log.append(("persist", record))
+        raise RuntimeError("Simulated DB failure")
+
+    async def persist_many(self, records: list) -> None:
+        self._call_log.append(("persist_many", records))
+        raise RuntimeError("Simulated DB failure")
 
 
 def _make_fake_logger() -> MagicMock:
@@ -144,7 +170,7 @@ class TestIngestOneDualWrite:
     event_id and silently fail.
     """
 
-    def test_ingest_one_returns_a_uuid(self) -> None:
+    async def test_ingest_one_returns_a_uuid(self) -> None:
         """ingest_one(event) must return a UUID.
 
         WHY: The route handler uses the returned id to build IngestAccepted(id=...).
@@ -160,13 +186,13 @@ class TestIngestOneDualWrite:
             logger=_make_fake_logger(),
         )
         event = _make_event()
-        result = asyncio.get_event_loop().run_until_complete(service.ingest_one(event))
+        result = await service.ingest_one(event)
 
         assert isinstance(result, uuid.UUID), (
             f"ingest_one must return a uuid.UUID, got {type(result).__name__!r}."
         )
 
-    def test_ingest_one_returns_uuid_matching_persisted_record(self) -> None:
+    async def test_ingest_one_returns_uuid_matching_persisted_record(self) -> None:
         """The UUID returned by ingest_one must equal the persisted record's id.
 
         WHY: Downstream consumers correlate the Redis stream message back to the
@@ -184,7 +210,7 @@ class TestIngestOneDualWrite:
             logger=_make_fake_logger(),
         )
         event = _make_event()
-        returned_id = asyncio.get_event_loop().run_until_complete(service.ingest_one(event))
+        returned_id = await service.ingest_one(event)
 
         assert len(repo.persisted_records) == 1, (
             f"Expected exactly 1 persisted record, got {len(repo.persisted_records)}."
@@ -196,7 +222,7 @@ class TestIngestOneDualWrite:
             "and downstream stages use this id to find the PG row."
         )
 
-    def test_ingest_one_calls_persist_exactly_once(self) -> None:
+    async def test_ingest_one_calls_persist_exactly_once(self) -> None:
         """ingest_one must call repo.persist exactly once.
 
         WHY: Each call to ingest_one ingests exactly one event. Multiple persist
@@ -212,14 +238,14 @@ class TestIngestOneDualWrite:
             publisher=FakePublisher(call_log),
             logger=_make_fake_logger(),
         )
-        asyncio.get_event_loop().run_until_complete(service.ingest_one(_make_event()))
+        await service.ingest_one(_make_event())
 
         persist_calls = [entry for entry in call_log if entry[0] == "persist"]
         assert len(persist_calls) == 1, (
             f"Expected exactly 1 call to repo.persist, got {len(persist_calls)}."
         )
 
-    def test_ingest_one_calls_publish_exactly_once(self) -> None:
+    async def test_ingest_one_calls_publish_exactly_once(self) -> None:
         """ingest_one must call publisher.publish exactly once (after persist).
 
         WHY: Each event must be published to the login_events stream once. Multiple
@@ -235,14 +261,14 @@ class TestIngestOneDualWrite:
             publisher=FakePublisher(call_log),
             logger=_make_fake_logger(),
         )
-        asyncio.get_event_loop().run_until_complete(service.ingest_one(_make_event()))
+        await service.ingest_one(_make_event())
 
         publish_calls = [entry for entry in call_log if entry[0] == "publish"]
         assert len(publish_calls) == 1, (
             f"Expected exactly 1 call to publisher.publish, got {len(publish_calls)}."
         )
 
-    def test_ingest_one_persist_precedes_publish(self) -> None:
+    async def test_ingest_one_persist_precedes_publish(self) -> None:
         """repo.persist must be called before publisher.publish in ingest_one.
 
         WHY: Spec §5.5 is explicit: 'Persist to PostgreSQL first and commit.
@@ -263,7 +289,7 @@ class TestIngestOneDualWrite:
             publisher=FakePublisher(call_log),
             logger=_make_fake_logger(),
         )
-        asyncio.get_event_loop().run_until_complete(service.ingest_one(_make_event()))
+        await service.ingest_one(_make_event())
 
         call_names = [entry[0] for entry in call_log]
         assert "persist" in call_names, "persist was never called"
@@ -296,7 +322,7 @@ class TestIngestOnePublishFailure:
     the event IS accepted (it's in PostgreSQL).
     """
 
-    def test_ingest_one_returns_id_even_when_publisher_raises(self) -> None:
+    async def test_ingest_one_returns_id_even_when_publisher_raises(self) -> None:
         """ingest_one must return the record's id even when publish raises.
 
         WHY: If ingest_one re-raises the publisher's exception, the route handler
@@ -314,9 +340,7 @@ class TestIngestOnePublishFailure:
             logger=_make_fake_logger(),
         )
         # Must NOT raise
-        returned_id = asyncio.get_event_loop().run_until_complete(
-            service.ingest_one(_make_event())
-        )
+        returned_id = await service.ingest_one(_make_event())
 
         assert isinstance(returned_id, uuid.UUID), (
             f"ingest_one must return a UUID even when publish raises, "
@@ -327,7 +351,7 @@ class TestIngestOnePublishFailure:
             "Returned UUID must equal the persisted record's id even after publish failure."
         )
 
-    def test_ingest_one_does_not_propagate_publisher_exception(self) -> None:
+    async def test_ingest_one_does_not_propagate_publisher_exception(self) -> None:
         """ingest_one must swallow the publisher's exception (no reraise).
 
         WHY: If the exception propagates, FastAPI converts it to a 500 response.
@@ -345,9 +369,7 @@ class TestIngestOnePublishFailure:
 
         # This must complete without raising
         try:
-            asyncio.get_event_loop().run_until_complete(
-                service.ingest_one(_make_event())
-            )
+            await service.ingest_one(_make_event())
         except Exception as exc:
             pytest.fail(
                 f"ingest_one must not propagate publisher exceptions. "
@@ -355,7 +377,7 @@ class TestIngestOnePublishFailure:
                 "Spec §5.5: catch the error, log it, still return the id."
             )
 
-    def test_ingest_one_calls_logger_error_when_publisher_raises(self) -> None:
+    async def test_ingest_one_calls_logger_error_when_publisher_raises(self) -> None:
         """When publish fails, logger.error must be called exactly once.
 
         WHY: Spec §5.4 states: 'self._log.error("login_events publish failed",
@@ -373,14 +395,14 @@ class TestIngestOnePublishFailure:
             publisher=FakePublisher(call_log, should_raise=True),
             logger=logger,
         )
-        asyncio.get_event_loop().run_until_complete(service.ingest_one(_make_event()))
+        await service.ingest_one(_make_event())
 
         assert logger.error.call_count == 1, (
             f"logger.error must be called exactly once when publish fails. "
             f"Got {logger.error.call_count} calls."
         )
 
-    def test_ingest_one_logger_error_called_with_event_id_kwarg(self) -> None:
+    async def test_ingest_one_logger_error_called_with_event_id_kwarg(self) -> None:
         """logger.error must be called with event_id=str(record.id) as a keyword arg.
 
         WHY: Spec §5.4 explicitly shows 'event_id=str(record.id)'. Structured
@@ -398,7 +420,7 @@ class TestIngestOnePublishFailure:
             publisher=FakePublisher(call_log, should_raise=True),
             logger=logger,
         )
-        asyncio.get_event_loop().run_until_complete(service.ingest_one(_make_event()))
+        await service.ingest_one(_make_event())
 
         persisted_record = repo.persisted_records[0]
         expected_event_id_str = str(persisted_record.id)
@@ -431,7 +453,7 @@ class TestIngestManyHappyPath:
     committed and others not, breaking the all-or-nothing guarantee for the batch.
     """
 
-    def test_ingest_many_returns_list_of_uuids(self) -> None:
+    async def test_ingest_many_returns_list_of_uuids(self) -> None:
         """ingest_many([e1,e2,e3]) must return a list of UUIDs.
 
         WHY: The route handler uses the returned list to build
@@ -448,7 +470,7 @@ class TestIngestManyHappyPath:
             logger=_make_fake_logger(),
         )
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
-        result = asyncio.get_event_loop().run_until_complete(service.ingest_many(events))
+        result = await service.ingest_many(events)
 
         assert isinstance(result, list), (
             f"ingest_many must return a list, got {type(result).__name__!r}."
@@ -461,7 +483,7 @@ class TestIngestManyHappyPath:
                 f"Result item {i} must be a uuid.UUID, got {type(item).__name__!r}."
             )
 
-    def test_ingest_many_calls_persist_many_exactly_once(self) -> None:
+    async def test_ingest_many_calls_persist_many_exactly_once(self) -> None:
         """ingest_many([e1,e2,e3]) must call repo.persist_many exactly once.
 
         WHY: The spec §5.3 and §5.5 require a single transaction for the whole batch:
@@ -479,7 +501,7 @@ class TestIngestManyHappyPath:
             logger=_make_fake_logger(),
         )
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
-        asyncio.get_event_loop().run_until_complete(service.ingest_many(events))
+        await service.ingest_many(events)
 
         persist_many_calls = [entry for entry in call_log if entry[0] == "persist_many"]
         assert len(persist_many_calls) == 1, (
@@ -487,7 +509,9 @@ class TestIngestManyHappyPath:
             "All events in the batch must be persisted in a single call for atomicity."
         )
 
-    def test_ingest_many_passes_all_records_in_single_persist_many_call(self) -> None:
+    async def test_ingest_many_passes_all_records_in_single_persist_many_call(
+        self,
+    ) -> None:
         """persist_many must be called with all 3 records in a single list argument.
 
         WHY: If the adapter receives fewer records than expected (e.g., only 2 of 3),
@@ -505,7 +529,7 @@ class TestIngestManyHappyPath:
             logger=_make_fake_logger(),
         )
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
-        asyncio.get_event_loop().run_until_complete(service.ingest_many(events))
+        await service.ingest_many(events)
 
         persist_many_calls = [entry for entry in call_log if entry[0] == "persist_many"]
         records_arg = persist_many_calls[0][1]
@@ -513,7 +537,7 @@ class TestIngestManyHappyPath:
             f"persist_many must receive a 3-element list, got {len(records_arg)} records."
         )
 
-    def test_ingest_many_returns_ids_in_input_order(self) -> None:
+    async def test_ingest_many_returns_ids_in_input_order(self) -> None:
         """IDs returned by ingest_many must match the persisted records in input order.
 
         WHY: The route handler builds BulkIngestAccepted(event_ids=ids). Callers
@@ -531,9 +555,7 @@ class TestIngestManyHappyPath:
             logger=_make_fake_logger(),
         )
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
-        returned_ids = asyncio.get_event_loop().run_until_complete(
-            service.ingest_many(events)
-        )
+        returned_ids = await service.ingest_many(events)
 
         # Persisted records are added to repo.persisted_records in call order
         persisted_ids = [r.id for r in repo.persisted_records]
@@ -542,7 +564,7 @@ class TestIngestManyHappyPath:
             f"Returned: {returned_ids}, Persisted: {persisted_ids}."
         )
 
-    def test_ingest_many_calls_publish_for_each_record(self) -> None:
+    async def test_ingest_many_calls_publish_for_each_record(self) -> None:
         """ingest_many must call publisher.publish once per record (3 events → 3 publishes).
 
         WHY: Each event must be published to the login_events stream independently
@@ -559,7 +581,7 @@ class TestIngestManyHappyPath:
             logger=_make_fake_logger(),
         )
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
-        asyncio.get_event_loop().run_until_complete(service.ingest_many(events))
+        await service.ingest_many(events)
 
         publish_calls = [entry for entry in call_log if entry[0] == "publish"]
         assert len(publish_calls) == 3, (
@@ -585,7 +607,7 @@ class TestIngestManyPublishFailure:
     'per-event' so the loop must not abort on a publish failure.
     """
 
-    def test_ingest_many_attempts_publish_for_all_records_even_when_publisher_raises(
+    async def test_ingest_many_attempts_publish_for_all_records_even_when_publisher_raises(
         self,
     ) -> None:
         """All 3 publish attempts must be made even when each one raises.
@@ -604,7 +626,7 @@ class TestIngestManyPublishFailure:
             logger=_make_fake_logger(),
         )
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
-        asyncio.get_event_loop().run_until_complete(service.ingest_many(events))
+        await service.ingest_many(events)
 
         publish_calls = [entry for entry in call_log if entry[0] == "publish"]
         assert len(publish_calls) == 3, (
@@ -613,7 +635,7 @@ class TestIngestManyPublishFailure:
             "Spec §5.5: publishing is per-event best-effort; don't short-circuit on failure."
         )
 
-    def test_ingest_many_does_not_propagate_publisher_exception(self) -> None:
+    async def test_ingest_many_does_not_propagate_publisher_exception(self) -> None:
         """ingest_many must not propagate the publisher's exception.
 
         WHY: All records were committed in a single PG transaction. A 500 response
@@ -631,9 +653,7 @@ class TestIngestManyPublishFailure:
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
 
         try:
-            result = asyncio.get_event_loop().run_until_complete(
-                service.ingest_many(events)
-            )
+            result = await service.ingest_many(events)
         except Exception as exc:
             pytest.fail(
                 f"ingest_many must not propagate publisher exceptions. "
@@ -644,7 +664,7 @@ class TestIngestManyPublishFailure:
             "ingest_many must return 3 UUIDs even when all publishes fail."
         )
 
-    def test_ingest_many_logs_error_for_each_failed_publish(self) -> None:
+    async def test_ingest_many_logs_error_for_each_failed_publish(self) -> None:
         """logger.error must be called once per failed publish in ingest_many.
 
         WHY: Each failed publish represents a potentially missing stream message.
@@ -662,9 +682,184 @@ class TestIngestManyPublishFailure:
             logger=logger,
         )
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
-        asyncio.get_event_loop().run_until_complete(service.ingest_many(events))
+        await service.ingest_many(events)
 
         assert logger.error.call_count == 3, (
             f"logger.error must be called once per failed publish (3 events). "
             f"Got {logger.error.call_count} error calls."
+        )
+
+
+# ===========================================================================
+# CLASS 6 — Persist failure: fail-closed on DB error (Spec §5.5 step 3)
+# ===========================================================================
+
+
+class TestPersistFailurePropagation:
+    """When the repository raises on persist/persist_many, the error must propagate.
+
+    Spec §5.5 step 3: 'If the commit fails (DB unavailable, constraint violation,
+    etc.): the event is not accepted. Let the exception propagate so the request
+    returns a 5xx and nothing enters the pipeline.'
+
+    WHY a dedicated class: this is a fail-closed security property. A future
+    refactor that wraps persist() in a broad try/except (mimicking _safe_publish)
+    would inadvertently silence DB failures and return 202 for events that were
+    never written — potentially dropping events silently. These tests must fail
+    if that refactor lands, acting as a regression guard on the dual-write
+    ordering contract.
+    """
+
+    async def test_ingest_one_propagates_repo_exception(self) -> None:
+        """ingest_one with a failing repo must propagate the RuntimeError.
+
+        WHY (spec §5.5 step 3): if the DB commit fails, the event is NOT accepted.
+        The route handler must receive the exception so FastAPI converts it to a
+        5xx, signalling the caller to retry. Swallowing the exception here would
+        make callers believe the event was accepted when it was never persisted.
+        """
+        from app.service import IngestionService
+
+        call_log: list = []
+        publisher = FakePublisher(call_log)
+        service = IngestionService(
+            repo=FailingRepo(call_log),
+            publisher=publisher,
+            logger=_make_fake_logger(),
+        )
+
+        with pytest.raises(RuntimeError):
+            await service.ingest_one(_make_event())
+
+    async def test_ingest_one_failing_repo_never_calls_publisher(self) -> None:
+        """When persist raises, publisher.publish must NEVER be called.
+
+        WHY (spec §5.5 step 3): publishing strictly follows a successful commit.
+        If publish were attempted despite a failed commit, a stream message would
+        exist for an event with no corresponding PostgreSQL row — downstream
+        consumers (normalization, risk evaluator) would silently discard or error
+        on a dangling id, corrupting the pipeline without any observable signal at
+        the ingestion boundary.
+
+        Guard intent: a future refactor that moves publish before persist (or into
+        a concurrent branch) must fail this test.
+        """
+        from app.service import IngestionService
+
+        call_log: list = []
+        publisher = FakePublisher(call_log)
+        service = IngestionService(
+            repo=FailingRepo(call_log),
+            publisher=publisher,
+            logger=_make_fake_logger(),
+        )
+
+        try:
+            await service.ingest_one(_make_event())
+        except RuntimeError:
+            pass  # Expected — we are testing the side-effects, not the exception
+
+        assert publisher.published_records == [], (
+            f"publisher.publish must NEVER be called when persist raises. "
+            f"Got {len(publisher.published_records)} published records. "
+            "Spec §5.5 step 3: publishing follows a successful commit only."
+        )
+
+        publish_entries = [entry for entry in call_log if entry[0] == "publish"]
+        assert publish_entries == [], (
+            f"call_log must contain no ('publish', ...) entries when persist fails. "
+            f"Got: {publish_entries}. "
+            "Spec §5.5 step 3: nothing enters the pipeline on commit failure."
+        )
+
+    async def test_ingest_one_failing_repo_records_persist_call_in_log(self) -> None:
+        """The persist call must appear in call_log even though it raises.
+
+        WHY: FailingRepo records the call before raising, confirming that
+        ingest_one did attempt the persist (as required) and the exception
+        originated there — not from some earlier validation gate. A call_log
+        without a persist entry would mean the exception was raised before
+        reaching the repo, which is a different (unexpected) failure mode.
+        """
+        from app.service import IngestionService
+
+        call_log: list = []
+        service = IngestionService(
+            repo=FailingRepo(call_log),
+            publisher=FakePublisher(call_log),
+            logger=_make_fake_logger(),
+        )
+
+        try:
+            await service.ingest_one(_make_event())
+        except RuntimeError:
+            pass
+
+        persist_entries = [entry for entry in call_log if entry[0] == "persist"]
+        assert len(persist_entries) == 1, (
+            f"call_log must contain exactly 1 ('persist', ...) entry. "
+            f"Got: {persist_entries}."
+        )
+
+    async def test_ingest_many_propagates_repo_exception(self) -> None:
+        """ingest_many with a failing repo must propagate the RuntimeError.
+
+        WHY (spec §5.5 step 3 + bulk semantics): for /events/bulk, the entire
+        batch transaction is all-or-nothing. If persist_many raises, no events are
+        accepted and the 5xx response tells the caller to retry the entire batch.
+        Swallowing the exception would return 202 for a batch that was never written.
+        """
+        from app.service import IngestionService
+
+        call_log: list = []
+        publisher = FakePublisher(call_log)
+        service = IngestionService(
+            repo=FailingRepo(call_log),
+            publisher=publisher,
+            logger=_make_fake_logger(),
+        )
+        events = [_make_event(user_id=f"user{i}") for i in range(3)]
+
+        with pytest.raises(RuntimeError):
+            await service.ingest_many(events)
+
+    async def test_ingest_many_failing_repo_zero_publishes(self) -> None:
+        """When persist_many raises, publisher.publish must be called zero times.
+
+        WHY (spec §5.5 step 3 + bulk semantics): a commit failure for the batch
+        means all 3 events are un-persisted. Publishing any of them would leave
+        dangling stream messages with no corresponding PostgreSQL rows for all 3
+        events. Zero publishes is the only safe outcome.
+
+        Guard intent: a future refactor that inverts the persist-before-publish
+        order in ingest_many (or wraps persist_many in try/except that falls
+        through to the publish loop) must fail this test.
+        """
+        from app.service import IngestionService
+
+        call_log: list = []
+        publisher = FakePublisher(call_log)
+        service = IngestionService(
+            repo=FailingRepo(call_log),
+            publisher=publisher,
+            logger=_make_fake_logger(),
+        )
+        events = [_make_event(user_id=f"user{i}") for i in range(3)]
+
+        try:
+            await service.ingest_many(events)
+        except RuntimeError:
+            pass
+
+        assert publisher.published_records == [], (
+            f"publisher.publish must never be called when persist_many raises. "
+            f"Got {len(publisher.published_records)} published records. "
+            "Spec §5.5 step 3: zero publishes on commit failure (batch of 3)."
+        )
+
+        publish_entries = [entry for entry in call_log if entry[0] == "publish"]
+        assert publish_entries == [], (
+            f"call_log must contain no ('publish', ...) entries when persist_many fails. "
+            f"Got {len(publish_entries)} publish entries. "
+            "Spec §5.5 step 3: nothing enters the pipeline on commit failure."
         )

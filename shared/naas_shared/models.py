@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Dict, Literal, Optional, Union
 from uuid import UUID, uuid4
 
-from pydantic import BaseModel, Field, field_validator  # noqa: F401
+from pydantic import BaseModel, Field, field_validator
 
 
 def _to_utc(v: datetime) -> datetime:

@@ -19,6 +19,10 @@ COPY services/identity-normalization/requirements.txt /app/svc/requirements.txt
 RUN pip install --no-cache-dir -r /app/svc/requirements.txt
 COPY services/identity-normalization/app/ /app/svc/app/
 
+# The service needs no root privileges at runtime; switch to a dedicated user.
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app/svc
+USER appuser
+
 WORKDIR /app/svc
 EXPOSE 8002
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8002"]

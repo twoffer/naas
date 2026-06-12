@@ -16,9 +16,10 @@ import naas_shared.database as _db_mod
 import naas_shared.redis_client as _redis_mod
 from fastapi import APIRouter, FastAPI
 from naas_shared.constants import GROUP_NORMALIZATION, STREAM_LOGIN_EVENTS
-from naas_shared.database import get_session_factory
+from naas_shared.database import dispose_engine, get_session_factory
 from naas_shared.logging import get_logger, setup_logging
 from naas_shared.models import HealthResponse
+from naas_shared.redis_client import close_redis
 from sqlalchemy import text
 
 # Import load_config at module level so tests can patch app.main.load_config
@@ -157,12 +158,17 @@ async def lifespan(application: FastAPI):
     try:
         yield
     finally:
-        # Cancel the background consumer task and await clean termination
+        # Cancel the background consumer task and wait for it to unwind
+        # (cancellation interrupts a mid-flight handler via CancelledError).
         consumer_task.cancel()
         try:
             await consumer_task
         except asyncio.CancelledError:
             pass
+        # Teardown must follow the awaited cancellation above so the consumer
+        # has fully released the shared clients before they are closed.
+        await close_redis()
+        await dispose_engine()
         _logger.info("identity_normalization_shutdown_complete")
 
 

@@ -1,7 +1,6 @@
 """Pydantic request/response schema contracts for event-ingestion."""
 
 import uuid
-from pathlib import Path
 
 # third-party
 import pytest
@@ -12,17 +11,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up until docs/architecture/ is found — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 SERVICE_DIR = REPO_ROOT / "services" / "event-ingestion"
 
 
@@ -309,7 +299,11 @@ class TestSchemasModuleDoesNotExposeORMSymbols:
             # If there's a 'Base' attribute, it must NOT be a DeclarativeBase subclass
             try:
                 from sqlalchemy.orm import DeclarativeBase
-                assert not (isinstance(base_attr, type) and issubclass(base_attr, DeclarativeBase)), (
+
+                assert not (
+                    isinstance(base_attr, type)
+                    and issubclass(base_attr, DeclarativeBase)
+                ), (
                     "app.schemas must not expose a SQLAlchemy DeclarativeBase as 'Base'. "
                     "ORM base classes belong in shared/naas_shared/schemas.py."
                 )
@@ -325,9 +319,7 @@ class TestSchemasModuleDoesNotExposeORMSymbols:
         catches it immediately rather than waiting for a circular import failure.
         """
         schemas_path = SERVICE_DIR / "app" / "schemas.py"
-        assert schemas_path.exists(), (
-            f"app/schemas.py not found at {schemas_path}."
-        )
+        assert schemas_path.exists(), f"app/schemas.py not found at {schemas_path}."
         source = schemas_path.read_text()
         assert "EventORM" not in source, (
             "app/schemas.py source must not reference 'EventORM'. "

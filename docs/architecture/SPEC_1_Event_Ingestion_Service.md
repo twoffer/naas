@@ -319,12 +319,12 @@ class BulkIngestAccepted(BaseModel):
 
 ### 5.8 Docker — Option A (self-contained image, repo-root build context)
 
-The shared library is **copied into the image at build time** and installed; the image is self-contained (no runtime source mounts). The build context is the repository root so the Dockerfile can see both `shared/` and the service. This is the **first service image in the project — it establishes the pattern all later services follow.**
+The shared library is **copied into the image at build time** and installed; the image is self-contained (no runtime source mounts). The build context is the repository root so the Dockerfile can see both `shared/` and the service. This is the **first service image in the project — it establishes the pattern all later services follow**, including the non-root user (`useradd` + `USER appuser`) which every subsequent service Dockerfile copies.
 
 `services/event-ingestion/Dockerfile`:
 
 ```dockerfile
-# [EXEMPLARY — but the repo-root context, COPY order, and port are load-bearing]
+# [EXEMPLARY — but the repo-root context, COPY order, port, and non-root user are load-bearing]
 FROM python:3.12-slim
 WORKDIR /app
 
@@ -336,6 +336,11 @@ RUN pip install --no-cache-dir -e /app/shared/
 COPY services/event-ingestion/requirements.txt /app/svc/requirements.txt
 RUN pip install --no-cache-dir -r /app/svc/requirements.txt
 COPY services/event-ingestion/app/ /app/svc/app/
+
+# The service needs no root privileges at runtime; switch to a dedicated user.
+# This non-root pattern is copied by all subsequent service Dockerfiles.
+RUN useradd --create-home --uid 10001 appuser && chown -R appuser:appuser /app/svc
+USER appuser
 
 WORKDIR /app/svc
 EXPOSE 8001

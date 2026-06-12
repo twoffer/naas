@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
@@ -14,16 +12,8 @@ from uuid import UUID
 # sys.path injection
 # ---------------------------------------------------------------------------
 
-def _repo_root() -> Path:
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError("Cannot find repo root")
+from tests.helpers import REPO_ROOT as _REPO
 
-
-_REPO = _repo_root()
 _SVC = str(_REPO / "services" / "identity-normalization")
 _SHARED = str(_REPO / "shared")
 for _p in [_SVC, _SHARED]:
@@ -75,18 +65,15 @@ def _make_mock_factory(session):
     return factory
 
 
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
 # ===========================================================================
 # B. PostgresNormalizationRepository.write() — UPDATE contract
 # ===========================================================================
 
+
 class TestRepositoryWriteUPDATEContract:
     """write() issues an UPDATE, commits, and does not INSERT/SELECT/add()."""
 
-    def test_write_calls_execute_and_commit(self):
+    async def test_write_calls_execute_and_commit(self):
         """write() must call session.execute() and session.commit() in that order."""
         from app.repository import PostgresNormalizationRepository
 
@@ -95,12 +82,16 @@ class TestRepositoryWriteUPDATEContract:
         repo = PostgresNormalizationRepository(session_factory=factory)
         normalized = _make_normalized()
 
-        _run(repo.write(_UUID, normalized))
+        await repo.write(_UUID, normalized)
 
-        assert session.execute.called, "session.execute() must be called to issue the UPDATE"
-        assert session.commit.called, "session.commit() must be called to persist the UPDATE"
+        assert session.execute.called, (
+            "session.execute() must be called to issue the UPDATE"
+        )
+        assert session.commit.called, (
+            "session.commit() must be called to persist the UPDATE"
+        )
 
-    def test_write_commits_after_execute(self):
+    async def test_write_commits_after_execute(self):
         """commit() must be called AFTER execute() — ordering is critical (point of no return)."""
         from app.repository import PostgresNormalizationRepository
 
@@ -119,13 +110,13 @@ class TestRepositoryWriteUPDATEContract:
         factory = _make_mock_factory(session)
         repo = PostgresNormalizationRepository(session_factory=factory)
 
-        _run(repo.write(_UUID, _make_normalized()))
+        await repo.write(_UUID, _make_normalized())
 
         assert call_order == ["execute", "commit"], (
             f"execute must precede commit, got order: {call_order}"
         )
 
-    def test_write_does_not_call_session_add(self):
+    async def test_write_does_not_call_session_add(self):
         """write() must NOT call session.add() — no INSERT, only UPDATE by id."""
         from app.repository import PostgresNormalizationRepository
 
@@ -133,11 +124,14 @@ class TestRepositoryWriteUPDATEContract:
         factory = _make_mock_factory(session)
         repo = PostgresNormalizationRepository(session_factory=factory)
 
-        _run(repo.write(_UUID, _make_normalized()))
+        await repo.write(_UUID, _make_normalized())
 
-        session.add.assert_not_called(), "session.add() must not be called — UPDATE only, no INSERT"
+        (
+            session.add.assert_not_called(),
+            "session.add() must not be called — UPDATE only, no INSERT",
+        )
 
-    def test_write_passes_serialized_normalized_to_execute(self):
+    async def test_write_passes_serialized_normalized_to_execute(self):
         """The UPDATE statement carries normalized_attributes = normalized.model_dump(mode='json')."""
         from app.repository import PostgresNormalizationRepository
 
@@ -146,7 +140,7 @@ class TestRepositoryWriteUPDATEContract:
         repo = PostgresNormalizationRepository(session_factory=factory)
         normalized = _make_normalized()
 
-        _run(repo.write(_UUID, normalized))
+        await repo.write(_UUID, normalized)
 
         # The statement passed to execute should reference the serialized normalized_attributes dict.
         # We verify by inspecting what was passed to execute.
@@ -159,7 +153,7 @@ class TestRepositoryWriteUPDATEContract:
         # The idempotency test below provides a stronger contract.
         assert stmt is not None, "execute() must receive a non-None statement"
 
-    def test_write_uses_factory_not_get_db_session(self):
+    async def test_write_uses_factory_not_get_db_session(self):
         """write() uses the injected session_factory, NOT the request-scoped get_db_session.
 
         The factory is called to produce a new session per write. Calling the factory
@@ -171,14 +165,14 @@ class TestRepositoryWriteUPDATEContract:
         factory = _make_mock_factory(session)
         repo = PostgresNormalizationRepository(session_factory=factory)
 
-        _run(repo.write(_UUID, _make_normalized()))
+        await repo.write(_UUID, _make_normalized())
 
         assert factory.called, (
             "session_factory must be called to produce the session — "
             "write() must NOT use get_db_session (request-scoped)"
         )
 
-    def test_write_is_idempotent(self):
+    async def test_write_is_idempotent(self):
         """A second write for the same event_id succeeds (idempotent UPDATE)."""
         from app.repository import PostgresNormalizationRepository
 
@@ -187,8 +181,8 @@ class TestRepositoryWriteUPDATEContract:
         repo = PostgresNormalizationRepository(session_factory=factory)
         normalized = _make_normalized()
 
-        _run(repo.write(_UUID, normalized))
-        _run(repo.write(_UUID, normalized))  # second write must not raise
+        await repo.write(_UUID, normalized)
+        await repo.write(_UUID, normalized)  # second write must not raise
 
         # execute + commit called twice (once per write)
         assert session.execute.call_count == 2, (
@@ -196,7 +190,7 @@ class TestRepositoryWriteUPDATEContract:
         )
         assert session.commit.call_count == 2
 
-    def test_write_does_not_select_before_update(self):
+    async def test_write_does_not_select_before_update(self):
         """write() issues a bare UPDATE — no SELECT-before-update (no query first)."""
         from app.repository import PostgresNormalizationRepository
 
@@ -204,7 +198,7 @@ class TestRepositoryWriteUPDATEContract:
         factory = _make_mock_factory(session)
         repo = PostgresNormalizationRepository(session_factory=factory)
 
-        _run(repo.write(_UUID, _make_normalized()))
+        await repo.write(_UUID, _make_normalized())
 
         # execute() called exactly once: only the UPDATE, no prior SELECT
         assert session.execute.call_count == 1, (
@@ -212,7 +206,7 @@ class TestRepositoryWriteUPDATEContract:
             f"got {session.execute.call_count} calls — SELECT-before-update is forbidden"
         )
 
-    def test_write_opens_one_session_per_write(self):
+    async def test_write_opens_one_session_per_write(self):
         """session_factory is called once per write() invocation."""
         from app.repository import PostgresNormalizationRepository
 
@@ -220,7 +214,7 @@ class TestRepositoryWriteUPDATEContract:
         factory = _make_mock_factory(session)
         repo = PostgresNormalizationRepository(session_factory=factory)
 
-        _run(repo.write(_UUID, _make_normalized()))
+        await repo.write(_UUID, _make_normalized())
 
         assert factory.call_count == 1, (
             "session_factory must be called once per write(); "
@@ -231,7 +225,7 @@ class TestRepositoryWriteUPDATEContract:
 class TestRepositoryDoesNotCreateDDL:
     """write() must not call Base.metadata.create_all or any DDL."""
 
-    def test_write_does_not_call_create_all(self):
+    async def test_write_does_not_call_create_all(self):
         """DDL is forbidden — the table already exists from the postgres init script."""
         from app.repository import PostgresNormalizationRepository
 
@@ -241,10 +235,14 @@ class TestRepositoryDoesNotCreateDDL:
 
         # Patch create_all at the Base level; if called, the test fails
         from naas_shared.schemas import Base
+
         with patch.object(Base.metadata, "create_all") as mock_create:
-            _run(repo.write(_UUID, _make_normalized()))
-            mock_create.assert_not_called(), (
-                "Base.metadata.create_all must NOT be called — DDL is owned by init.sql"
+            await repo.write(_UUID, _make_normalized())
+            (
+                mock_create.assert_not_called(),
+                (
+                    "Base.metadata.create_all must NOT be called — DDL is owned by init.sql"
+                ),
             )
 
     def test_normalized_attributes_serialized_as_json_dict(self):

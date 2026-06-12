@@ -105,34 +105,25 @@ class TestPostgresEventRepositoryToORM:
     """
 
     def _get_to_orm_callable(self):
-        """Resolve _to_orm from the adapter class or module.
+        """Resolve _to_orm from the module level.
 
-        Returns the callable, or None if not accessible directly (in which case
-        the caller falls back to the persist()-based approach).
+        _to_orm is a module-level function in app.adapters; returns it directly.
+        Returns None if not accessible (caller falls back to persist()-based approach).
         """
         import app.adapters as adapters_mod
-        from app.adapters import PostgresEventRepository
 
-        # Try class-level static method first
-        if hasattr(PostgresEventRepository, "_to_orm"):
-            fn = getattr(PostgresEventRepository, "_to_orm")
-            # If it's a classmethod descriptor, call it on the class
-            return fn
-
-        # Try module-level function
         if hasattr(adapters_mod, "_to_orm"):
             return adapters_mod._to_orm
 
         return None
 
-    def test_to_orm_returns_event_orm_instance(self) -> None:
+    async def test_to_orm_returns_event_orm_instance(self) -> None:
         """_to_orm(record) must return an EventORM instance.
 
         WHY: session.add() expects a mapped ORM instance. If _to_orm returns a
         dict or a plain object, SQLAlchemy raises a TypeError at the add() call,
         crashing the persist path for every event.
         """
-        import asyncio
         from naas_shared.schemas import EventORM
 
         to_orm = self._get_to_orm_callable()
@@ -149,7 +140,7 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
 
             assert session.add.called, "session.add must be called in persist()"
             added_obj = session.add.call_args[0][0]
@@ -158,7 +149,7 @@ class TestPostgresEventRepositoryToORM:
                 f"got {type(added_obj).__name__!r}."
             )
 
-    def test_to_orm_maps_id_from_record(self) -> None:
+    async def test_to_orm_maps_id_from_record(self) -> None:
         """_to_orm must copy the record's id to the ORM object.
 
         WHY: The event id is the correlation key for the entire pipeline
@@ -166,8 +157,6 @@ class TestPostgresEventRepositoryToORM:
         id, the PG row diverges from the stream message id, breaking every
         downstream consumer that reads the events table by id.
         """
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record()
 
@@ -181,16 +170,14 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.id == record.id, (
                 f"ORM id must equal record.id. Got {added_obj.id!r}."
             )
 
-    def test_to_orm_maps_user_id_from_record(self) -> None:
+    async def test_to_orm_maps_user_id_from_record(self) -> None:
         """_to_orm must copy user_id from the record to the ORM object."""
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record(user_id="bob")
 
@@ -203,14 +190,12 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.user_id == "bob"
 
-    def test_to_orm_maps_protocol_from_record(self) -> None:
+    async def test_to_orm_maps_protocol_from_record(self) -> None:
         """_to_orm must copy protocol from the record to the ORM object."""
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record(protocol="saml")
 
@@ -223,14 +208,12 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.protocol == "saml"
 
-    def test_to_orm_maps_client_ip_from_record(self) -> None:
+    async def test_to_orm_maps_client_ip_from_record(self) -> None:
         """_to_orm must copy client_ip from the record to the ORM object."""
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record(client_ip="8.8.8.8")
 
@@ -243,14 +226,12 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.client_ip == "8.8.8.8"
 
-    def test_to_orm_maps_timestamp_from_record(self) -> None:
+    async def test_to_orm_maps_timestamp_from_record(self) -> None:
         """_to_orm must copy timestamp from the record to the ORM object."""
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record()
 
@@ -265,14 +246,12 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.timestamp == _TEST_TIMESTAMP
 
-    def test_to_orm_maps_source_from_record(self) -> None:
+    async def test_to_orm_maps_source_from_record(self) -> None:
         """_to_orm must copy source from the record to the ORM object."""
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record(source="simulator")
 
@@ -285,14 +264,12 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.source == "simulator"
 
-    def test_to_orm_maps_is_synthetic_from_record(self) -> None:
+    async def test_to_orm_maps_is_synthetic_from_record(self) -> None:
         """_to_orm must copy is_synthetic from the record to the ORM object."""
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record(is_synthetic=True)
 
@@ -305,19 +282,17 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.is_synthetic is True
 
-    def test_to_orm_maps_is_historical_from_record(self) -> None:
+    async def test_to_orm_maps_is_historical_from_record(self) -> None:
         """_to_orm must copy is_historical from the record to the ORM object.
 
         WHY: is_historical is a critical safety flag — historical events must never
         trigger alerts. If it is not mapped correctly, the alert service may fire
         on historical replay data. This is a security invariant in the NAAS pipeline.
         """
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record(is_historical=True)
 
@@ -331,19 +306,17 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.is_historical is True
 
-    def test_to_orm_maps_raw_attributes_from_record(self) -> None:
+    async def test_to_orm_maps_raw_attributes_from_record(self) -> None:
         """_to_orm must copy raw_attributes from the record to the ORM object.
 
         WHY: raw_attributes is the opaque protocol-specific payload that downstream
         services (identity normalization) read from the PostgreSQL row. If it is
         not stored, the normalization service has no data to work from.
         """
-        import asyncio
-
         payload = {"email": "test@corp.com", "groups": ["admin"]}
         to_orm = self._get_to_orm_callable()
         record = _make_record(raw_attributes=payload)
@@ -359,11 +332,11 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.raw_attributes == payload
 
-    def test_to_orm_leaves_normalized_attributes_unset(self) -> None:
+    async def test_to_orm_leaves_normalized_attributes_unset(self) -> None:
         """_to_orm must NOT set normalized_attributes on the ORM object.
 
         WHY: Spec §3.1 explicitly states 'normalized_attributes: NULL at ingestion.
@@ -372,8 +345,6 @@ class TestPostgresEventRepositoryToORM:
         normalization or silently overwrite it. The column must be None/unset
         at ingestion time.
         """
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record()
 
@@ -389,19 +360,17 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.normalized_attributes is None
 
-    def test_to_orm_leaves_enriched_signals_unset(self) -> None:
+    async def test_to_orm_leaves_enriched_signals_unset(self) -> None:
         """_to_orm must NOT set enriched_signals on the ORM object.
 
         WHY: Spec §3.1 states 'enriched_signals: NULL at ingestion. Populated by
         Signal Enrichment.' Signal enrichment is a later pipeline stage; ingestion
         must not populate this column.
         """
-        import asyncio
-
         to_orm = self._get_to_orm_callable()
         record = _make_record()
 
@@ -417,7 +386,7 @@ class TestPostgresEventRepositoryToORM:
 
             session = _make_fake_async_session()
             repo = PostgresEventRepository(session=session)
-            asyncio.get_event_loop().run_until_complete(repo.persist(record))
+            await repo.persist(record)
             added_obj = session.add.call_args[0][0]
             assert added_obj.enriched_signals is None
 
@@ -468,37 +437,35 @@ class TestPostgresEventRepositoryPersist:
     would lose the event.
     """
 
-    def test_persist_calls_session_add_once(self) -> None:
+    async def test_persist_calls_session_add_once(self) -> None:
         """persist(record) must call session.add() exactly once.
 
         WHY: add() stages the ORM object for INSERT. Zero calls = event not saved.
         Multiple calls = duplicate rows (UQ violation on the PK or silent data bloat).
         """
-        import asyncio
         from app.adapters import PostgresEventRepository
 
         session = _make_fake_async_session()
         repo = PostgresEventRepository(session=session)
-        asyncio.get_event_loop().run_until_complete(repo.persist(_make_record()))
+        await repo.persist(_make_record())
 
         assert session.add.call_count == 1, (
             f"session.add must be called exactly once in persist(). "
             f"Got {session.add.call_count} calls."
         )
 
-    def test_persist_calls_session_commit_once(self) -> None:
+    async def test_persist_calls_session_commit_once(self) -> None:
         """persist(record) must call session.commit() exactly once.
 
         WHY: The explicit commit in persist() is the durability point (spec §5.5).
         Zero commits = the INSERT is not durable (lost on crash). Multiple commits =
         extra round-trips and potential transaction-state confusion.
         """
-        import asyncio
         from app.adapters import PostgresEventRepository
 
         session = _make_fake_async_session()
         repo = PostgresEventRepository(session=session)
-        asyncio.get_event_loop().run_until_complete(repo.persist(_make_record()))
+        await repo.persist(_make_record())
 
         assert session.commit.call_count == 1, (
             f"session.commit must be called exactly once in persist(). "
@@ -521,27 +488,26 @@ class TestPostgresEventRepositoryPersistMany:
     batch in one transaction (all-or-nothing per spec §5.5).
     """
 
-    def test_persist_many_calls_session_add_all_once(self) -> None:
+    async def test_persist_many_calls_session_add_all_once(self) -> None:
         """persist_many([r1,r2,r3]) must call session.add_all() exactly once.
 
         WHY: add_all() sends all ORM objects in a single batch, enabling efficient
         multi-row INSERT. Multiple add_all() calls or individual add() calls would
         split the batch into separate statements, defeating the atomicity guarantee.
         """
-        import asyncio
         from app.adapters import PostgresEventRepository
 
         session = _make_fake_async_session()
         repo = PostgresEventRepository(session=session)
         records = [_make_record(user_id=f"user{i}", id=uuid.uuid4()) for i in range(3)]
-        asyncio.get_event_loop().run_until_complete(repo.persist_many(records))
+        await repo.persist_many(records)
 
         assert session.add_all.call_count == 1, (
             f"session.add_all must be called exactly once in persist_many(). "
             f"Got {session.add_all.call_count} calls."
         )
 
-    def test_persist_many_passes_correct_number_of_orm_objects_to_add_all(
+    async def test_persist_many_passes_correct_number_of_orm_objects_to_add_all(
         self,
     ) -> None:
         """persist_many([r1,r2,r3]) must pass a list of 3 ORM objects to add_all().
@@ -549,14 +515,13 @@ class TestPostgresEventRepositoryPersistMany:
         WHY: If fewer ORM objects are passed, some events are silently not inserted.
         If more are passed, spurious duplicate rows appear.
         """
-        import asyncio
         from naas_shared.schemas import EventORM
         from app.adapters import PostgresEventRepository
 
         session = _make_fake_async_session()
         repo = PostgresEventRepository(session=session)
         records = [_make_record(user_id=f"user{i}", id=uuid.uuid4()) for i in range(3)]
-        asyncio.get_event_loop().run_until_complete(repo.persist_many(records))
+        await repo.persist_many(records)
 
         orm_list_arg = session.add_all.call_args[0][0]
         assert len(orm_list_arg) == 3, (
@@ -568,7 +533,7 @@ class TestPostgresEventRepositoryPersistMany:
                 f"got {type(obj).__name__!r}."
             )
 
-    def test_persist_many_calls_session_commit_once(self) -> None:
+    async def test_persist_many_calls_session_commit_once(self) -> None:
         """persist_many must call session.commit() exactly once (one transaction).
 
         WHY: A single commit for the whole batch is the all-or-nothing guarantee.
@@ -577,13 +542,12 @@ class TestPostgresEventRepositoryPersistMany:
         'any insert failure rolls back the whole batch' — a single transaction makes
         this possible.
         """
-        import asyncio
         from app.adapters import PostgresEventRepository
 
         session = _make_fake_async_session()
         repo = PostgresEventRepository(session=session)
         records = [_make_record(user_id=f"user{i}", id=uuid.uuid4()) for i in range(3)]
-        asyncio.get_event_loop().run_until_complete(repo.persist_many(records))
+        await repo.persist_many(records)
 
         assert session.commit.call_count == 1, (
             f"session.commit must be called exactly once in persist_many(). "
@@ -613,27 +577,26 @@ class TestRedisEventPublisherPublish:
     we also patch 'naas_shared.redis_client.publish_to_stream' as a fallback note.
     """
 
-    def test_publish_calls_publish_to_stream_once(self) -> None:
+    async def test_publish_calls_publish_to_stream_once(self) -> None:
         """RedisEventPublisher.publish must call publish_to_stream exactly once.
 
         WHY: Each event produces exactly one stream message. Zero calls = event
         not in the pipeline (normalization never processes it). Multiple calls =
         duplicate stream messages → duplicate downstream processing.
         """
-        import asyncio
         from app.adapters import RedisEventPublisher
 
         record = _make_record()
         with patch("app.adapters.publish_to_stream", new=AsyncMock()) as mock_pts:
             publisher = RedisEventPublisher()
-            asyncio.get_event_loop().run_until_complete(publisher.publish(record))
+            await publisher.publish(record)
 
         assert mock_pts.call_count == 1, (
             f"publish_to_stream must be called exactly once per publish() call. "
             f"Got {mock_pts.call_count} calls."
         )
 
-    def test_publish_calls_publish_to_stream_with_stream_login_events_as_first_arg(
+    async def test_publish_calls_publish_to_stream_with_stream_login_events_as_first_arg(
         self,
     ) -> None:
         """publish must pass STREAM_LOGIN_EVENTS as the first arg to publish_to_stream.
@@ -644,14 +607,13 @@ class TestRedisEventPublisherPublish:
         the wrong stream name is used (e.g., 'normalized_events'), events would skip
         the normalization stage entirely.
         """
-        import asyncio
         from naas_shared.constants import STREAM_LOGIN_EVENTS
         from app.adapters import RedisEventPublisher
 
         record = _make_record()
         with patch("app.adapters.publish_to_stream", new=AsyncMock()) as mock_pts:
             publisher = RedisEventPublisher()
-            asyncio.get_event_loop().run_until_complete(publisher.publish(record))
+            await publisher.publish(record)
 
         stream_arg = mock_pts.call_args[0][0]
         assert stream_arg == STREAM_LOGIN_EVENTS, (
@@ -659,7 +621,9 @@ class TestRedisEventPublisherPublish:
             f"('{STREAM_LOGIN_EVENTS}'), got {stream_arg!r}."
         )
 
-    def test_publish_calls_publish_to_stream_with_dict_as_second_arg(self) -> None:
+    async def test_publish_calls_publish_to_stream_with_dict_as_second_arg(
+        self,
+    ) -> None:
         """publish must pass a dict as the second arg to publish_to_stream.
 
         WHY: publish_to_stream(stream, data) expects `data` to be a dict
@@ -668,13 +632,12 @@ class TestRedisEventPublisherPublish:
         models are not JSON-serializable by json.dumps without mode='json'.
         The adapter must call record.model_dump(mode='json') first.
         """
-        import asyncio
         from app.adapters import RedisEventPublisher
 
         record = _make_record()
         with patch("app.adapters.publish_to_stream", new=AsyncMock()) as mock_pts:
             publisher = RedisEventPublisher()
-            asyncio.get_event_loop().run_until_complete(publisher.publish(record))
+            await publisher.publish(record)
 
         data_arg = mock_pts.call_args[0][1]
         assert isinstance(data_arg, dict), (
@@ -682,7 +645,7 @@ class TestRedisEventPublisherPublish:
             f"Got {type(data_arg).__name__!r}."
         )
 
-    def test_publish_payload_contains_id_key(self) -> None:
+    async def test_publish_payload_contains_id_key(self) -> None:
         """The dict passed to publish_to_stream must contain an 'id' key.
 
         WHY: Spec §3.2 states the published payload 'MUST carry id (the correlation
@@ -690,13 +653,12 @@ class TestRedisEventPublisherPublish:
         login_events stream (identity normalization) use this id to look up the
         event row by PK. A missing id makes the stream message useless.
         """
-        import asyncio
         from app.adapters import RedisEventPublisher
 
         record = _make_record()
         with patch("app.adapters.publish_to_stream", new=AsyncMock()) as mock_pts:
             publisher = RedisEventPublisher()
-            asyncio.get_event_loop().run_until_complete(publisher.publish(record))
+            await publisher.publish(record)
 
         data_arg = mock_pts.call_args[0][1]
         assert "id" in data_arg, (
@@ -705,7 +667,7 @@ class TestRedisEventPublisherPublish:
             "Spec §3.2: the payload MUST carry 'id'."
         )
 
-    def test_publish_payload_id_is_a_string(self) -> None:
+    async def test_publish_payload_id_is_a_string(self) -> None:
         """The 'id' value in the published payload dict must be a string.
 
         WHY: JSON has no native UUID type. model_dump(mode='json') serializes UUID
@@ -714,13 +676,12 @@ class TestRedisEventPublisherPublish:
         (it would raise TypeError inside publish_to_stream). Consumers also expect
         a string id to reconstruct the UUID from.
         """
-        import asyncio
         from app.adapters import RedisEventPublisher
 
         record = _make_record()
         with patch("app.adapters.publish_to_stream", new=AsyncMock()) as mock_pts:
             publisher = RedisEventPublisher()
-            asyncio.get_event_loop().run_until_complete(publisher.publish(record))
+            await publisher.publish(record)
 
         data_arg = mock_pts.call_args[0][1]
         id_value = data_arg.get("id")
@@ -730,20 +691,19 @@ class TestRedisEventPublisherPublish:
             "Use record.model_dump(mode='json') to ensure UUID → str conversion."
         )
 
-    def test_publish_payload_id_matches_record_id(self) -> None:
+    async def test_publish_payload_id_matches_record_id(self) -> None:
         """The 'id' string in the published payload must equal str(record.id).
 
         WHY: The correlation key on the stream must identify the exact PG row.
         If the id is wrong (different UUID), downstream consumers look up the
         wrong row (or no row), silently processing the wrong event or failing.
         """
-        import asyncio
         from app.adapters import RedisEventPublisher
 
         record = _make_record()
         with patch("app.adapters.publish_to_stream", new=AsyncMock()) as mock_pts:
             publisher = RedisEventPublisher()
-            asyncio.get_event_loop().run_until_complete(publisher.publish(record))
+            await publisher.publish(record)
 
         data_arg = mock_pts.call_args[0][1]
         assert data_arg["id"] == str(record.id), (

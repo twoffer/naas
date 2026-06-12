@@ -11,6 +11,7 @@ import pytest
 # Mock builders for DB session and Redis client
 # ---------------------------------------------------------------------------
 
+
 def _make_ok_db_session() -> AsyncMock:
     """Async mock session whose execute() succeeds (SELECT 1 returns a row).
 
@@ -61,6 +62,7 @@ def _make_failing_redis_client(exc: Exception | None = None) -> AsyncMock:
 # ---------------------------------------------------------------------------
 # Context manager: patch DB + Redis simultaneously
 # ---------------------------------------------------------------------------
+
 
 @contextmanager
 def _patch_health_deps(db_session=None, redis_client=None):
@@ -359,7 +361,9 @@ class TestHealthStatusUnhealthy:
             "When PG is down (regardless of Redis), status must be 'unhealthy'."
         )
 
-    def test_health_service_field_is_identity_normalization_when_unhealthy(self) -> None:
+    def test_health_service_field_is_identity_normalization_when_unhealthy(
+        self,
+    ) -> None:
         """Service field is 'identity-normalization' even in unhealthy state."""
         from starlette.testclient import TestClient
         from app.main import app
@@ -375,7 +379,9 @@ class TestHealthStatusUnhealthy:
             f"got {body.get('service')!r}."
         )
 
-    def test_health_body_conforms_to_health_response_schema_when_unhealthy(self) -> None:
+    def test_health_body_conforms_to_health_response_schema_when_unhealthy(
+        self,
+    ) -> None:
         """GET /health body must validate against HealthResponse when unhealthy."""
         from naas_shared.models import HealthResponse
         from pydantic import ValidationError
@@ -414,12 +420,15 @@ class TestHealthAlwaysReturnsHttp200:
     service itself is running and reachable.
     """
 
-    @pytest.mark.parametrize("scenario,db_ok,redis_ok,expected_body_status", [
-        ("both_ok", True, True, "healthy"),
-        ("redis_down", True, False, "degraded"),
-        ("pg_down", False, True, "unhealthy"),
-        ("both_down", False, False, "unhealthy"),
-    ])
+    @pytest.mark.parametrize(
+        "scenario,db_ok,redis_ok,expected_body_status",
+        [
+            ("both_ok", True, True, "healthy"),
+            ("redis_down", True, False, "degraded"),
+            ("pg_down", False, True, "unhealthy"),
+            ("both_down", False, False, "unhealthy"),
+        ],
+    )
     def test_health_always_http_200(
         self,
         scenario: str,
@@ -437,7 +446,9 @@ class TestHealthAlwaysReturnsHttp200:
         from app.main import app
 
         db_session = _make_ok_db_session() if db_ok else _make_failing_db_session()
-        redis_client = _make_ok_redis_client() if redis_ok else _make_failing_redis_client()
+        redis_client = (
+            _make_ok_redis_client() if redis_ok else _make_failing_redis_client()
+        )
 
         with _patch_health_deps(db_session=db_session, redis_client=redis_client) as _:
             with TestClient(app, raise_server_exceptions=False) as client:

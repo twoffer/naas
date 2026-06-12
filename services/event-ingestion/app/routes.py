@@ -72,8 +72,9 @@ async def ingest_many(
 async def health() -> HealthResponse:
     """Readiness probe: check PostgreSQL and Redis connectivity (spec §5.6).
 
-    Accesses get_db_session and get_redis through the naas_shared module references
-    at call time so test patches at the naas_shared.* namespace are effective.
+    Accesses get_session_factory and get_redis through the naas_shared module
+    references at call time so test patches at the naas_shared.* namespace are
+    effective.
 
     Decision table (spec §5.6):
       PG OK + Redis OK  → "healthy"
@@ -83,14 +84,12 @@ async def health() -> HealthResponse:
     HTTP status is always 200; operational status is in the body.
     """
     pg_ok = True
-    agen = _db_mod.get_db_session()
     try:
-        session = await agen.__anext__()
-        await session.execute(text("SELECT 1"))
+        factory = _db_mod.get_session_factory()
+        async with factory() as session:
+            await session.execute(text("SELECT 1"))
     except Exception:
         pg_ok = False
-    finally:
-        await agen.aclose()
 
     redis_ok = True
     try:

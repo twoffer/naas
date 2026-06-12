@@ -1,6 +1,5 @@
 """Dockerfile, requirements.txt, and .dockerignore contract for event-ingestion."""
 
-from pathlib import Path
 from typing import Any
 
 # third-party
@@ -12,17 +11,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up until docs/architecture/ is found — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 SERVICE_DIR = REPO_ROOT / "services" / "event-ingestion"
 DOCKERFILE_PATH = SERVICE_DIR / "Dockerfile"
 REQUIREMENTS_PATH = SERVICE_DIR / "requirements.txt"
@@ -33,6 +23,7 @@ COMPOSE_PATH = REPO_ROOT / "docker-compose.yml"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_compose() -> dict[str, Any]:
     """Parse docker-compose.yml. Fails the calling test if absent or invalid YAML."""
@@ -107,8 +98,11 @@ class TestRequirementsTxt:
         happens to pull it in transitively — fragile and unspecified behavior.
         """
         content = _requirements_text()
-        lines = [line.strip().lower() for line in content.splitlines()
-                 if line.strip() and not line.strip().startswith("#")]
+        lines = [
+            line.strip().lower()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         fastapi_lines = [line for line in lines if line.startswith("fastapi")]
         assert fastapi_lines, (
             f"requirements.txt must list 'fastapi' (with or without version pin). "
@@ -123,8 +117,11 @@ class TestRequirementsTxt:
         the CMD fails with 'command not found'.
         """
         content = _requirements_text()
-        lines = [line.strip().lower() for line in content.splitlines()
-                 if line.strip() and not line.strip().startswith("#")]
+        lines = [
+            line.strip().lower()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         uvicorn_lines = [line for line in lines if line.startswith("uvicorn")]
         assert uvicorn_lines, (
             f"requirements.txt must list 'uvicorn' (with or without [standard]). "
@@ -140,8 +137,11 @@ class TestRequirementsTxt:
         The authoritative source is shared/pyproject.toml.
         """
         content = _requirements_text()
-        lines = [line.strip().lower() for line in content.splitlines()
-                 if line.strip() and not line.strip().startswith("#")]
+        lines = [
+            line.strip().lower()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         sqlalchemy_lines = [line for line in lines if line.startswith("sqlalchemy")]
         assert not sqlalchemy_lines, (
             f"requirements.txt must NOT list 'sqlalchemy' — it is a transitive dep "
@@ -156,8 +156,11 @@ class TestRequirementsTxt:
         mismatch between what naas_shared expects and what the service overrides.
         """
         content = _requirements_text()
-        lines = [line.strip().lower() for line in content.splitlines()
-                 if line.strip() and not line.strip().startswith("#")]
+        lines = [
+            line.strip().lower()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         asyncpg_lines = [line for line in lines if line.startswith("asyncpg")]
         assert not asyncpg_lines, (
             f"requirements.txt must NOT list 'asyncpg' — it is a transitive dep "
@@ -171,11 +174,20 @@ class TestRequirementsTxt:
         Listing it separately creates version conflicts with the shared client version.
         """
         content = _requirements_text()
-        lines = [line.strip().lower() for line in content.splitlines()
-                 if line.strip() and not line.strip().startswith("#")]
+        lines = [
+            line.strip().lower()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         # Match 'redis' but not something like 'fastapi-redis' (unlikely but safe)
-        redis_lines = [line for line in lines if line == "redis" or line.startswith("redis==")
-                       or line.startswith("redis>=") or line.startswith("redis~=")]
+        redis_lines = [
+            line
+            for line in lines
+            if line == "redis"
+            or line.startswith("redis==")
+            or line.startswith("redis>=")
+            or line.startswith("redis~=")
+        ]
         assert not redis_lines, (
             f"requirements.txt must NOT list 'redis' — it is a transitive dep "
             f"from naas_shared. Found: {redis_lines}"
@@ -215,8 +227,7 @@ class TestDockerfile:
         lines = [line.strip() for line in content.splitlines()]
         expose_lines = [line for line in lines if line.upper().startswith("EXPOSE")]
         assert any("8001" in line for line in expose_lines), (
-            f"Dockerfile must contain 'EXPOSE 8001'. "
-            f"Found EXPOSE lines: {expose_lines}"
+            f"Dockerfile must contain 'EXPOSE 8001'. Found EXPOSE lines: {expose_lines}"
         )
 
     def test_dockerfile_copies_shared_before_service_code(self) -> None:
@@ -236,7 +247,11 @@ class TestDockerfile:
 
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if stripped.startswith("COPY") and "shared/" in stripped and shared_copy_idx is None:
+            if (
+                stripped.startswith("COPY")
+                and "shared/" in stripped
+                and shared_copy_idx is None
+            ):
                 shared_copy_idx = i
             if stripped.startswith("COPY") and "services/event-ingestion" in stripped:
                 if service_copy_idx is None:
@@ -269,8 +284,7 @@ class TestDockerfile:
         # Look for pip install ... -e ... shared or pip install -e /app/shared
         lines = content.splitlines()
         install_lines = [
-            line.strip() for line in lines
-            if "pip install" in line and "shared" in line
+            line.strip() for line in lines if "pip install" in line and "shared" in line
         ]
         # Accept both `pip install -e /app/shared/` and `pip install -e shared/`
         # and `pip install --no-cache-dir -e /app/shared/`
@@ -294,15 +308,15 @@ class TestDockerfile:
         """
         content = _dockerfile_text()
         lines = content.splitlines()
-        cmd_lines = [line.strip() for line in lines if line.strip().upper().startswith("CMD")]
+        cmd_lines = [
+            line.strip() for line in lines if line.strip().upper().startswith("CMD")
+        ]
         assert cmd_lines, (
             "Dockerfile must contain a CMD instruction. "
             f"No CMD found in {DOCKERFILE_PATH}."
         )
         last_cmd = cmd_lines[-1]  # The effective CMD is the last one
-        assert "uvicorn" in last_cmd, (
-            f"CMD must invoke uvicorn. Got: {last_cmd!r}"
-        )
+        assert "uvicorn" in last_cmd, f"CMD must invoke uvicorn. Got: {last_cmd!r}"
         assert "app.main:app" in last_cmd, (
             f"CMD must reference 'app.main:app' as the ASGI module. Got: {last_cmd!r}"
         )
@@ -310,6 +324,76 @@ class TestDockerfile:
             f"CMD must use port 8001. Got: {last_cmd!r}. "
             "The docker-compose healthcheck probes localhost:8001."
         )
+
+    def test_dockerfile_runs_as_non_root(self) -> None:
+        """Dockerfile must have a USER directive naming a non-root user.
+
+        The USER directive must:
+          1. Exist at all.
+          2. Name a user that is not 'root' or '0' (running as root in a
+             production container is a security violation).
+          3. Appear after the last RUN/COPY instruction and before CMD,
+             so the process that starts via CMD does not run as root.
+
+        WHY: Containers running as root inherit root privileges from the host
+        kernel namespace — a container escape or path-traversal vulnerability
+        can gain full host access. The principle of least privilege requires
+        a dedicated non-root user for every service process. Validating
+        placement (after final RUN/COPY, before CMD) ensures the USER switch
+        is not accidentally buried before package installs (where it would be
+        overridden by a subsequent USER root in a multi-stage build).
+        """
+        content = _dockerfile_text()
+        lines = content.splitlines()
+
+        stripped = [line.strip() for line in lines]
+
+        # 1. USER directive must exist.
+        user_indices = [
+            i for i, line in enumerate(stripped) if line.upper().startswith("USER ")
+        ]
+        assert user_indices, (
+            f"Dockerfile must contain a USER directive to run as a non-root user. "
+            f"Not found in {DOCKERFILE_PATH}. "
+            "Add e.g. 'RUN adduser --disabled-password appuser' then 'USER appuser'."
+        )
+
+        last_user_idx = user_indices[-1]
+        user_value = stripped[last_user_idx].split(None, 1)[1].strip()
+
+        # 2. Named user must not be root or uid 0.
+        assert user_value.lower() not in ("root", "0"), (
+            f"Dockerfile USER must not be 'root' or '0'. Got: {user_value!r}. "
+            "Running the service process as root violates least-privilege."
+        )
+
+        # 3. USER must appear after the last RUN/COPY and before CMD.
+        cmd_indices = [
+            i for i, line in enumerate(stripped) if line.upper().startswith("CMD")
+        ]
+        run_copy_indices = [
+            i
+            for i, line in enumerate(stripped)
+            if line.upper().startswith("RUN ") or line.upper().startswith("COPY ")
+        ]
+
+        assert cmd_indices, (
+            "Dockerfile must contain a CMD instruction (needed to verify USER placement)."
+        )
+        last_cmd_idx = cmd_indices[-1]
+
+        assert last_user_idx < last_cmd_idx, (
+            f"USER directive (line {last_user_idx + 1}) must appear BEFORE "
+            f"CMD (line {last_cmd_idx + 1}) so the CMD process runs as the non-root user."
+        )
+
+        if run_copy_indices:
+            last_run_copy_idx = run_copy_indices[-1]
+            assert last_user_idx > last_run_copy_idx, (
+                f"USER directive (line {last_user_idx + 1}) must appear AFTER "
+                f"the last RUN/COPY (line {last_run_copy_idx + 1}) so package installs "
+                "run with appropriate privileges and the final USER switch is not overridden."
+            )
 
 
 # ===========================================================================
@@ -346,11 +430,13 @@ class TestDockerignore:
         if not DOCKERIGNORE_PATH.exists():
             pytest.fail(f".dockerignore not found at {DOCKERIGNORE_PATH}.")
         content = DOCKERIGNORE_PATH.read_text(encoding="utf-8")
-        entries = [line.strip() for line in content.splitlines()
-                   if line.strip() and not line.strip().startswith("#")]
+        entries = [
+            line.strip()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         assert ".git" in entries, (
-            f".dockerignore must contain a '.git' entry. "
-            f"Found entries: {entries}"
+            f".dockerignore must contain a '.git' entry. Found entries: {entries}"
         )
 
     def test_dockerignore_contains_venv_entry(self) -> None:
@@ -364,11 +450,13 @@ class TestDockerignore:
         if not DOCKERIGNORE_PATH.exists():
             pytest.fail(f".dockerignore not found at {DOCKERIGNORE_PATH}.")
         content = DOCKERIGNORE_PATH.read_text(encoding="utf-8")
-        entries = [line.strip() for line in content.splitlines()
-                   if line.strip() and not line.strip().startswith("#")]
+        entries = [
+            line.strip()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         assert ".venv" in entries, (
-            f".dockerignore must contain a '.venv' entry. "
-            f"Found entries: {entries}"
+            f".dockerignore must contain a '.venv' entry. Found entries: {entries}"
         )
 
     def test_dockerignore_contains_node_modules_entry(self) -> None:
@@ -381,8 +469,11 @@ class TestDockerignore:
         if not DOCKERIGNORE_PATH.exists():
             pytest.fail(f".dockerignore not found at {DOCKERIGNORE_PATH}.")
         content = DOCKERIGNORE_PATH.read_text(encoding="utf-8")
-        entries = [line.strip() for line in content.splitlines()
-                   if line.strip() and not line.strip().startswith("#")]
+        entries = [
+            line.strip()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         assert "node_modules" in entries, (
             f".dockerignore must contain a 'node_modules' entry. "
             f"Found entries: {entries}"
@@ -399,11 +490,13 @@ class TestDockerignore:
         if not DOCKERIGNORE_PATH.exists():
             pytest.fail(f".dockerignore not found at {DOCKERIGNORE_PATH}.")
         content = DOCKERIGNORE_PATH.read_text(encoding="utf-8")
-        entries = [line.strip() for line in content.splitlines()
-                   if line.strip() and not line.strip().startswith("#")]
+        entries = [
+            line.strip()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         assert ".claude" in entries, (
-            f".dockerignore must contain a '.claude' entry. "
-            f"Found entries: {entries}"
+            f".dockerignore must contain a '.claude' entry. Found entries: {entries}"
         )
 
     def test_dockerignore_contains_pycache_glob(self) -> None:
@@ -417,8 +510,11 @@ class TestDockerignore:
         if not DOCKERIGNORE_PATH.exists():
             pytest.fail(f".dockerignore not found at {DOCKERIGNORE_PATH}.")
         content = DOCKERIGNORE_PATH.read_text(encoding="utf-8")
-        entries = [line.strip() for line in content.splitlines()
-                   if line.strip() and not line.strip().startswith("#")]
+        entries = [
+            line.strip()
+            for line in content.splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
         assert "**/__pycache__" in entries, (
             f".dockerignore must contain a '**/__pycache__' entry. "
             f"Found entries: {entries}"
@@ -587,9 +683,7 @@ class TestDockerComposeEventIngestionService:
             "The service publishes to login_events stream and requires Redis."
         )
         redis_dep = depends_on["redis"]
-        condition = (
-            redis_dep.get("condition") if isinstance(redis_dep, dict) else None
-        )
+        condition = redis_dep.get("condition") if isinstance(redis_dep, dict) else None
         assert condition == "service_healthy", (
             f"event-ingestion depends_on.redis.condition must be 'service_healthy', "
             f"got {condition!r}. "
@@ -630,7 +724,9 @@ class TestDockerComposeEventIngestionService:
         svc = _compose_ei_service()
         healthcheck = svc.get("healthcheck", {})
         test = healthcheck.get("test", [])
-        test_str = " ".join(str(t) for t in test) if isinstance(test, list) else str(test)
+        test_str = (
+            " ".join(str(t) for t in test) if isinstance(test, list) else str(test)
+        )
         assert "8001" in test_str, (
             f"event-ingestion healthcheck.test must reference port 8001. "
             f"Got: {test_str!r}"

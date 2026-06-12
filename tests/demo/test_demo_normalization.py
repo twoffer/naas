@@ -14,7 +14,6 @@ import importlib.util
 import re
 import subprocess
 import sys
-from pathlib import Path
 
 # third-party
 import pytest
@@ -25,19 +24,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find docs/architecture/ — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        f"Could not locate repo root. Started from: {Path(__file__).resolve()}"
-    )
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 DEMO_DIR = REPO_ROOT / "demo"
 DEMO_SCRIPT = DEMO_DIR / "demo_normalization.py"
 DEMO_REQUIREMENTS = DEMO_DIR / "requirements.txt"

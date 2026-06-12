@@ -14,23 +14,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find the directory containing
-    docs/architecture/ — the canonical repo root marker.  Capped at 10
-    levels to prevent runaway traversal.
-    """
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        "Could not locate repo root (expected a directory containing "
-        f"docs/architecture/).  Started from: {Path(__file__).resolve()}"
-    )
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
 
 # Infrastructure services that MUST always be present.
@@ -40,7 +25,10 @@ REQUIRED_SERVICES = {"postgres", "redis", "keycloak", "openldap"}
 # now legitimately appear in docker-compose.yml.  As each future spec adds its
 # service, append its name here so the scope-boundary guards below keep protecting
 # the not-yet-implemented services without flagging the implemented ones.
-IMPLEMENTED_APP_SERVICES = {"event-ingestion", "identity-normalization"}  # Spec 1, Spec 2
+IMPLEMENTED_APP_SERVICES = {
+    "event-ingestion",
+    "identity-normalization",
+}  # Spec 1, Spec 2
 
 # Every application service name (none of which exist at Spec 0 stage).
 ALL_APP_SERVICES = {
@@ -214,15 +202,11 @@ class TestComposeFileExistence:
         `docker compose config` call.
         """
         yaml = pytest.importorskip("yaml")
-        assert COMPOSE_FILE.exists(), (
-            f"Cannot parse: {COMPOSE_FILE} not found."
-        )
+        assert COMPOSE_FILE.exists(), f"Cannot parse: {COMPOSE_FILE} not found."
         try:
             doc = yaml.safe_load(COMPOSE_FILE.read_text(encoding="utf-8"))
         except yaml.YAMLError as exc:
-            pytest.fail(
-                f"docker-compose.yml failed YAML parse: {exc}"
-            )
+            pytest.fail(f"docker-compose.yml failed YAML parse: {exc}")
         assert doc is not None, "yaml.safe_load returned None — file is empty"
         assert isinstance(doc, dict), (
             f"Expected YAML root to be a mapping, got {type(doc).__name__}"
@@ -371,9 +355,7 @@ class TestPostgresService:
             f"postgres service image must start with 'postgres:17', got '{image}'"
         )
 
-    def test_postgres_bind_mount_init_sql_source(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_postgres_bind_mount_init_sql_source(self, compose: dict[str, Any]) -> None:
         """postgres must bind-mount ./infrastructure/postgres/init.sql.
 
         WHY: This is the DDL script that creates all tables, indexes, and the
@@ -428,9 +410,7 @@ class TestPostgresService:
             f"Volume refs found: {refs}"
         )
 
-    def test_postgres_attached_to_naas_network(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_postgres_attached_to_naas_network(self, compose: dict[str, Any]) -> None:
         """postgres must be on naas-network.
 
         WHY: All services communicate over naas-network. A postgres container
@@ -440,8 +420,7 @@ class TestPostgresService:
         svc = compose["services"]["postgres"]
         networks = _service_networks(svc)
         assert "naas-network" in networks, (
-            f"postgres must be attached to 'naas-network'. "
-            f"Networks found: {networks}"
+            f"postgres must be attached to 'naas-network'. Networks found: {networks}"
         )
 
 
@@ -453,9 +432,7 @@ class TestPostgresService:
 class TestRedisService:
     """Validates the redis service configuration."""
 
-    def test_redis_image_starts_with_redis_74(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_redis_image_starts_with_redis_74(self, compose: dict[str, Any]) -> None:
         """redis image must be redis:7.4-alpine (or any redis:7.4* tag).
 
         WHY: Redis Streams support (XADD/XREADGROUP) was mature by 6.x, but
@@ -468,9 +445,7 @@ class TestRedisService:
             f"redis service image must start with 'redis:7.4', got '{image}'"
         )
 
-    def test_redis_bind_mount_redis_conf_source(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_redis_bind_mount_redis_conf_source(self, compose: dict[str, Any]) -> None:
         """redis must bind-mount ./infrastructure/redis/redis.conf.
 
         WHY: The custom redis.conf sets maxmemory (256mb) and appendonly (yes).
@@ -505,9 +480,7 @@ class TestRedisService:
             f"got: '{cmd}'"
         )
 
-    def test_redis_declares_redis_data_volume(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_redis_declares_redis_data_volume(self, compose: dict[str, Any]) -> None:
         """redis must declare the redis-data named volume.
 
         WHY: appendonly=yes persistence is only durable if the AOF file lives
@@ -541,13 +514,10 @@ class TestKeycloakService:
         svc = compose["services"]["keycloak"]
         image = svc.get("image", "")
         assert image == "quay.io/keycloak/keycloak:26.0", (
-            f"keycloak image must be 'quay.io/keycloak/keycloak:26.0', "
-            f"got '{image}'"
+            f"keycloak image must be 'quay.io/keycloak/keycloak:26.0', got '{image}'"
         )
 
-    def test_keycloak_command_contains_start_dev(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_keycloak_command_contains_start_dev(self, compose: dict[str, Any]) -> None:
         """keycloak command must contain `start-dev`.
 
         WHY: `start-dev` is the flag that activates development mode with
@@ -598,9 +568,7 @@ class TestKeycloakService:
             f"Found: {kc_db_keys}"
         )
 
-    def test_keycloak_may_have_admin_credentials(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_keycloak_may_have_admin_credentials(self, compose: dict[str, Any]) -> None:
         """keycloak KEYCLOAK_ADMIN / KEYCLOAK_ADMIN_PASSWORD are allowed.
 
         WHY: These credentials are necessary for the admin console and the
@@ -646,9 +614,7 @@ class TestKeycloakService:
 class TestOpenLdapService:
     """Validates the openldap service configuration."""
 
-    def test_openldap_uses_locally_built_image(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_openldap_uses_locally_built_image(self, compose: dict[str, Any]) -> None:
         """openldap must be a locally-built image from ./infrastructure/openldap
         tagged naas-openldap:local, based on osixia/openldap:1.5.0.
 
@@ -682,9 +648,7 @@ class TestOpenLdapService:
 
         # The osixia 1.5.0 pin now lives in the Dockerfile's FROM line.
         dockerfile = REPO_ROOT / "infrastructure" / "openldap" / "Dockerfile"
-        assert dockerfile.exists(), (
-            f"openldap Dockerfile not found at {dockerfile}"
-        )
+        assert dockerfile.exists(), f"openldap Dockerfile not found at {dockerfile}"
         text = dockerfile.read_text(encoding="utf-8")
         assert "FROM osixia/openldap:1.5.0" in text, (
             "openldap Dockerfile must pin 'FROM osixia/openldap:1.5.0' — that "
@@ -715,9 +679,7 @@ class TestOpenLdapService:
 
         # The Dockerfile must COPY it into the osixia custom-bootstrap directory.
         dockerfile = REPO_ROOT / "infrastructure" / "openldap" / "Dockerfile"
-        assert dockerfile.exists(), (
-            f"openldap Dockerfile not found at {dockerfile}"
-        )
+        assert dockerfile.exists(), f"openldap Dockerfile not found at {dockerfile}"
         text = dockerfile.read_text(encoding="utf-8")
         assert "COPY bootstrap.ldif" in text, (
             "openldap Dockerfile must COPY bootstrap.ldif into the image."
@@ -730,9 +692,7 @@ class TestOpenLdapService:
             "(/container/service/slapd/assets/config/bootstrap/ldif/custom/)."
         )
 
-    def test_openldap_declares_ldap_data_volume(
-        self, compose: dict[str, Any]
-    ) -> None:
+    def test_openldap_declares_ldap_data_volume(self, compose: dict[str, Any]) -> None:
         """openldap must declare the ldap-data named volume.
 
         WHY: /var/lib/ldap contains the LDAP database files. A named volume
@@ -836,8 +796,7 @@ class TestTopLevelVolumes:
         volumes = set(compose.get("volumes", {}).keys())
         missing = REQUIRED_VOLUMES - volumes
         assert not missing, (
-            f"Top-level volumes is missing: {missing}. "
-            f"Declared volumes: {volumes}"
+            f"Top-level volumes is missing: {missing}. Declared volumes: {volumes}"
         )
 
 
@@ -881,9 +840,7 @@ class TestRequiredSourceFilesExist:
             f"Required compose source file not found: {abs_path}. "
             f"This file is required by the compose stack."
         )
-        assert abs_path.is_file(), (
-            f"Path exists but is not a file: {abs_path}"
-        )
+        assert abs_path.is_file(), f"Path exists but is not a file: {abs_path}"
         assert abs_path.stat().st_size > 0, (
             f"Required compose source file is empty: {abs_path}"
         )

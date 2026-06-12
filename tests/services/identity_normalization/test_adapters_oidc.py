@@ -1,6 +1,5 @@
 """OidcAdapter: extract() attribute mapping, field normalization, and protocol label."""
 
-
 # third-party
 import pytest
 
@@ -71,9 +70,7 @@ class TestOidcAdapterProtocolConformance:
 
         adapter = OidcAdapter()
 
-        assert callable(adapter.extract), (
-            "OidcAdapter().extract must be callable."
-        )
+        assert callable(adapter.extract), "OidcAdapter().extract must be callable."
 
     def test_oidc_adapter_extract_accepts_dict(self) -> None:
         """OidcAdapter().extract({}) must not raise TypeError.
@@ -231,26 +228,29 @@ class TestOidcAdapterValueNormalization:
     including case variants and whitespace stripping.
     """
 
-    @pytest.mark.parametrize("raw_dept,expected_dept", [
-        ("eng", "Engineering"),
-        ("ENGINEERING", "Engineering"),
-        (" Engineering ", "Engineering"),
-        ("r&d", "Engineering"),
-        ("product development", "Engineering"),
-        ("fin", "Finance"),
-        ("finance", "Finance"),
-        ("accounting", "Finance"),
-        ("hr", "Human Resources"),
-        ("human resources", "Human Resources"),
-        ("people ops", "Human Resources"),
-        ("it", "Information Technology"),
-        ("information technology", "Information Technology"),
-        ("infra", "Information Technology"),
-        ("sales", "Sales"),
-        ("revenue", "Sales"),
-        ("mktg", "Marketing"),
-        ("marketing", "Marketing"),
-    ])
+    @pytest.mark.parametrize(
+        "raw_dept,expected_dept",
+        [
+            ("eng", "Engineering"),
+            ("ENGINEERING", "Engineering"),
+            (" Engineering ", "Engineering"),
+            ("r&d", "Engineering"),
+            ("product development", "Engineering"),
+            ("fin", "Finance"),
+            ("finance", "Finance"),
+            ("accounting", "Finance"),
+            ("hr", "Human Resources"),
+            ("human resources", "Human Resources"),
+            ("people ops", "Human Resources"),
+            ("it", "Information Technology"),
+            ("information technology", "Information Technology"),
+            ("infra", "Information Technology"),
+            ("sales", "Sales"),
+            ("revenue", "Sales"),
+            ("mktg", "Marketing"),
+            ("marketing", "Marketing"),
+        ],
+    )
     def test_department_normalization_variants(
         self, raw_dept: str, expected_dept: str
     ) -> None:
@@ -264,26 +264,29 @@ class TestOidcAdapterValueNormalization:
             f"got {result.get('department')!r}."
         )
 
-    @pytest.mark.parametrize("raw_et,expected_et", [
-        ("fte", "FTE"),
-        ("E", "FTE"),
-        ("e", "FTE"),
-        ("employee", "FTE"),
-        ("full-time", "FTE"),
-        ("Full-Time", "FTE"),
-        ("full time", "FTE"),
-        ("regular", "FTE"),
-        ("contractor", "contractor"),
-        ("c", "contractor"),
-        ("contract", "contractor"),
-        ("contingent", "contractor"),
-        ("temp", "contractor"),
-        ("vendor", "vendor"),
-        ("v", "vendor"),
-        ("external", "vendor"),
-        ("partner", "vendor"),
-        ("third-party", "vendor"),
-    ])
+    @pytest.mark.parametrize(
+        "raw_et,expected_et",
+        [
+            ("fte", "FTE"),
+            ("E", "FTE"),
+            ("e", "FTE"),
+            ("employee", "FTE"),
+            ("full-time", "FTE"),
+            ("Full-Time", "FTE"),
+            ("full time", "FTE"),
+            ("regular", "FTE"),
+            ("contractor", "contractor"),
+            ("c", "contractor"),
+            ("contract", "contractor"),
+            ("contingent", "contractor"),
+            ("temp", "contractor"),
+            ("vendor", "vendor"),
+            ("v", "vendor"),
+            ("external", "vendor"),
+            ("partner", "vendor"),
+            ("third-party", "vendor"),
+        ],
+    )
     def test_employee_type_normalization_variants(
         self, raw_et: str, expected_et: str
     ) -> None:

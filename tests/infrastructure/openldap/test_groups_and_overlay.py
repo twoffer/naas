@@ -10,30 +10,16 @@
 
 # stdlib
 import re
-from pathlib import Path
 
 # third-party
 import pytest
 
+from tests.helpers import REPO_ROOT
+from tests.infrastructure.ldif_helpers import load_ldif_lines as _load_ldif_lines_impl
+from tests.infrastructure.ldif_helpers import (
+    parse_ldif_blocks as _parse_ldif_blocks_impl,
+)
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery (consistent with tests/infrastructure/test_openldap_ldif.py)
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find docs/architecture/ — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        "Could not locate repo root (looked for docs/architecture/ sentinel)"
-    )
-
-
-REPO_ROOT = _find_repo_root()
 LDIF_FILE = REPO_ROOT / "infrastructure" / "openldap" / "bootstrap.ldif"
 OVERLAY_LDIF = REPO_ROOT / "infrastructure" / "openldap" / "00-memberof-overlay.ldif"
 DOCKERFILE = REPO_ROOT / "infrastructure" / "openldap" / "Dockerfile"
@@ -46,79 +32,21 @@ SPEC0_DOC = (
 
 
 # ---------------------------------------------------------------------------
-# LDIF parser (reused from parent test file, local copy to keep this file
-# self-contained under tests/infrastructure/openldap/)
+# LDIF parser — delegated to tests/infrastructure/ldif_helpers.py
 # ---------------------------------------------------------------------------
 
 
 def _load_ldif_lines() -> list[str]:
     """Return every line from the LDIF file, with newlines stripped."""
-    return LDIF_FILE.read_text(encoding="utf-8").splitlines()
+    return _load_ldif_lines_impl(LDIF_FILE)
 
 
 def _parse_ldif_blocks(lines: list[str]) -> dict[str, dict[str, list[str]]]:
-    """Parse LDIF lines into blocks keyed by dn value.
+    """Parse LDIF lines into blocks keyed by dn value (RFC-2849 correct).
 
-    Returns a dict mapping dn_value -> {attr_name: [value, ...]}.
-
-    RFC-2849 behaviours handled:
-    - Blank lines end the current entry and start a new one.
-    - Comment lines (starting with '#') are skipped without ending the current
-      entry — a comment inside an entry is a comment, not a record separator.
-    - Continuation lines (RFC-2849 §2.1: a line starting with a single space)
-      are folded into the preceding attribute value: the leading space is
-      stripped and the remainder is appended to the last value stored.
+    Delegates to the shared implementation in tests/infrastructure/ldif_helpers.py.
     """
-    blocks: dict[str, dict[str, list[str]]] = {}
-    current_dn: str | None = None
-    current_block: dict[str, list[str]] = {}
-    last_attr: str | None = None  # tracks the attribute to fold continuations into
-
-    for line in lines:
-        # RFC-2849 continuation line: starts with exactly one space
-        if line.startswith(" ") and current_dn is not None and last_attr is not None:
-            # Fold the continuation value onto the last attribute value collected
-            continuation = line[1:]  # strip the single leading space
-            if current_block.get(last_attr):
-                current_block[last_attr][-1] += continuation
-            continue
-
-        stripped = line.strip()
-
-        # Blank line → end of current entry
-        if not stripped:
-            if current_dn is not None:
-                blocks[current_dn] = current_block
-                current_dn = None
-                current_block = {}
-                last_attr = None
-            continue
-
-        # Comment line → skip; does NOT end the current entry
-        if stripped.startswith("#"):
-            continue
-
-        if ":" not in stripped:
-            continue
-
-        attr, _, value = stripped.partition(":")
-        attr = attr.strip().lower()
-        value = value.strip()
-
-        if attr == "dn":
-            if current_dn is not None:
-                blocks[current_dn] = current_block
-            current_dn = value
-            current_block = {"dn": [value]}
-            last_attr = "dn"
-        elif current_dn is not None:
-            current_block.setdefault(attr, []).append(value)
-            last_attr = attr
-
-    if current_dn is not None:
-        blocks[current_dn] = current_block
-
-    return blocks
+    return _parse_ldif_blocks_impl(lines)
 
 
 def _get_line_index(lines: list[str], dn_value: str) -> int | None:

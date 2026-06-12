@@ -1,30 +1,11 @@
 """resolution.py: overall normalization_confidence calculation across multi-source attributes."""
 
-from pathlib import Path
-
 # third-party
 import pytest
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery and sys.path injection
-# ---------------------------------------------------------------------------
-
-
-
-
-def _find_repo_root() -> Path:
-    """Walk up until docs/architecture/ is found — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
-
-REPO_ROOT = _find_repo_root()
+from tests.helpers import REPO_ROOT
 
 CONFIG_PATH = REPO_ROOT / "config" / "normalization.yaml"
-
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +130,13 @@ class TestAttributeImportanceConstants:
         """ATTRIBUTE_IMPORTANCE must have exactly the five specified keys."""
         from app.resolution import ATTRIBUTE_IMPORTANCE
 
-        expected_keys = {"display_name", "primary_email", "department", "employee_type", "groups"}
+        expected_keys = {
+            "display_name",
+            "primary_email",
+            "department",
+            "employee_type",
+            "groups",
+        }
         assert set(ATTRIBUTE_IMPORTANCE.keys()) == expected_keys, (
             f"Expected ATTRIBUTE_IMPORTANCE keys={expected_keys}, "
             f"got {set(ATTRIBUTE_IMPORTANCE.keys())!r}."
@@ -310,7 +297,7 @@ class TestPartialPresenceConfidence:
         )
 
         expected = (
-            0.15 * 0.70    # display_name oidc
+            0.15 * 0.70  # display_name oidc
             + 0.25 * 0.95  # primary_email oidc
             + 0.20 * 0.70  # department oidc (mapped, no penalty)
             + 0.25 * 0.60  # employee_type oidc
@@ -398,11 +385,11 @@ class TestSpec33ConfidenceExample:
         # employee_type: unanimous, conf = max(0.60, 0.95) = 0.95
         # groups:        list_merge, 2/3 shared → 0.7 + 0.3×(2/3) = 0.90
         expected = (
-            0.15 * 0.85   # display_name
-            + 0.25 * 0.95 # primary_email
-            + 0.20 * 0.72 # department (priority, 0.2 penalty encoded in 0.72)
-            + 0.25 * 0.95 # employee_type
-            + 0.15 * 0.90 # groups
+            0.15 * 0.85  # display_name
+            + 0.25 * 0.95  # primary_email
+            + 0.20 * 0.72  # department (priority, 0.2 penalty encoded in 0.72)
+            + 0.25 * 0.95  # employee_type
+            + 0.15 * 0.90  # groups
         )
         assert result.normalization_confidence == pytest.approx(expected, rel=1e-3), (
             f"Expected normalization_confidence≈{expected:.4f} for §3.3 scenario, "
@@ -487,7 +474,9 @@ class TestDepartmentPriorityConfidenceContribution:
         per_attr_conf = detail.confidence
         # Overall must be importance × per_attr_conf (only department present)
         expected_overall = 0.20 * per_attr_conf
-        assert result.normalization_confidence == pytest.approx(expected_overall, rel=1e-4), (
+        assert result.normalization_confidence == pytest.approx(
+            expected_overall, rel=1e-4
+        ), (
             f"Expected normalization_confidence=0.20×{per_attr_conf:.2f}={expected_overall:.4f}, "
             f"got {result.normalization_confidence!r}. "
             "Per-attribute confidence in resolution_details must be the same value "

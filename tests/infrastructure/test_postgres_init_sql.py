@@ -7,7 +7,6 @@
 
 # stdlib
 import re
-from pathlib import Path
 
 # third-party
 import pytest
@@ -18,23 +17,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find the directory that contains
-    docs/architecture/ — that is the repo root.  This avoids hardcoding any
-    absolute path, so the tests are portable across machines and CI.
-    """
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):  # cap at 10 levels to prevent infinite walk
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        "Could not locate repo root (expected a directory containing docs/architecture/). "
-        f"Started from: {Path(__file__).resolve()}"
-    )
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 INIT_SQL_PATH = REPO_ROOT / "infrastructure" / "postgres" / "init.sql"
 
 
@@ -52,9 +36,7 @@ def init_sql_text() -> str:
     obscuring it.
     """
     if not INIT_SQL_PATH.exists():
-        pytest.skip(
-            "infrastructure/postgres/init.sql not found"
-        )
+        pytest.skip("infrastructure/postgres/init.sql not found")
     return INIT_SQL_PATH.read_text(encoding="utf-8")
 
 
@@ -62,7 +44,6 @@ def init_sql_text() -> str:
 def init_sql_upper(init_sql_text: str) -> str:
     """Upper-cased version of init.sql for case-insensitive checks."""
     return init_sql_text.upper()
-
 
 
 # ---------------------------------------------------------------------------
@@ -686,5 +667,3 @@ class TestInitSqlNoCreateDatabase:
 # ---------------------------------------------------------------------------
 # redis.conf — existence
 # ---------------------------------------------------------------------------
-
-

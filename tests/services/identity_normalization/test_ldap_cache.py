@@ -1,13 +1,11 @@
 """Three-state Redis cache mechanics for LdapAdapter.enrich()."""
 
-import asyncio
 import json
 import sys
 from unittest.mock import MagicMock
 
 # third-party
 import pytest
-
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +110,7 @@ class TestCacheMiss:
     previous cache entry exists — i.e., never.
     """
 
-    def test_cache_miss_triggers_ldap_search(self, monkeypatch) -> None:
+    async def test_cache_miss_triggers_ldap_search(self, monkeypatch) -> None:
         """When Redis GET returns None, enrich() must call LDAP search_s.
 
         Verifies enrich() checks the cache first and falls through on a miss.
@@ -134,16 +132,14 @@ class TestCacheMiss:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert conn_mock.search_s.called, (
             "On Redis cache miss (GET returns None), enrich() must call LDAP search_s. "
             "The LDAP query was not made."
         )
 
-    def test_cache_miss_queries_redis_before_ldap(self, monkeypatch) -> None:
+    async def test_cache_miss_queries_redis_before_ldap(self, monkeypatch) -> None:
         """Redis GET must be called before the LDAP search on a cache miss.
 
         WHY: If LDAP is queried first (before checking cache), the cache is
@@ -176,9 +172,7 @@ class TestCacheMiss:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert "redis_get" in call_order, "Redis GET must be called"
         assert "ldap_search" in call_order, "LDAP search must be called on miss"
@@ -208,7 +202,7 @@ class TestCacheNegativeHit:
 
     NEGATIVE_SENTINEL = b'"null"'  # JSON string "null" stored as bytes
 
-    def test_negative_cache_hit_skips_ldap_search(self, monkeypatch) -> None:
+    async def test_negative_cache_hit_skips_ldap_search(self, monkeypatch) -> None:
         """When Redis GET returns the negative sentinel, search_s must NOT be called.
 
         Verifies enrich() recognises b'"null"' as a negative hit and skips LDAP.
@@ -227,16 +221,14 @@ class TestCacheNegativeHit:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "unknown@corp.com")
-        )
+        await adapter.enrich("primary_email", "unknown@corp.com")
 
         assert not conn_mock.search_s.called, (
             "enrich() must NOT call LDAP search_s when the negative sentinel is in cache. "
             f"Redis returned {self.NEGATIVE_SENTINEL!r} (negative hit) but LDAP was queried."
         )
 
-    def test_negative_cache_hit_returns_none(self, monkeypatch) -> None:
+    async def test_negative_cache_hit_returns_none(self, monkeypatch) -> None:
         """A negative cache hit must return None (same as a live no-match).
 
         WHY: The consumer maps None to EnrichmentSkipped(skip_reason='no_ldap_match').
@@ -255,9 +247,7 @@ class TestCacheNegativeHit:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "unknown@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "unknown@corp.com")
 
         assert attrs is None, (
             f"Negative cache hit must return attrs=None, got {attrs!r}"
@@ -266,7 +256,7 @@ class TestCacheNegativeHit:
             f"Negative cache hit must return outcome='cache_hit_negative', got {outcome!r}"
         )
 
-    def test_second_lookup_for_absent_user_does_not_query_ldap_again(
+    async def test_second_lookup_for_absent_user_does_not_query_ldap_again(
         self, monkeypatch
     ) -> None:
         """Two successive calls for the same absent user must produce only one LDAP query.
@@ -307,14 +297,10 @@ class TestCacheNegativeHit:
         adapter = LdapAdapter()
 
         # First call — must query LDAP (cache miss) and store sentinel
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "ghost@corp.com")
-        )
+        await adapter.enrich("primary_email", "ghost@corp.com")
 
         # Second call — must use cached sentinel and NOT query LDAP again
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "ghost@corp.com")
-        )
+        await adapter.enrich("primary_email", "ghost@corp.com")
 
         assert conn_mock.search_s.call_count == 1, (
             f"Two successive calls for the same absent user must produce exactly "
@@ -348,7 +334,7 @@ class TestCachePositiveHit:
         }
         return json.dumps(cached).encode("utf-8")
 
-    def test_positive_cache_hit_skips_ldap_search(self, monkeypatch) -> None:
+    async def test_positive_cache_hit_skips_ldap_search(self, monkeypatch) -> None:
         """When Redis GET returns a JSON attr object, search_s must NOT be called.
 
         Verifies enrich() recognises a JSON dict as a positive hit and skips LDAP.
@@ -367,16 +353,14 @@ class TestCachePositiveHit:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert not conn_mock.search_s.called, (
             "enrich() must NOT call LDAP search_s on a positive cache hit. "
             "The cached JSON dict should be returned directly."
         )
 
-    def test_positive_cache_hit_returns_dict(self, monkeypatch) -> None:
+    async def test_positive_cache_hit_returns_dict(self, monkeypatch) -> None:
         """A positive cache hit must return a unified-schema dict.
 
         WHY: The caller expects a dict (same as a live LDAP match). Returning None
@@ -396,9 +380,7 @@ class TestCachePositiveHit:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is not None, (
             "Positive cache hit must return a dict, got attrs=None"
@@ -410,7 +392,9 @@ class TestCachePositiveHit:
             f"Positive cache hit must return outcome='cache_hit_positive', got {outcome!r}"
         )
 
-    def test_positive_cache_hit_preserves_cached_values(self, monkeypatch) -> None:
+    async def test_positive_cache_hit_preserves_cached_values(
+        self, monkeypatch
+    ) -> None:
         """The returned dict must contain the values from the cache entry.
 
         WHY: If the adapter re-queries LDAP (ignoring cache) or returns a partially
@@ -437,9 +421,7 @@ class TestCachePositiveHit:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is not None
         assert attrs.get("display_name") == "Alice Smith", (
@@ -467,7 +449,7 @@ class TestCacheKeyFormat:
     lookup for users who have been queried before).
     """
 
-    def test_cache_get_uses_correct_key_prefix(self, monkeypatch) -> None:
+    async def test_cache_get_uses_correct_key_prefix(self, monkeypatch) -> None:
         """Redis GET must be called with key starting with 'ldap_enrichment:'.
 
         Verifies enrich() uses LDAP_ENRICHMENT_CACHE_PREFIX for key construction.
@@ -489,9 +471,7 @@ class TestCacheKeyFormat:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert len(fake_redis.get_calls) >= 1, (
             "enrich() must call Redis GET at least once"
@@ -502,7 +482,7 @@ class TestCacheKeyFormat:
             f"(LDAP_ENRICHMENT_CACHE_PREFIX). Got: {key_used!r}"
         )
 
-    def test_cache_key_includes_lookup_value(self, monkeypatch) -> None:
+    async def test_cache_key_includes_lookup_value(self, monkeypatch) -> None:
         """Redis GET key must include the correlation_value as suffix.
 
         WHY: Key = prefix + correlation_value (§5.3). Without the value in the
@@ -527,9 +507,7 @@ class TestCacheKeyFormat:
 
         lookup_value = "bob@corp.com"
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", lookup_value)
-        )
+        await adapter.enrich("primary_email", lookup_value)
 
         assert len(fake_redis.get_calls) >= 1
         key_used = fake_redis.get_calls[0]
@@ -539,7 +517,7 @@ class TestCacheKeyFormat:
             f"Expected: 'ldap_enrichment:{lookup_value}'"
         )
 
-    def test_cache_key_exact_format(self, monkeypatch) -> None:
+    async def test_cache_key_exact_format(self, monkeypatch) -> None:
         """Redis GET key must be exactly 'ldap_enrichment:<lookup_value>'.
 
         WHY: Any extra characters (e.g., ':email:', double prefix) would cause
@@ -563,9 +541,7 @@ class TestCacheKeyFormat:
 
         lookup_value = "alice@corp.com"
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", lookup_value)
-        )
+        await adapter.enrich("primary_email", lookup_value)
 
         assert len(fake_redis.get_calls) >= 1
         key_used = fake_redis.get_calls[0]
@@ -588,7 +564,9 @@ class TestCacheWrites:
     LDAP are reflected after at most cache_ttl_seconds).
     """
 
-    def test_positive_match_is_written_to_cache_with_ttl(self, monkeypatch) -> None:
+    async def test_positive_match_is_written_to_cache_with_ttl(
+        self, monkeypatch
+    ) -> None:
         """A successful LDAP match must be stored in Redis with a non-zero TTL.
 
         Verifies enrich() calls setex/set with a TTL after a successful match.
@@ -622,9 +600,7 @@ class TestCacheWrites:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert len(fake_redis.set_calls) >= 1, (
             "A positive LDAP match must write to Redis cache (setex/set with TTL). "
@@ -642,7 +618,7 @@ class TestCacheWrites:
             f"got {set_call['key']!r}"
         )
 
-    def test_negative_match_sentinel_is_written_to_cache_with_ttl(
+    async def test_negative_match_sentinel_is_written_to_cache_with_ttl(
         self, monkeypatch
     ) -> None:
         """A no-match LDAP result must store the negative sentinel in Redis.
@@ -668,9 +644,7 @@ class TestCacheWrites:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "ghost@corp.com")
-        )
+        await adapter.enrich("primary_email", "ghost@corp.com")
 
         assert len(fake_redis.set_calls) >= 1, (
             "A no-match LDAP result must write the negative sentinel to Redis cache. "
@@ -692,7 +666,9 @@ class TestCacheWrites:
             f"Got: {stored_value!r}"
         )
 
-    def test_positive_write_uses_json_serializable_value(self, monkeypatch) -> None:
+    async def test_positive_write_uses_json_serializable_value(
+        self, monkeypatch
+    ) -> None:
         """The cached positive value must be JSON-serializable (not raw bytes).
 
         WHY: Redis stores string-like values. Storing a Python dict directly would
@@ -728,9 +704,7 @@ class TestCacheWrites:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert len(fake_redis.set_calls) >= 1
         stored_value = fake_redis.set_calls[0]["value"]
@@ -773,7 +747,9 @@ class TestTransientFailureNotCached:
     This is unacceptable for a system that claims graceful degradation.
     """
 
-    def test_ldap_connection_error_does_not_write_to_cache(self, monkeypatch) -> None:
+    async def test_ldap_connection_error_does_not_write_to_cache(
+        self, monkeypatch
+    ) -> None:
         """SERVER_DOWN error must not write any sentinel to Redis.
 
         Verifies enrich() skips the cache-write on connection errors.
@@ -795,9 +771,7 @@ class TestTransientFailureNotCached:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert len(fake_redis.set_calls) == 0, (
             f"A SERVER_DOWN (connection error) must NOT write to Redis cache. "
@@ -805,7 +779,7 @@ class TestTransientFailureNotCached:
             f"Caching transient errors would prevent recovery when LDAP comes back."
         )
 
-    def test_ldap_timeout_does_not_write_to_cache(self, monkeypatch) -> None:
+    async def test_ldap_timeout_does_not_write_to_cache(self, monkeypatch) -> None:
         """TIMEOUT_EXCEEDED error must not write any sentinel to Redis.
 
         WHY: A timeout is transient (network congestion, LDAP load spike). Caching
@@ -831,16 +805,14 @@ class TestTransientFailureNotCached:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert len(fake_redis.set_calls) == 0, (
             f"A TIMEOUT_EXCEEDED error must NOT write to Redis cache. "
             f"Got {len(fake_redis.set_calls)} write(s): {fake_redis.set_calls}."
         )
 
-    def test_ldap_search_error_does_not_write_to_cache(self, monkeypatch) -> None:
+    async def test_ldap_search_error_does_not_write_to_cache(self, monkeypatch) -> None:
         """OPERATIONS_ERROR (search error) must not write any sentinel to Redis."""
         fake_ldap = _inject_fake_ldap(monkeypatch)
         fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
@@ -861,16 +833,16 @@ class TestTransientFailureNotCached:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert len(fake_redis.set_calls) == 0, (
             f"An OPERATIONS_ERROR (search error) must NOT write to Redis cache. "
             f"Got {len(fake_redis.set_calls)} write(s): {fake_redis.set_calls}."
         )
 
-    def test_no_match_sentinel_is_written_but_not_on_error(self, monkeypatch) -> None:
+    async def test_no_match_sentinel_is_written_but_not_on_error(
+        self, monkeypatch
+    ) -> None:
         """Contrast test: no-match (empty result) IS cached; error is NOT cached.
 
         WHY: Both return None from enrich(), but they have different caching semantics.
@@ -896,9 +868,7 @@ class TestTransientFailureNotCached:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "ghost@corp.com")
-        )
+        await adapter.enrich("primary_email", "ghost@corp.com")
 
         # No-match MUST write to cache (negative sentinel)
         assert len(fake_redis_nomatch.set_calls) >= 1, (
@@ -937,9 +907,7 @@ class TestTransientFailureNotCached:
         importlib.reload(ldap_mod)
 
         adapter2 = ldap_mod.LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter2.enrich("primary_email", "ghost@corp.com")
-        )
+        await adapter2.enrich("primary_email", "ghost@corp.com")
 
         assert len(fake_redis_err.set_calls) == 0, (
             f"A search error must NOT write to cache. "

@@ -10,6 +10,7 @@ import typing
 # Helper: get method names from a class
 # ---------------------------------------------------------------------------
 
+
 def _method_names(cls: type) -> set[str]:
     """Return all public method names defined directly on cls."""
     return {
@@ -452,7 +453,9 @@ class TestEventPublisherSignature:
             f"Found parameters: {param_names}."
         )
 
-    def test_event_publisher_publish_normalized_takes_normalized_parameter(self) -> None:
+    def test_event_publisher_publish_normalized_takes_normalized_parameter(
+        self,
+    ) -> None:
         """EventPublisher.publish_normalized must accept a 'normalized' parameter.
 
         WHY: The publisher needs the NormalizedAttributes instance to populate

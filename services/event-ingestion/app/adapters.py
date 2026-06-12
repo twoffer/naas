@@ -7,9 +7,8 @@ PostgresEventRepository — implements EventRepository over an async SQLAlchemy
 RedisEventPublisher — implements EventPublisher by calling the shared
     publish_to_stream helper, which performs a Redis XADD with maxlen capping.
 
-_to_orm is a module-level helper so tests can access it directly via
-    `app.adapters._to_orm` AND via `PostgresEventRepository._to_orm` (exposed
-    as a staticmethod reference).
+_to_orm is a module-level helper; tests access it directly via
+    `app.adapters._to_orm`.
 """
 
 from naas_shared.constants import STREAM_LOGIN_EVENTS
@@ -48,10 +47,6 @@ class PostgresEventRepository:
     durability point (spec §5.5 step 1).  The get_db_session dependency's
     end-of-request commit then becomes a harmless no-op.
     """
-
-    # Expose _to_orm as a staticmethod so tests can call
-    # PostgresEventRepository._to_orm(record) directly.
-    _to_orm = staticmethod(_to_orm)
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

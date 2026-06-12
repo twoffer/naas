@@ -1,7 +1,5 @@
 """Spec 0 documentation mirrors Spec 2 additions: LDAP cache prefix and pool size field."""
 
-from pathlib import Path
-
 # third-party
 import pytest
 
@@ -11,20 +9,14 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find docs/architecture/ — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        f"Could not locate repo root. Started from: {Path(__file__).resolve()}"
-    )
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
-SPEC_0_PATH = REPO_ROOT / "docs" / "architecture" / "SPEC_0_Project_Scaffold_and_Shared_Foundation.md"
+SPEC_0_PATH = (
+    REPO_ROOT
+    / "docs"
+    / "architecture"
+    / "SPEC_0_Project_Scaffold_and_Shared_Foundation.md"
+)
 
 
 # ---------------------------------------------------------------------------
@@ -210,14 +202,16 @@ class TestSpec0Section38LdapPoolSizeMirror:
         content = _read_spec0()
 
         ldap_host_pos = content.find('ldap_host: str = "openldap"')
-        pool_size_pos = content.find("ldap_pool_size: int = Field(default=3, ge=1, le=10)")
+        pool_size_pos = content.find(
+            "ldap_pool_size: int = Field(default=3, ge=1, le=10)"
+        )
 
         if ldap_host_pos == -1:
-            pytest.skip("ldap_host line not found in SPEC_0 — pre-existing fields check failed first")
+            pytest.skip(
+                "ldap_host line not found in SPEC_0 — pre-existing fields check failed first"
+            )
 
-        assert pool_size_pos != -1, (
-            "ldap_pool_size line not found in SPEC_0"
-        )
+        assert pool_size_pos != -1, "ldap_pool_size line not found in SPEC_0"
 
         # ldap_pool_size should appear within ~500 characters of ldap_host
         # (same Settings LDAP block, not at the end of an unrelated section)
