@@ -581,3 +581,70 @@ class TestNoWasMappedAttributes:
         assert detail.confidence == pytest.approx(0.85), (
             f"Expected 0.85 for unanimous display_name, got {detail.confidence!r}."
         )
+
+
+# ===========================================================================
+# CLASS 7 — Mixed was_mapped unanimous department penalty
+# ===========================================================================
+
+
+class TestUnanimousMixedWasMappedPenalty:
+    """Unanimous department with mixed was_mapped flags must apply the penalty.
+
+    Spec §5.5 / resolution.py lines 215-220: 'all_mapped = all(wm for _, wm in
+    sources_map.values())'.  If ANY source reports was_mapped=False, all_mapped is
+    False and the -0.2 penalty is applied.
+
+    This pins that the all(...) check is the implementation, NOT an any(...) check.
+    Using any(...) would incorrectly suppress the penalty when at least one source
+    was mapped, hiding the unmapped retention in the confidence score.
+
+    WHY this matters: if LDAP is authoritative and sends a canonical value but OIDC
+    sends the same raw string having gone through the title-case fallback (was_mapped=False),
+    the agreed value still has uncertain canonical mapping.  The penalty signals that
+    at least one source did not recognise the agreed value as a canonical alias.
+    """
+
+    def test_mixed_flags_unanimous_applies_penalty(self) -> None:
+        """Unanimous dept {ldap: ('X', True), oidc: ('X', False)} → confidence = max_weight - 0.2.
+
+        ldap weight = 0.90, oidc weight = 0.70.
+        max_weight = 0.90.
+        all_mapped = all([True, False]) = False → penalty applied.
+        confidence = 0.90 - 0.20 = 0.70.
+
+        WHY: 'X' was_mapped=False from OIDC means the title-case fallback was used;
+        the canonical mapping is uncertain even though both sources agree on the string.
+        """
+        from app.resolution import resolve
+        from naas_shared.models import UnanimousResolution
+
+        cfg = _load_real_config()
+        result = resolve(
+            attribute_sources={
+                "department": {
+                    "ldap": ("X", True),   # ldap recognized 'X' as canonical
+                    "oidc": ("X", False),  # oidc used title-case fallback — uncertain mapping
+                }
+            },
+            config=cfg,
+            source_protocol="oidc",
+            enrichment=_applied_enrichment(),
+        )
+
+        detail = result.resolution_details["department"]
+        assert isinstance(detail, UnanimousResolution), (
+            f"Both sources agree on 'X' → should be UnanimousResolution. "
+            f"Got {type(detail).__name__!r}."
+        )
+        assert detail.resolved_value == "X", (
+            f"Resolved value must be 'X' (agreed value). Got {detail.resolved_value!r}."
+        )
+        # all_mapped=False because oidc has was_mapped=False → penalty applied
+        # max weight = ldap = 0.90; confidence = 0.90 - 0.20 = 0.70
+        assert detail.confidence == pytest.approx(0.70), (
+            f"Unanimous dept with mixed was_mapped must apply -0.2 penalty. "
+            f"Expected max_weight(0.90) - 0.20 = 0.70. Got {detail.confidence!r}. "
+            "The resolution uses all(was_mapped) — if ANY source is unmapped, "
+            "the penalty fires.  Verify resolution.py uses `all(...)`, not `any(...)`."
+        )

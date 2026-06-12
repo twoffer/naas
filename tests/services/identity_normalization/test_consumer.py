@@ -4,24 +4,9 @@ from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 from uuid import UUID
-
-
-# ---------------------------------------------------------------------------
-# sys.path injection
-# ---------------------------------------------------------------------------
-
-from tests.helpers import REPO_ROOT as _REPO
-
-_SVC = str(_REPO / "services" / "identity-normalization")
-_SHARED = str(_REPO / "shared")
-for _p in [_SVC, _SHARED]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 
 from naas_shared.models import (
     EnrichmentSkipped,
@@ -631,3 +616,179 @@ class TestConsumerMessageParsing:
         )
         assert parsed.protocol == "oidc"
         assert parsed.user_id == "alice"
+
+
+# ===========================================================================
+# D.8 (continued): Poison-message no-ACK contract
+# ===========================================================================
+
+
+class TestPoisonMessageNoAck:
+    """Malformed or invalid messages must NOT be XACKed (poison-message safety).
+
+    Spec §5.1 / consumer.py: ACK only after all steps succeed.  A message that
+    fails JSON parsing or Pydantic validation must stay in the pending-entries list
+    so it can be inspected / dead-lettered manually.  It must never cause an
+    unhandled exception that kills the consumer loop.
+
+    WHY: If a bad message were XACKed it would be permanently lost.  If it
+    propagated an exception it would stall the loop for all subsequent messages.
+    """
+
+    async def test_bad_json_data_field_no_xack(self):
+        """A message with a non-JSON data field must NOT be XACKed.
+
+        The consumer calls json.loads(data_raw); a SyntaxError/JSONDecodeError
+        must be caught, the message skipped (not ACKed), and the loop must continue.
+        """
+        from app.consumer import run_consumer_loop
+
+        service = AsyncMock()
+        repository = AsyncMock()
+        publisher = AsyncMock()
+
+        bad_message = [
+            [STREAM_LOGIN_EVENTS, [("bad-1-0", {"data": "not valid json {{{"})]]
+        ]
+
+        redis = AsyncMock()
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                bad_message,
+                asyncio.CancelledError(),
+            ]
+        )
+        redis.xack = AsyncMock()
+
+        try:
+            await run_consumer_loop(
+                service=service,
+                repository=repository,
+                publisher=publisher,
+                redis=redis,
+            )
+        except asyncio.CancelledError:
+            pass
+
+        assert not redis.xack.called, (
+            "XACK must NOT be called for a message with an invalid JSON data field. "
+            "Bad JSON means we cannot reconstruct the event — it must stay pending."
+        )
+
+    async def test_invalid_login_event_record_no_xack(self):
+        """A message with valid JSON but invalid LoginEventRecord schema must NOT be XACKed.
+
+        LoginEventRecord.model_validate() raises Pydantic ValidationError on a schema
+        violation (e.g., wrong type for 'id').  The consumer must catch it, log, and
+        leave the message unACKed for redelivery.
+        """
+        from app.consumer import run_consumer_loop
+
+        # Build a JSON payload that parses fine but fails LoginEventRecord validation.
+        invalid_payload = json.dumps(
+            {
+                "id": "this-is-not-a-uuid",   # invalid UUID
+                "user_id": "alice",
+                "client_ip": "192.168.1.1",
+                "protocol": "oidc",
+                "timestamp": "2024-01-15T10:30:00+00:00",
+                "source": "user",
+                "is_synthetic": False,
+                "is_historical": False,
+                "raw_attributes": {},
+            }
+        )
+        invalid_message = [
+            [STREAM_LOGIN_EVENTS, [("bad-2-0", {"data": invalid_payload})]]
+        ]
+
+        service = AsyncMock()
+        repository = AsyncMock()
+        publisher = AsyncMock()
+
+        redis = AsyncMock()
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                invalid_message,
+                asyncio.CancelledError(),
+            ]
+        )
+        redis.xack = AsyncMock()
+
+        try:
+            await run_consumer_loop(
+                service=service,
+                repository=repository,
+                publisher=publisher,
+                redis=redis,
+            )
+        except asyncio.CancelledError:
+            pass
+
+        assert not redis.xack.called, (
+            "XACK must NOT be called for a message that fails LoginEventRecord validation. "
+            "An unvalidated payload cannot be safely processed — it must stay pending."
+        )
+
+    async def test_invalid_message_does_not_propagate_exception(self):
+        """A bad message must not raise an exception out of _process_message.
+
+        Verifies that the consumer loop continues to process the next valid message
+        after encountering a bad one — the loop is NOT killed.
+        """
+        from app.consumer import run_consumer_loop
+
+        good_record = _make_record()
+        normalized = _make_normalized()
+        normalize_call_count = [0]
+
+        async def _counting_normalize(r):
+            normalize_call_count[0] += 1
+            return normalized
+
+        service = AsyncMock()
+        service.normalize = _counting_normalize
+        repository = AsyncMock()
+        repository.write = AsyncMock(return_value=None)
+        publisher = AsyncMock()
+        publisher.publish_normalized = AsyncMock(return_value=None)
+
+        bad_message_then_good = [
+            [
+                STREAM_LOGIN_EVENTS,
+                [
+                    ("bad-3-0", {"data": "not-json"}),
+                    ("good-3-1", {"data": json.dumps(good_record.model_dump(mode="json"), default=str)}),
+                ],
+            ]
+        ]
+
+        redis = AsyncMock()
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                bad_message_then_good,
+                asyncio.CancelledError(),
+            ]
+        )
+        redis.xack = AsyncMock()
+
+        try:
+            await run_consumer_loop(
+                service=service,
+                repository=repository,
+                publisher=publisher,
+                redis=redis,
+            )
+        except asyncio.CancelledError:
+            pass
+
+        assert normalize_call_count[0] == 1, (
+            f"After a bad message, the loop must continue and process the next valid "
+            f"message.  Expected normalize() called 1 time, got {normalize_call_count[0]}. "
+            "A poison message must not kill the consumer loop."
+        )
+        # The good message was XACKed; the bad one was not.
+        assert redis.xack.call_count == 1, (
+            f"Exactly 1 XACK expected (for the good message only). "
+            f"Got {redis.xack.call_count}."
+        )

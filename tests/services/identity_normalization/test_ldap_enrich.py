@@ -1,96 +1,17 @@
 """LdapAdapter.enrich(): LDAP search, attribute extraction, and cache write mechanics."""
 
-import sys
 from unittest.mock import AsyncMock, MagicMock
 
 # third-party
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Shared fake-ldap injection helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_fake_ldap_module() -> MagicMock:
-    """Build a fake 'ldap' MagicMock that mimics the minimal ldap API used by enrich().
-
-    The fake provides:
-    - ldap.SCOPE_SUBTREE = 2
-    - ldap.filter.escape_filter_chars (a real callable — controlled in per-test setup)
-    - ldap.dn.dn2str (unused directly but present so no AttributeError)
-    - ldap.initialize(uri) → a connection mock
-    - ldap.LDAPError base exception class
-    - ldap.TIMEOUT_EXCEEDED (int sentinel, per python-ldap convention)
-    - ldap.SERVER_DOWN (int sentinel)
-    - ldap.NO_SUCH_OBJECT (int sentinel)
-    """
-    fake_ldap = MagicMock(name="ldap")
-    fake_ldap.SCOPE_SUBTREE = 2
-
-    # Exception classes — must be real classes so except clauses work
-    class LDAPError(Exception):
-        pass
-
-    class TIMEOUT(LDAPError):
-        pass
-
-    class TIMELIMIT_EXCEEDED(LDAPError):
-        pass
-
-    class SERVER_DOWN(LDAPError):
-        pass
-
-    class NO_SUCH_OBJECT(LDAPError):
-        pass
-
-    class OPERATIONS_ERROR(LDAPError):
-        pass
-
-    fake_ldap.LDAPError = LDAPError
-    fake_ldap.TIMEOUT = TIMEOUT
-    fake_ldap.TIMELIMIT_EXCEEDED = TIMELIMIT_EXCEEDED
-    fake_ldap.SERVER_DOWN = SERVER_DOWN
-    fake_ldap.NO_SUCH_OBJECT = NO_SUCH_OBJECT
-    fake_ldap.OPERATIONS_ERROR = OPERATIONS_ERROR
-
-    # ldap.filter sub-module
-    fake_filter = MagicMock(name="ldap.filter")
-    # Default pass-through: escape_filter_chars returns the input unchanged
-    fake_filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
-    fake_ldap.filter = fake_filter
-
-    # ldap.dn sub-module
-    fake_dn = MagicMock(name="ldap.dn")
-    fake_ldap.dn = fake_dn
-
-    return fake_ldap
-
-
-def _inject_fake_ldap(monkeypatch) -> MagicMock:
-    """Inject fake ldap modules into sys.modules and return the top-level mock.
-
-    The injection must happen before importing app.adapters.ldap (or the cached
-    import must be cleared so it re-imports with the fake in place).
-    """
-    fake_ldap = _make_fake_ldap_module()
-    monkeypatch.setitem(sys.modules, "ldap", fake_ldap)
-    monkeypatch.setitem(sys.modules, "ldap.filter", fake_ldap.filter)
-    monkeypatch.setitem(sys.modules, "ldap.dn", fake_ldap.dn)
-    # Clear any cached app.adapters.ldap import so the next import re-evaluates
-    for key in list(sys.modules.keys()):
-        if key == "app.adapters.ldap" or key == "app.adapters":
-            monkeypatch.delitem(sys.modules, key, raising=False)
-    return fake_ldap
+from tests.services.identity_normalization.conftest import inject_fake_ldap
 
 
 def _make_fake_redis(get_return=None, set_calls=None) -> MagicMock:
-    """Build a fake async Redis client.
+    """Build a fake async Redis client (legacy helper — new tests use FakeRedis).
 
-    Args:
-        get_return: What redis.get() returns (None = miss, b'"null"' = negative hit,
-                    JSON bytes = positive hit).
-        set_calls: A list to record (key, value, ex=ttl) calls for assertion.
+    Kept for tests that assert on a shared list passed in via set_calls.
     """
     fake_redis = AsyncMock(name="redis")
 
@@ -110,6 +31,10 @@ def _make_fake_redis(get_return=None, set_calls=None) -> MagicMock:
     fake_redis.set = AsyncMock(side_effect=fake_set)
 
     return fake_redis
+
+
+# Alias so test bodies that call _inject_fake_ldap continue to work unchanged.
+_inject_fake_ldap = inject_fake_ldap
 
 
 # ---------------------------------------------------------------------------

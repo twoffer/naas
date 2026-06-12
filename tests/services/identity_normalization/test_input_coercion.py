@@ -8,61 +8,9 @@ non-string entries to strings-only.
 
 from __future__ import annotations
 
-import sys
-from unittest.mock import MagicMock
-
-
-# ---------------------------------------------------------------------------
-# Shared helpers (fake ldap for adapter imports that require python-ldap)
-# ---------------------------------------------------------------------------
-
-
-def _make_fake_ldap_module() -> MagicMock:
-    """Build a minimal fake ldap module with real exception classes."""
-    fake_ldap = MagicMock(name="ldap")
-    fake_ldap.SCOPE_SUBTREE = 2
-
-    class LDAPError(Exception):
-        pass
-
-    class TIMEOUT_EXCEEDED(LDAPError):
-        pass
-
-    class SERVER_DOWN(LDAPError):
-        pass
-
-    class NO_SUCH_OBJECT(LDAPError):
-        pass
-
-    class OPERATIONS_ERROR(LDAPError):
-        pass
-
-    fake_ldap.LDAPError = LDAPError
-    fake_ldap.TIMEOUT_EXCEEDED = TIMEOUT_EXCEEDED
-    fake_ldap.SERVER_DOWN = SERVER_DOWN
-    fake_ldap.NO_SUCH_OBJECT = NO_SUCH_OBJECT
-    fake_ldap.OPERATIONS_ERROR = OPERATIONS_ERROR
-
-    fake_filter = MagicMock(name="ldap.filter")
-    fake_filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
-    fake_ldap.filter = fake_filter
-
-    fake_dn = MagicMock(name="ldap.dn")
-    fake_ldap.dn = fake_dn
-
-    return fake_ldap
-
-
-def _inject_fake_ldap(monkeypatch) -> MagicMock:
-    """Inject fake ldap into sys.modules and clear cached app.adapters.ldap."""
-    fake_ldap = _make_fake_ldap_module()
-    monkeypatch.setitem(sys.modules, "ldap", fake_ldap)
-    monkeypatch.setitem(sys.modules, "ldap.filter", fake_ldap.filter)
-    monkeypatch.setitem(sys.modules, "ldap.dn", fake_ldap.dn)
-    for key in list(sys.modules.keys()):
-        if key == "app.adapters.ldap" or key == "app.adapters":
-            monkeypatch.delitem(sys.modules, key, raising=False)
-    return fake_ldap
+from tests.services.identity_normalization.conftest import (
+    inject_fake_ldap as _inject_fake_ldap,
+)
 
 
 # ===========================================================================
@@ -351,10 +299,17 @@ class TestAdapterExtractNonStringInputs:
         )
 
     def test_ldap_extract_member_of_filters_non_strings(self, monkeypatch) -> None:
-        """LdapAdapter.extract() with memberOf=[1, 2, 'cn=grp,dc=corp'] keeps only strings.
+        """LdapAdapter.extract() with memberOf=[1, 2, 'cn=engineering,...'] returns only 'engineering'.
 
-        WHY: _reduce_dn_to_group_name calls str methods on the DN value; passing an
-        int causes AttributeError. Non-str memberOf entries must be dropped.
+        WHY: _reduce_dn_to_group_name calls ldap.dn.str2dn on the DN string; passing
+        an int would cause AttributeError. Non-str memberOf entries must be dropped.
+        The one valid DN string 'cn=engineering,ou=groups,dc=corp,dc=com' must be
+        reduced to its cn value 'engineering' via str2dn.
+
+        Previously the fake ldap.dn was a bare MagicMock so str2dn returned an empty-
+        iterating MagicMock, every DN reduced to None, groups == [], and the assertion
+        loop ran zero times — the test passed vacuously.  Now that the canonical fake
+        provides a functional str2dn, this test asserts the actual expected output.
         """
         _inject_fake_ldap(monkeypatch)
         from app.adapters.ldap import LdapAdapter
@@ -370,10 +325,18 @@ class TestAdapterExtractNonStringInputs:
             }
         )
 
+        # Non-str entries (1, 2) must be dropped.
         for g in result["groups"]:
             assert isinstance(g, str), (
                 f"All entries in groups must be strings; got {g!r} ({type(g).__name__})"
             )
+
+        # The valid DN must resolve to its cn component value 'engineering'.
+        assert result["groups"] == ["engineering"], (
+            f"The valid DN 'cn=engineering,...' must reduce to group name 'engineering'. "
+            f"Got groups={result['groups']!r}. "
+            "Check that non-str items are filtered AND that str2dn parses the valid DN."
+        )
 
 
 # ===========================================================================

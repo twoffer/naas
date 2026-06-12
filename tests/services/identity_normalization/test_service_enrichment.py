@@ -2,29 +2,12 @@
 
 from __future__ import annotations
 
-import sys
 from datetime import datetime, timezone
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
-
-# ---------------------------------------------------------------------------
-# sys.path injection (mirrors conftest.py pattern for this service)
-# ---------------------------------------------------------------------------
-
 from tests.helpers import REPO_ROOT as _REPO
-
-_SVC = str(_REPO / "services" / "identity-normalization")
-_SHARED = str(_REPO / "shared")
-for _p in [_SVC, _SHARED]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-
-# ---------------------------------------------------------------------------
-# Shared model imports (always present)
-# ---------------------------------------------------------------------------
 from naas_shared.models import (
     EnrichmentSkipped,
     LoginEventRecord,
@@ -677,4 +660,262 @@ class TestConnectionErrorStatefulLogging:
         assert len(recovery_events) >= 1, (
             f"Recovery after degradation must log INFO 'ldap_enrichment_recovered'. "
             f"Got logged events: {logged_events}"
+        )
+
+
+# ===========================================================================
+# F. LDAP attribute merge into resolution (Task 3)
+# ===========================================================================
+
+
+class TestLdapAttrMergeIntoResolution:
+    """_merge_ldap_attrs wires LDAP-sourced attributes into the resolution layer.
+
+    Spec §5.5: when enrichment returns ldap_match or cache_hit_positive, the LDAP
+    unified attrs are added as the "ldap" source in attribute_sources before
+    resolution.resolve() is called.  These tests pin that the merge is actually
+    visible in NormalizedAttributes.resolution_details, so that adding an LDAP
+    source produces observable output differences rather than silently being ignored.
+
+    Uses the real config/normalization.yaml for all weight/priority assertions so
+    the tests pin actual production behaviour.
+    """
+
+    def _make_service_with_ldap_attrs(
+        self,
+        ldap_attrs: dict,
+        outcome: str = "ldap_match",
+    ):
+        """Build NormalizationService whose ldap.enrich() returns the given attrs."""
+        from app.service import NormalizationService
+        from app.adapters.oidc import OidcAdapter
+        from app.adapters.saml import SamlAdapter
+        from app.adapters.ldap import LdapAdapter
+        from app.normalization_config import load_config
+
+        cfg = load_config(_REPO / "config" / "normalization.yaml")
+        oidc = OidcAdapter()
+        saml = SamlAdapter()
+        ldap = LdapAdapter()
+        ldap.enrich = AsyncMock(return_value=(ldap_attrs, outcome))
+        return NormalizationService(
+            config=cfg, oidc_adapter=oidc, saml_adapter=saml, ldap_adapter=ldap
+        )
+
+    async def test_ldap_match_ldap_appears_in_resolution_details_sources(self):
+        """When LDAP returns a department, 'ldap' must appear in resolution_details['department'].sources.
+
+        Spec §5.5: resolution_details records all sources that contributed to the
+        winning value.  If _merge_ldap_attrs silently drops LDAP data, sources will
+        contain only 'oidc' and the test will fail — confirming the merge happened.
+        """
+        # OIDC record has department='eng' (→ 'Engineering'); LDAP also sends 'Engineering'.
+        # With the real config, priority for department is [ldap, oidc, saml].
+        ldap_attrs = {
+            "display_name": "Alice Smith",
+            "primary_email": "alice@corp.com",
+            "department": "Engineering",
+            "employee_type": "FTE",
+            "groups": ["engineering"],
+        }
+        svc = self._make_service_with_ldap_attrs(ldap_attrs, outcome="ldap_match")
+        record = _oidc_record()
+
+        result = await svc.normalize(record)
+
+        dept_detail = result.resolution_details.get("department")
+        assert dept_detail is not None, (
+            "resolution_details must contain 'department' when both OIDC and LDAP provide it"
+        )
+        sources = dept_detail.sources
+        assert "ldap" in sources, (
+            f"'ldap' must appear in resolution_details['department'].sources when "
+            f"ldap_match returns a department. Got sources={sources!r}. "
+            "If ldap is absent, _merge_ldap_attrs is not wiring LDAP into attribute_sources."
+        )
+
+    async def test_cache_hit_positive_ldap_appears_in_resolution_details_sources(self):
+        """cache_hit_positive: LDAP data arrives from cache, must still appear in resolution.
+
+        WHY: The merge path for cache_hit_positive is identical to ldap_match but
+        sets cache_hit=True on EnrichmentApplied.  Both branches call _merge_ldap_attrs.
+        """
+        ldap_attrs = {
+            "display_name": "Alice Smith",
+            "primary_email": "alice@corp.com",
+            "department": "Engineering",
+            "employee_type": "FTE",
+            "groups": ["ldap-group"],
+        }
+        svc = self._make_service_with_ldap_attrs(
+            ldap_attrs, outcome="cache_hit_positive"
+        )
+        record = _oidc_record()
+
+        result = await svc.normalize(record)
+
+        dept_detail = result.resolution_details.get("department")
+        assert dept_detail is not None, (
+            "resolution_details must contain 'department' for cache_hit_positive outcome"
+        )
+        sources = dept_detail.sources
+        assert "ldap" in sources, (
+            f"'ldap' must appear in resolution_details['department'].sources for "
+            f"cache_hit_positive.  Got sources={sources!r}."
+        )
+        # Also confirm cache_hit is True
+        from naas_shared.models import EnrichmentApplied
+
+        assert isinstance(result.enrichment, EnrichmentApplied)
+        assert result.enrichment.cache_hit is True
+
+    async def test_ldap_wins_department_when_config_priority_favors_ldap(self):
+        """When OIDC and LDAP disagree on department, LDAP wins per config priority [ldap, oidc, saml].
+
+        Real config: department priority = [ldap, oidc, saml].
+        OIDC has 'Finance'; LDAP has 'Engineering'.
+        Resolution must pick 'Engineering' (LDAP wins) and record conflicting_values.
+
+        Spec §5.5: priority resolution — winner_source matches config priority ordering.
+        """
+        from naas_shared.models import PriorityResolution
+
+        # OIDC raw: department='fin' → 'Finance'
+        # LDAP: department='Engineering'
+        ldap_attrs = {
+            "display_name": "Alice Smith",
+            "primary_email": "alice@corp.com",
+            "department": "Engineering",
+            "employee_type": "FTE",
+            "groups": [],
+        }
+        # Build a record with a different department so there IS a conflict.
+        record = LoginEventRecord(
+            id=_UUID,
+            user_id="alice",
+            client_ip="192.168.1.1",
+            protocol="oidc",
+            timestamp=_NOW,
+            source="user",
+            is_synthetic=False,
+            is_historical=False,
+            raw_attributes={
+                "name": "Alice Smith",
+                "email": "alice@corp.com",
+                "department": "fin",   # → 'Finance' after normalization
+                "employee_type": "fte",
+                "groups": [],
+            },
+        )
+        svc = self._make_service_with_ldap_attrs(ldap_attrs, outcome="ldap_match")
+        result = await svc.normalize(record)
+
+        dept_detail = result.resolution_details.get("department")
+        assert dept_detail is not None, "department must be in resolution_details"
+        assert isinstance(dept_detail, PriorityResolution), (
+            f"Conflicting OIDC/LDAP departments must produce PriorityResolution, "
+            f"got {type(dept_detail).__name__!r}"
+        )
+        assert dept_detail.winner_source == "ldap", (
+            f"LDAP must win the department conflict per config priority [ldap, oidc, saml]. "
+            f"Got winner_source={dept_detail.winner_source!r}"
+        )
+        assert result.department == "Engineering", (
+            f"Resolved department must be 'Engineering' (LDAP winner). "
+            f"Got {result.department!r}"
+        )
+        assert "oidc" in dept_detail.conflicting_values, (
+            f"conflicting_values must include 'oidc' (the losing source). "
+            f"Got {dept_detail.conflicting_values!r}"
+        )
+        assert dept_detail.conflicting_values["oidc"] == "Finance", (
+            f"OIDC conflicting value must be 'Finance' (from 'fin'). "
+            f"Got {dept_detail.conflicting_values['oidc']!r}"
+        )
+
+    async def test_ldap_groups_are_unioned_into_resolved_groups(self):
+        """OIDC and LDAP groups are unioned (default strategy) in the resolved output.
+
+        Spec §5.5: groups merge_strategy defaults to 'union'. Both OIDC and LDAP
+        groups must appear in the resolved groups list.
+        """
+        ldap_attrs = {
+            "display_name": "Alice Smith",
+            "primary_email": "alice@corp.com",
+            "department": "Engineering",
+            "employee_type": "FTE",
+            "groups": ["engineering", "ldap-all-users"],
+        }
+        # OIDC record has groups=['admin', 'vpn-users']
+        svc = self._make_service_with_ldap_attrs(ldap_attrs, outcome="ldap_match")
+        record = _oidc_record()  # groups=["admin", "vpn-users"]
+
+        result = await svc.normalize(record)
+
+        resolved_groups = set(result.groups)
+        assert "admin" in resolved_groups, (
+            f"OIDC group 'admin' must appear in resolved groups. Got {result.groups!r}"
+        )
+        assert "engineering" in resolved_groups, (
+            f"LDAP group 'engineering' must appear in resolved groups. Got {result.groups!r}"
+        )
+        assert "ldap-all-users" in resolved_groups, (
+            f"LDAP group 'ldap-all-users' must appear in resolved groups. Got {result.groups!r}"
+        )
+
+    async def test_ldap_department_unmapped_triggers_penalty_in_resolution(self):
+        """LDAP returning an unmapped department value applies the -0.2 confidence penalty.
+
+        Spec §5.5: was_mapped=False on the winning department value → confidence reduced
+        by 0.2.  When LDAP provides the only source ('ldap_match', no OIDC department
+        in raw_attrs), _was_department_mapped('WidgetCorp') returns False, so
+        SingleSourceResolution.confidence = 0.90 - 0.20 = 0.70 (ldap weight 0.90).
+        """
+        import pytest
+        from naas_shared.models import SingleSourceResolution
+
+        ldap_attrs = {
+            "display_name": "Alice Smith",
+            "primary_email": "alice@corp.com",
+            "department": "WidgetCorp",   # unmapped — not in DEPARTMENT_CANONICAL
+            "employee_type": "FTE",
+            "groups": [],
+        }
+        # Build a record without any OIDC department so LDAP is the single source.
+        record = LoginEventRecord(
+            id=_UUID,
+            user_id="alice",
+            client_ip="192.168.1.1",
+            protocol="oidc",
+            timestamp=_NOW,
+            source="user",
+            is_synthetic=False,
+            is_historical=False,
+            raw_attributes={
+                "name": "Alice Smith",
+                "email": "alice@corp.com",
+                # no department key — LDAP is the single source
+                "employee_type": "fte",
+                "groups": [],
+            },
+        )
+        svc = self._make_service_with_ldap_attrs(ldap_attrs, outcome="ldap_match")
+        result = await svc.normalize(record)
+
+        dept_detail = result.resolution_details.get("department")
+        assert dept_detail is not None, (
+            "department must appear in resolution_details when LDAP provides it"
+        )
+        assert isinstance(dept_detail, SingleSourceResolution), (
+            f"Single LDAP source must produce SingleSourceResolution. "
+            f"Got {type(dept_detail).__name__!r}"
+        )
+        assert dept_detail.resolved_value == "WidgetCorp", (
+            f"Unmapped LDAP department 'WidgetCorp' must be retained. "
+            f"Got {dept_detail.resolved_value!r}"
+        )
+        # ldap weight for department = 0.90; penalty for unmapped = -0.20 → 0.70
+        assert dept_detail.confidence == pytest.approx(0.70), (
+            f"Confidence must be 0.90 (ldap weight) - 0.20 (unmapped penalty) = 0.70. "
+            f"Got {dept_detail.confidence!r}"
         )

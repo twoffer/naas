@@ -11,7 +11,3 @@ markers = [
     "integration: live-docker integration test (skip by default; opt in via --integration flag or NAAS_RUN_INTEGRATION=1 env var)",
 ]
 
-[tool.ruff.lint.per-file-ignores]
-# Service test files inject sys.path (via per-service conftest pattern) before
-# importing app.* — module-level imports cannot all sit at the top of the file.
-"tests/**" = ["E402"]

@@ -1,6 +1,6 @@
 """GET /health endpoint happy-path, degraded, and unhealthy states for event-ingestion."""
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # third-party
@@ -67,8 +67,6 @@ def _make_failing_redis_client(exc: Exception | None = None) -> AsyncMock:
 # ---------------------------------------------------------------------------
 # Context manager: patch DB + Redis simultaneously
 # ---------------------------------------------------------------------------
-
-from contextlib import contextmanager
 
 
 @contextmanager

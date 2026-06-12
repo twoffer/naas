@@ -1,79 +1,14 @@
 """LDAP injection sanitization in LdapAdapter.enrich(): escape_filter_chars contract."""
 
-import sys
 from unittest.mock import MagicMock
 
 # third-party
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Shared helpers (duplicated for module isolation)
-# ---------------------------------------------------------------------------
-
-
-def _make_fake_ldap_module() -> MagicMock:
-    """Build a fake 'ldap' MagicMock with exception classes and sub-modules."""
-    fake_ldap = MagicMock(name="ldap")
-    fake_ldap.SCOPE_SUBTREE = 2
-
-    class LDAPError(Exception):
-        pass
-
-    class SERVER_DOWN(LDAPError):
-        pass
-
-    class TIMEOUT(LDAPError):
-        pass
-
-    class TIMELIMIT_EXCEEDED(LDAPError):
-        pass
-
-    class OPERATIONS_ERROR(LDAPError):
-        pass
-
-    fake_ldap.LDAPError = LDAPError
-    fake_ldap.SERVER_DOWN = SERVER_DOWN
-    fake_ldap.TIMEOUT = TIMEOUT
-    fake_ldap.TIMELIMIT_EXCEEDED = TIMELIMIT_EXCEEDED
-    fake_ldap.OPERATIONS_ERROR = OPERATIONS_ERROR
-
-    fake_filter = MagicMock(name="ldap.filter")
-    # Default: pass-through (identity function) — overridden per test
-    fake_filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
-    fake_ldap.filter = fake_filter
-
-    fake_dn = MagicMock(name="ldap.dn")
-    fake_ldap.dn = fake_dn
-
-    return fake_ldap
-
-
-def _inject_fake_ldap(monkeypatch) -> MagicMock:
-    fake_ldap = _make_fake_ldap_module()
-    monkeypatch.setitem(sys.modules, "ldap", fake_ldap)
-    monkeypatch.setitem(sys.modules, "ldap.filter", fake_ldap.filter)
-    monkeypatch.setitem(sys.modules, "ldap.dn", fake_ldap.dn)
-    for key in list(sys.modules.keys()):
-        if key == "app.adapters.ldap" or key == "app.adapters":
-            monkeypatch.delitem(sys.modules, key, raising=False)
-    return fake_ldap
-
-
-class _FakeRedis:
-    """Minimal fake async Redis — always returns cache miss, records set calls."""
-
-    def __init__(self):
-        self.set_calls: list = []
-
-    async def get(self, key: str):
-        return None  # always miss → forces LDAP query path
-
-    async def setex(self, key: str, ttl: int, value):
-        self.set_calls.append({"key": key, "ttl": ttl, "value": value})
-
-    async def set(self, key: str, value, ex=None):
-        self.set_calls.append({"key": key, "ttl": ex, "value": value})
+from tests.services.identity_normalization.conftest import (
+    FakeRedis as _FakeRedis,
+    inject_fake_ldap as _inject_fake_ldap,
+)
 
 
 # ===========================================================================

@@ -16,24 +16,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery and sys.path setup
-# ---------------------------------------------------------------------------
-
-
 from tests.helpers import REPO_ROOT
-
-SHARED_DIR = str(REPO_ROOT / "shared")
-DEMO_SCRIPT = REPO_ROOT / "demo" / "demo_normalization.py"
-
-if SHARED_DIR not in sys.path:
-    sys.path.insert(0, SHARED_DIR)
-
-# ---------------------------------------------------------------------------
-# naas_shared imports for building real-shape fixtures
-# ---------------------------------------------------------------------------
-
-from naas_shared.models import (  # noqa: E402
+from naas_shared.models import (
     EnrichmentApplied,
     EnrichmentSkipped,
     ListMergeResolution,
@@ -42,6 +26,8 @@ from naas_shared.models import (  # noqa: E402
     SingleSourceResolution,
     UnanimousResolution,
 )
+
+DEMO_SCRIPT = REPO_ROOT / "demo" / "demo_normalization.py"
 
 
 # ---------------------------------------------------------------------------

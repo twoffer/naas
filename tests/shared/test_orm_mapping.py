@@ -1,16 +1,10 @@
 """naas_shared.schemas ORM mapping: Base declarative base and EventORM column contracts."""
 
-import sys
-
-# third-party
 import pytest
 
 from tests.helpers import REPO_ROOT
 
 SHARED_DIR = REPO_ROOT / "shared"
-
-if str(SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(SHARED_DIR))
 
 
 # ---------------------------------------------------------------------------

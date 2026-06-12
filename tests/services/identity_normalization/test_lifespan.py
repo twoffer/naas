@@ -3,26 +3,12 @@
 from __future__ import annotations
 
 import asyncio
-import sys
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-# ---------------------------------------------------------------------------
-# sys.path injection
-# ---------------------------------------------------------------------------
-
-
-from tests.helpers import REPO_ROOT as _REPO
-
-_SVC = str(_REPO / "services" / "identity-normalization")
-_SHARED = str(_REPO / "shared")
-for _p in [_SVC, _SHARED]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
-from naas_shared.constants import STREAM_LOGIN_EVENTS, GROUP_NORMALIZATION  # noqa: E402
+from naas_shared.constants import STREAM_LOGIN_EVENTS, GROUP_NORMALIZATION
 
 
 # ===========================================================================

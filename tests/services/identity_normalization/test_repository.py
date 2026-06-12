@@ -2,24 +2,9 @@
 
 from __future__ import annotations
 
-import sys
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
-
-
-# ---------------------------------------------------------------------------
-# sys.path injection
-# ---------------------------------------------------------------------------
-
-from tests.helpers import REPO_ROOT as _REPO
-
-_SVC = str(_REPO / "services" / "identity-normalization")
-_SHARED = str(_REPO / "shared")
-for _p in [_SVC, _SHARED]:
-    if _p not in sys.path:
-        sys.path.insert(0, _p)
-
 
 from naas_shared.models import EnrichmentSkipped, NormalizedAttributes
 

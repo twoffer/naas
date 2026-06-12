@@ -15,77 +15,18 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from tests.services.identity_normalization.conftest import (
+    FakeRedis as _FakeRedis,
+    inject_fake_ldap as _inject_fake_ldap,
+)
+
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Note: inject_fake_ldap/_FakeRedis come from the per-service conftest.
+# _make_correct_hierarchy_fake_ldap below is intentionally LOCAL — it builds
+# the correct-hierarchy fake used to expose the TIMEOUT_EXCEEDED name bug and
+# must NOT use the canonical make_fake_ldap_module (which exports TIMEOUT_EXCEEDED).
 # ---------------------------------------------------------------------------
-
-
-def _make_fake_ldap_module() -> MagicMock:
-    """Build a minimal fake ldap module with real exception classes."""
-    fake_ldap = MagicMock(name="ldap")
-    fake_ldap.SCOPE_SUBTREE = 2
-
-    class LDAPError(Exception):
-        pass
-
-    class TIMEOUT_EXCEEDED(LDAPError):
-        pass
-
-    class SERVER_DOWN(LDAPError):
-        pass
-
-    class NO_SUCH_OBJECT(LDAPError):
-        pass
-
-    class OPERATIONS_ERROR(LDAPError):
-        pass
-
-    fake_ldap.LDAPError = LDAPError
-    fake_ldap.TIMEOUT_EXCEEDED = TIMEOUT_EXCEEDED
-    fake_ldap.SERVER_DOWN = SERVER_DOWN
-    fake_ldap.NO_SUCH_OBJECT = NO_SUCH_OBJECT
-    fake_ldap.OPERATIONS_ERROR = OPERATIONS_ERROR
-
-    fake_filter = MagicMock(name="ldap.filter")
-    fake_filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
-    fake_ldap.filter = fake_filter
-
-    fake_dn = MagicMock(name="ldap.dn")
-    fake_ldap.dn = fake_dn
-
-    return fake_ldap
-
-
-def _inject_fake_ldap(monkeypatch) -> MagicMock:
-    """Inject fake ldap into sys.modules and clear cached app.adapters.ldap."""
-    fake_ldap = _make_fake_ldap_module()
-    monkeypatch.setitem(sys.modules, "ldap", fake_ldap)
-    monkeypatch.setitem(sys.modules, "ldap.filter", fake_ldap.filter)
-    monkeypatch.setitem(sys.modules, "ldap.dn", fake_ldap.dn)
-    for key in list(sys.modules.keys()):
-        if key == "app.adapters.ldap" or key == "app.adapters":
-            monkeypatch.delitem(sys.modules, key, raising=False)
-    return fake_ldap
-
-
-class _FakeRedis:
-    """Fake async Redis client — records get/set/setex calls."""
-
-    def __init__(self, get_return=None):
-        self._get_return = get_return
-        self.get_calls: list = []
-        self.set_calls: list = []
-
-    async def get(self, key: str):
-        self.get_calls.append(key)
-        return self._get_return
-
-    async def setex(self, key: str, ttl: int, value):
-        self.set_calls.append({"key": key, "ttl": ttl, "value": value})
-
-    async def set(self, key: str, value, ex=None):
-        self.set_calls.append({"key": key, "ttl": ex, "value": value})
 
 
 def _make_correct_hierarchy_fake_ldap() -> MagicMock:
