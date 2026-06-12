@@ -40,24 +40,7 @@ from typing import Generator
 
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Repo-root discovery
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        f"Could not locate repo root. Started from: {Path(__file__).resolve()}"
-    )
-
-
-REPO_ROOT = _find_repo_root()
+from tests.helpers import REPO_ROOT
 
 # Ensure naas_shared is importable (mirrors root conftest, safe to repeat).
 _shared_dir = str(REPO_ROOT / "shared")

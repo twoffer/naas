@@ -6,7 +6,6 @@
 # with correct emails/groups/credentials, and top-level groups array.
 # stdlib
 import json
-from pathlib import Path
 
 # third-party
 import pytest
@@ -17,23 +16,15 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find docs/architecture/ — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError("Could not locate repo root (looked for docs/architecture/ sentinel)")
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 REALM_FILE = REPO_ROOT / "infrastructure" / "keycloak" / "naas-realm-export.json"
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_realm() -> dict:
     """Load and parse the Keycloak realm export JSON.  Callers should only
@@ -277,11 +268,14 @@ class TestKeycloakRealmUsers:
             f"Expected usernames={expected!r}, got {usernames!r}"
         )
 
-    @pytest.mark.parametrize("username,expected_email", [
-        ("alice", "alice@corp.com"),
-        ("bob", "bob@corp.com"),
-        ("charlie", "charlie@corp.com"),
-    ])
+    @pytest.mark.parametrize(
+        "username,expected_email",
+        [
+            ("alice", "alice@corp.com"),
+            ("bob", "bob@corp.com"),
+            ("charlie", "charlie@corp.com"),
+        ],
+    )
     def test_user_email(self, realm, username, expected_email):
         """Each user must have the email address specified in spec §5.2 table.
 
@@ -357,11 +351,14 @@ class TestKeycloakRealmUsers:
             "Temporary passwords force a change flow that breaks automated logins."
         )
 
-    @pytest.mark.parametrize("username,expected_group", [
-        ("alice", "engineering"),
-        ("bob", "product"),
-        ("charlie", "security"),
-    ])
+    @pytest.mark.parametrize(
+        "username,expected_group",
+        [
+            ("alice", "engineering"),
+            ("bob", "product"),
+            ("charlie", "security"),
+        ],
+    )
     def test_user_group_membership(self, realm, username, expected_group):
         """Each user must belong to the group specified in spec §5.2 table.
 
@@ -421,5 +418,3 @@ class TestKeycloakRealmGroups:
 # ---------------------------------------------------------------------------
 # OpenLDAP LDIF — file existence
 # ---------------------------------------------------------------------------
-
-

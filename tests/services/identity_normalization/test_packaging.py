@@ -1,27 +1,10 @@
 """Dockerfile, requirements.txt, and .dockerignore contract for identity-normalization."""
 
-from pathlib import Path
-
 # third-party
 import pytest
 
+from tests.helpers import REPO_ROOT
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery (needed to locate committed files under test)
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    """Walk up until docs/architecture/ is found — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
-
-
-REPO_ROOT = _find_repo_root()
 SERVICE_DIR = REPO_ROOT / "services" / "identity-normalization"
 DOCKERFILE_PATH = SERVICE_DIR / "Dockerfile"
 REQUIREMENTS_PATH = SERVICE_DIR / "requirements.txt"
@@ -30,6 +13,7 @@ REQUIREMENTS_PATH = SERVICE_DIR / "requirements.txt"
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _dockerfile_text() -> str:
     """Return Dockerfile content. Fails the calling test if absent."""
@@ -122,7 +106,8 @@ class TestRequirementsTxt:
         lines = _requirements_lines()
         # Match 'python-ldap', 'python_ldap' — pip normalizes these
         ldap_lines = [
-            line for line in lines
+            line
+            for line in lines
             if line.startswith("python-ldap") or line.startswith("python_ldap")
         ]
         assert ldap_lines, (
@@ -180,8 +165,12 @@ class TestRequirementsTxt:
         """
         lines = _requirements_lines()
         redis_lines = [
-            line for line in lines
-            if line == "redis" or line.startswith("redis==") or line.startswith("redis>=") or line.startswith("redis~=")
+            line
+            for line in lines
+            if line == "redis"
+            or line.startswith("redis==")
+            or line.startswith("redis>=")
+            or line.startswith("redis~=")
         ]
         assert not redis_lines, (
             f"requirements.txt must NOT list 'redis' — it is a transitive dep "
@@ -243,7 +232,11 @@ class TestDockerfile:
 
         for i, line in enumerate(lines):
             stripped = line.strip()
-            if stripped.startswith("COPY") and "shared/" in stripped and shared_copy_idx is None:
+            if (
+                stripped.startswith("COPY")
+                and "shared/" in stripped
+                and shared_copy_idx is None
+            ):
                 shared_copy_idx = i
             if stripped.startswith("COPY") and "identity-normalization" in stripped:
                 if service_copy_idx is None:
@@ -274,8 +267,7 @@ class TestDockerfile:
         content = _dockerfile_text()
         lines = content.splitlines()
         install_lines = [
-            line.strip() for line in lines
-            if "pip install" in line and "shared" in line
+            line.strip() for line in lines if "pip install" in line and "shared" in line
         ]
         has_editable_install = any(
             "-e" in line and "shared" in line for line in install_lines
@@ -296,15 +288,15 @@ class TestDockerfile:
         """
         content = _dockerfile_text()
         lines = content.splitlines()
-        cmd_lines = [line.strip() for line in lines if line.strip().upper().startswith("CMD")]
+        cmd_lines = [
+            line.strip() for line in lines if line.strip().upper().startswith("CMD")
+        ]
         assert cmd_lines, (
             "Dockerfile must contain a CMD instruction. "
             f"No CMD found in {DOCKERFILE_PATH}."
         )
         last_cmd = cmd_lines[-1]  # The effective CMD is the last one
-        assert "uvicorn" in last_cmd, (
-            f"CMD must invoke uvicorn. Got: {last_cmd!r}"
-        )
+        assert "uvicorn" in last_cmd, f"CMD must invoke uvicorn. Got: {last_cmd!r}"
         assert "app.main:app" in last_cmd, (
             f"CMD must reference 'app.main:app' as the ASGI module. Got: {last_cmd!r}"
         )
@@ -391,3 +383,73 @@ class TestDockerfile:
             "System build deps (gcc, libldap2-dev, libsasl2-dev) must be installed "
             "before python-ldap is compiled."
         )
+
+    def test_dockerfile_runs_as_non_root(self) -> None:
+        """Dockerfile must have a USER directive naming a non-root user.
+
+        The USER directive must:
+          1. Exist at all.
+          2. Name a user that is not 'root' or '0' (running as root in a
+             production container is a security violation).
+          3. Appear after the last RUN/COPY instruction and before CMD,
+             so the process that starts via CMD does not run as root.
+
+        WHY: Containers running as root inherit root privileges from the host
+        kernel namespace — a container escape or path-traversal vulnerability
+        can gain full host access. The principle of least privilege requires
+        a dedicated non-root user for every service process. Validating
+        placement (after final RUN/COPY, before CMD) ensures the USER switch
+        is not accidentally buried before package installs (where it would be
+        overridden by a subsequent USER root in a multi-stage build).
+        """
+        content = _dockerfile_text()
+        lines = content.splitlines()
+
+        stripped = [line.strip() for line in lines]
+
+        # 1. USER directive must exist.
+        user_indices = [
+            i for i, line in enumerate(stripped) if line.upper().startswith("USER ")
+        ]
+        assert user_indices, (
+            f"Dockerfile must contain a USER directive to run as a non-root user. "
+            f"Not found in {DOCKERFILE_PATH}. "
+            "Add e.g. 'RUN adduser --disabled-password appuser' then 'USER appuser'."
+        )
+
+        last_user_idx = user_indices[-1]
+        user_value = stripped[last_user_idx].split(None, 1)[1].strip()
+
+        # 2. Named user must not be root or uid 0.
+        assert user_value.lower() not in ("root", "0"), (
+            f"Dockerfile USER must not be 'root' or '0'. Got: {user_value!r}. "
+            "Running the service process as root violates least-privilege."
+        )
+
+        # 3. USER must appear after the last RUN/COPY and before CMD.
+        cmd_indices = [
+            i for i, line in enumerate(stripped) if line.upper().startswith("CMD")
+        ]
+        run_copy_indices = [
+            i
+            for i, line in enumerate(stripped)
+            if line.upper().startswith("RUN ") or line.upper().startswith("COPY ")
+        ]
+
+        assert cmd_indices, (
+            "Dockerfile must contain a CMD instruction (needed to verify USER placement)."
+        )
+        last_cmd_idx = cmd_indices[-1]
+
+        assert last_user_idx < last_cmd_idx, (
+            f"USER directive (line {last_user_idx + 1}) must appear BEFORE "
+            f"CMD (line {last_cmd_idx + 1}) so the CMD process runs as the non-root user."
+        )
+
+        if run_copy_indices:
+            last_run_copy_idx = run_copy_indices[-1]
+            assert last_user_idx > last_run_copy_idx, (
+                f"USER directive (line {last_user_idx + 1}) must appear AFTER "
+                f"the last RUN/COPY (line {last_run_copy_idx + 1}) so package installs "
+                "run with appropriate privileges and the final USER switch is not overridden."
+            )

@@ -10,6 +10,7 @@ import pytest
 # Helper — build a minimal valid YAML with overrides
 # ---------------------------------------------------------------------------
 
+
 def _write_enrichment_yaml(
     tmp_path: Path,
     correlation_key: str = "primary_email",
@@ -121,7 +122,9 @@ class TestCorrelationKeyValidation:
 
         # Must not raise
         cfg = load_config(p)
-        assert cfg is not None, "load_config must return a config object for valid input."
+        assert cfg is not None, (
+            "load_config must return a config object for valid input."
+        )
 
     @pytest.mark.parametrize(
         "valid_key",
@@ -288,8 +291,7 @@ class TestCacheTtlValidation:
         exc_message = str(exc_info.value)
         # The error must reference the field or value
         assert any(
-            token in exc_message
-            for token in ("cache_ttl", "ttl", "0", "positive")
+            token in exc_message for token in ("cache_ttl", "ttl", "0", "positive")
         ), (
             f"Error message must reference the cache_ttl_seconds field or the invalid value. "
             f"Got: {exc_message!r}."
@@ -309,8 +311,7 @@ class TestCacheTtlValidation:
 
         exc_message = str(exc_info.value)
         assert any(
-            token in exc_message
-            for token in ("cache_ttl", "ttl", "-5", "positive")
+            token in exc_message for token in ("cache_ttl", "ttl", "-5", "positive")
         ), (
             f"Error message must reference the cache_ttl_seconds field or invalid value. "
             f"Got: {exc_message!r}."
@@ -370,9 +371,7 @@ class TestEnrichAttributesValidation:
     is not a reverse-mappable unified field'.
     """
 
-    def test_enrich_attributes_with_invalid_name_raises(
-        self, tmp_path: Path
-    ) -> None:
+    def test_enrich_attributes_with_invalid_name_raises(self, tmp_path: Path) -> None:
         """load_config raises when enrich_attributes contains 'favorite_color'.
 
         WHY: 'favorite_color' is not in UNIFIED_TO_LDAP, so it cannot be fetched

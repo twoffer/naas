@@ -5,7 +5,7 @@ import redis.asyncio as aioredis
 from naas_shared.config import get_settings
 from naas_shared.constants import STREAM_MAXLEN
 
-_redis = None
+_redis: aioredis.Redis | None = None
 
 
 async def get_redis() -> aioredis.Redis:
@@ -16,11 +16,27 @@ async def get_redis() -> aioredis.Redis:
     global _redis
     if _redis is None:
         settings = get_settings()
+        # Resilience kwargs: a restarted Redis must not leave the singleton
+        # holding a permanently broken connection.
         _redis = aioredis.from_url(
             f"redis://{settings.redis_host}:{settings.redis_port}",
             decode_responses=True,
+            socket_connect_timeout=5,
+            socket_keepalive=True,
+            health_check_interval=30,
         )
     return _redis
+
+
+async def close_redis() -> None:
+    """Close the Redis connection and reset the module singleton.
+
+    Lifespan shutdown. Safe to call when never initialized.
+    """
+    global _redis
+    if _redis is not None:
+        await _redis.aclose()
+        _redis = None
 
 
 async def publish_to_stream(stream: str, data: dict) -> str:

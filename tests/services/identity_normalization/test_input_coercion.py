@@ -12,7 +12,6 @@ import sys
 from unittest.mock import MagicMock
 
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers (fake ldap for adapter imports that require python-ldap)
 # ---------------------------------------------------------------------------
@@ -194,13 +193,15 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.oidc import OidcAdapter
 
         adapter = OidcAdapter()
-        result = adapter.extract({
-            "name": "Alice",
-            "email": "alice@corp.com",
-            "department": 123,
-            "employee_type": "fte",
-            "groups": ["admin"],
-        })
+        result = adapter.extract(
+            {
+                "name": "Alice",
+                "email": "alice@corp.com",
+                "department": 123,
+                "employee_type": "fte",
+                "groups": ["admin"],
+            }
+        )
 
         assert result["department"] is None, (
             f"OIDC extract with department=123 (non-str) must produce department=None, "
@@ -212,13 +213,15 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.oidc import OidcAdapter
 
         adapter = OidcAdapter()
-        result = adapter.extract({
-            "name": "Alice",
-            "email": "alice@corp.com",
-            "department": "eng",
-            "employee_type": ["x"],
-            "groups": ["admin"],
-        })
+        result = adapter.extract(
+            {
+                "name": "Alice",
+                "email": "alice@corp.com",
+                "department": "eng",
+                "employee_type": ["x"],
+                "groups": ["admin"],
+            }
+        )
 
         assert result["employee_type"] is None, (
             f"OIDC extract with employee_type=['x'] must produce employee_type=None, "
@@ -230,11 +233,13 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.oidc import OidcAdapter
 
         adapter = OidcAdapter()
-        result = adapter.extract({
-            "name": "Alice",
-            "email": "alice@corp.com",
-            "groups": [1, 2, "real-group"],
-        })
+        result = adapter.extract(
+            {
+                "name": "Alice",
+                "email": "alice@corp.com",
+                "groups": [1, 2, "real-group"],
+            }
+        )
 
         assert result["groups"] == ["real-group"], (
             f"OIDC extract groups with mixed types must keep only strings. "
@@ -246,13 +251,15 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.saml import SamlAdapter
 
         adapter = SamlAdapter()
-        result = adapter.extract({
-            "displayName": "Bob",
-            "email": "bob@corp.com",
-            "dept": 123,
-            "employeeType": "fte",
-            "groups": ["staff"],
-        })
+        result = adapter.extract(
+            {
+                "displayName": "Bob",
+                "email": "bob@corp.com",
+                "dept": 123,
+                "employeeType": "fte",
+                "groups": ["staff"],
+            }
+        )
 
         assert result["department"] is None, (
             f"SAML extract with dept=123 must produce department=None, "
@@ -264,13 +271,15 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.saml import SamlAdapter
 
         adapter = SamlAdapter()
-        result = adapter.extract({
-            "displayName": "Bob",
-            "email": "bob@corp.com",
-            "dept": "eng",
-            "employeeType": {"code": "fte"},
-            "groups": [],
-        })
+        result = adapter.extract(
+            {
+                "displayName": "Bob",
+                "email": "bob@corp.com",
+                "dept": "eng",
+                "employeeType": {"code": "fte"},
+                "groups": [],
+            }
+        )
 
         assert result["employee_type"] is None, (
             f"SAML extract with employeeType=dict must produce employee_type=None, "
@@ -282,11 +291,13 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.saml import SamlAdapter
 
         adapter = SamlAdapter()
-        result = adapter.extract({
-            "displayName": "Bob",
-            "email": "bob@corp.com",
-            "groups": [1, 2, "real-group"],
-        })
+        result = adapter.extract(
+            {
+                "displayName": "Bob",
+                "email": "bob@corp.com",
+                "groups": [1, 2, "real-group"],
+            }
+        )
 
         assert result["groups"] == ["real-group"], (
             f"SAML extract groups with mixed types must keep only strings. "
@@ -301,13 +312,15 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        result = adapter.extract({
-            "cn": "Charlie",
-            "mail": "charlie@corp.com",
-            "departmentNumber": 999,
-            "employeeType": "fte",
-            "memberOf": [],
-        })
+        result = adapter.extract(
+            {
+                "cn": "Charlie",
+                "mail": "charlie@corp.com",
+                "departmentNumber": 999,
+                "employeeType": "fte",
+                "memberOf": [],
+            }
+        )
 
         assert result["department"] is None, (
             f"LDAP extract with departmentNumber=999 (non-str) must produce department=None, "
@@ -322,13 +335,15 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        result = adapter.extract({
-            "cn": "Charlie",
-            "mail": "charlie@corp.com",
-            "departmentNumber": "eng",
-            "employeeType": ["fte"],
-            "memberOf": [],
-        })
+        result = adapter.extract(
+            {
+                "cn": "Charlie",
+                "mail": "charlie@corp.com",
+                "departmentNumber": "eng",
+                "employeeType": ["fte"],
+                "memberOf": [],
+            }
+        )
 
         assert result["employee_type"] is None, (
             f"LDAP extract with employeeType=['fte'] must produce employee_type=None, "
@@ -345,13 +360,15 @@ class TestAdapterExtractNonStringInputs:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        result = adapter.extract({
-            "cn": "Charlie",
-            "mail": "charlie@corp.com",
-            "departmentNumber": None,
-            "employeeType": None,
-            "memberOf": [1, 2, "cn=engineering,ou=groups,dc=corp,dc=com"],
-        })
+        result = adapter.extract(
+            {
+                "cn": "Charlie",
+                "mail": "charlie@corp.com",
+                "departmentNumber": None,
+                "employeeType": None,
+                "memberOf": [1, 2, "cn=engineering,ou=groups,dc=corp,dc=com"],
+            }
+        )
 
         for g in result["groups"]:
             assert isinstance(g, str), (
@@ -382,11 +399,13 @@ class TestAdapterExtractNonStringNameEmail:
         """OidcAdapter.extract() with name=42 must return display_name=None, not 42."""
         from app.adapters.oidc import OidcAdapter
 
-        result = OidcAdapter().extract({
-            "name": 42,
-            "email": "alice@corp.com",
-            "groups": [],
-        })
+        result = OidcAdapter().extract(
+            {
+                "name": 42,
+                "email": "alice@corp.com",
+                "groups": [],
+            }
+        )
 
         assert result["display_name"] is None, (
             f"OidcAdapter.extract() with name=42 (non-str) must return "
@@ -398,14 +417,16 @@ class TestAdapterExtractNonStringNameEmail:
         """OidcAdapter.extract() with email={\"x\":1} must return primary_email=None."""
         from app.adapters.oidc import OidcAdapter
 
-        result = OidcAdapter().extract({
-            "name": "Alice",
-            "email": {"x": 1},
-            "groups": [],
-        })
+        result = OidcAdapter().extract(
+            {
+                "name": "Alice",
+                "email": {"x": 1},
+                "groups": [],
+            }
+        )
 
         assert result["primary_email"] is None, (
-            f"OidcAdapter.extract() with email={{\"x\":1}} (non-str) must return "
+            f'OidcAdapter.extract() with email={{"x":1}} (non-str) must return '
             f"primary_email=None, got {result['primary_email']!r}. "
             "A dict in the email field must be coerced to None."
         )
@@ -418,11 +439,13 @@ class TestAdapterExtractNonStringNameEmail:
         """SamlAdapter.extract() with displayName=42 must return display_name=None."""
         from app.adapters.saml import SamlAdapter
 
-        result = SamlAdapter().extract({
-            "displayName": 42,
-            "email": "bob@corp.com",
-            "groups": [],
-        })
+        result = SamlAdapter().extract(
+            {
+                "displayName": 42,
+                "email": "bob@corp.com",
+                "groups": [],
+            }
+        )
 
         assert result["display_name"] is None, (
             f"SamlAdapter.extract() with displayName=42 (non-str) must return "
@@ -434,14 +457,16 @@ class TestAdapterExtractNonStringNameEmail:
         """SamlAdapter.extract() with email=[\"a@b.com\"] must return primary_email=None."""
         from app.adapters.saml import SamlAdapter
 
-        result = SamlAdapter().extract({
-            "displayName": "Bob",
-            "email": ["a@b.com"],
-            "groups": [],
-        })
+        result = SamlAdapter().extract(
+            {
+                "displayName": "Bob",
+                "email": ["a@b.com"],
+                "groups": [],
+            }
+        )
 
         assert result["primary_email"] is None, (
-            f"SamlAdapter.extract() with email=[\"a@b.com\"] (non-str) must return "
+            f'SamlAdapter.extract() with email=["a@b.com"] (non-str) must return '
             f"primary_email=None, got {result['primary_email']!r}. "
             "A list in the email field must be coerced to None."
         )
@@ -455,13 +480,15 @@ class TestAdapterExtractNonStringNameEmail:
         _inject_fake_ldap(monkeypatch)
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "cn": 42,
-            "mail": "charlie@corp.com",
-            "departmentNumber": None,
-            "employeeType": None,
-            "memberOf": [],
-        })
+        result = LdapAdapter().extract(
+            {
+                "cn": 42,
+                "mail": "charlie@corp.com",
+                "departmentNumber": None,
+                "employeeType": None,
+                "memberOf": [],
+            }
+        )
 
         assert result["display_name"] is None, (
             f"LdapAdapter.extract() with cn=42 (non-str) must return "
@@ -476,16 +503,18 @@ class TestAdapterExtractNonStringNameEmail:
         _inject_fake_ldap(monkeypatch)
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "cn": "Charlie",
-            "mail": {"x": 1},
-            "departmentNumber": None,
-            "employeeType": None,
-            "memberOf": [],
-        })
+        result = LdapAdapter().extract(
+            {
+                "cn": "Charlie",
+                "mail": {"x": 1},
+                "departmentNumber": None,
+                "employeeType": None,
+                "memberOf": [],
+            }
+        )
 
         assert result["primary_email"] is None, (
-            f"LdapAdapter.extract() with mail={{\"x\":1}} (non-str) must return "
+            f'LdapAdapter.extract() with mail={{"x":1}} (non-str) must return '
             f"primary_email=None, got {result['primary_email']!r}. "
             "A dict in the mail field must be coerced to None."
         )

@@ -1,9 +1,7 @@
 """app/adapters/_mapping.py: FieldRule mapping engine and declarative adapter tables."""
 
-
 # third-party
 import pytest
-
 
 
 # ===========================================================================
@@ -182,16 +180,19 @@ class TestCoerceStr:
             f"Got {result!r}. Use isinstance(value, str), not a truthiness check."
         )
 
-    @pytest.mark.parametrize("value,expected", [
-        ("alice@corp.com", "alice@corp.com"),
-        ("Engineering",    "Engineering"),
-        ("FTE",            "FTE"),
-        (0,                None),
-        (-1,               None),
-        (None,             None),
-        ([],               None),
-        ({},               None),
-    ])
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            ("alice@corp.com", "alice@corp.com"),
+            ("Engineering", "Engineering"),
+            ("FTE", "FTE"),
+            (0, None),
+            (-1, None),
+            (None, None),
+            ([], None),
+            ({}, None),
+        ],
+    )
     def test_coerce_str_parametrized(self, value: object, expected) -> None:
         """Parametrized contract verification for coerce_str."""
         from app.adapters._mapping import coerce_str
@@ -247,9 +248,7 @@ class TestCoerceStrList:
 
         result = coerce_str_list([])
 
-        assert result == [], (
-            f"coerce_str_list([]) must return [], got {result!r}."
-        )
+        assert result == [], f"coerce_str_list([]) must return [], got {result!r}."
 
     def test_mixed_type_list_keeps_only_strings(self) -> None:
         """coerce_str_list([1, 'admin', None, 'vpn', 2]) == ['admin', 'vpn'].
@@ -361,18 +360,21 @@ class TestCoerceStrList:
                 f"Got {type(result).__name__!r}: {result!r}."
             )
 
-    @pytest.mark.parametrize("value,expected", [
-        (["admin"],                    ["admin"]),
-        (["admin", "vpn"],             ["admin", "vpn"]),
-        ([],                           []),
-        ([1, "admin", 2],              ["admin"]),
-        (None,                         []),
-        ("admin",                      []),  # STRICT: bare string → []
-        ("",                           []),  # empty string is still not a list
-        (0,                            []),
-        ({},                           []),
-        ([True, "valid", False],       ["valid"]),  # bool is not str
-    ])
+    @pytest.mark.parametrize(
+        "value,expected",
+        [
+            (["admin"], ["admin"]),
+            (["admin", "vpn"], ["admin", "vpn"]),
+            ([], []),
+            ([1, "admin", 2], ["admin"]),
+            (None, []),
+            ("admin", []),  # STRICT: bare string → []
+            ("", []),  # empty string is still not a list
+            (0, []),
+            ({}, []),
+            ([True, "valid", False], ["valid"]),  # bool is not str
+        ],
+    )
     def test_coerce_str_list_parametrized(self, value: object, expected: list) -> None:
         """Parametrized contract verification for coerce_str_list."""
         from app.adapters._mapping import coerce_str_list
@@ -568,9 +570,7 @@ class TestApplyFieldRules:
         """
         from app.adapters._mapping import FieldRule, apply_field_rules
 
-        rules = {
-            "combined": FieldRule(("a", "b"), lambda x, y: f"{x}-{y}")
-        }
+        rules = {"combined": FieldRule(("a", "b"), lambda x, y: f"{x}-{y}")}
         raw = {"a": "1"}  # 'b' absent
 
         result = apply_field_rules(raw, rules)
@@ -587,12 +587,17 @@ class TestApplyFieldRules:
         evaluated and present in the output regardless of which keys are present
         in raw_attributes.
         """
-        from app.adapters._mapping import FieldRule, apply_field_rules, coerce_str, coerce_str_list
+        from app.adapters._mapping import (
+            FieldRule,
+            apply_field_rules,
+            coerce_str,
+            coerce_str_list,
+        )
 
         rules = {
-            "display_name":  FieldRule(("name",),   coerce_str),
-            "primary_email": FieldRule(("email",),  coerce_str),
-            "groups":        FieldRule(("groups",), coerce_str_list),
+            "display_name": FieldRule(("name",), coerce_str),
+            "primary_email": FieldRule(("email",), coerce_str),
+            "groups": FieldRule(("groups",), coerce_str_list),
         }
         raw = {
             "name": "Alice",
@@ -606,9 +611,7 @@ class TestApplyFieldRules:
             "display_name": "Alice",
             "primary_email": "alice@corp.com",
             "groups": ["admin"],
-        }, (
-            f"All rules must be evaluated. Expected full dict, got {result!r}."
-        )
+        }, f"All rules must be evaluated. Expected full dict, got {result!r}."
 
     def test_output_dict_has_exactly_the_rule_keys(self) -> None:
         """apply_field_rules output dict must contain exactly the rule field names.
@@ -621,7 +624,7 @@ class TestApplyFieldRules:
         from app.adapters._mapping import FieldRule, apply_field_rules, coerce_str
 
         rules = {
-            "display_name":  FieldRule(("name",),  coerce_str),
+            "display_name": FieldRule(("name",), coerce_str),
             "primary_email": FieldRule(("email",), coerce_str),
         }
         raw = {"name": "Alice", "email": "alice@corp.com", "extra_key": "ignored"}
@@ -641,12 +644,17 @@ class TestApplyFieldRules:
         output dict makes the resulting dict predictable for both dict-equality
         assertions and ordered serialization.
         """
-        from app.adapters._mapping import FieldRule, apply_field_rules, coerce_str, coerce_str_list
+        from app.adapters._mapping import (
+            FieldRule,
+            apply_field_rules,
+            coerce_str,
+            coerce_str_list,
+        )
 
         rules = {
-            "display_name":  FieldRule(("name",),        coerce_str),
-            "primary_email": FieldRule(("email",),       coerce_str),
-            "groups":        FieldRule(("groups",),      coerce_str_list),
+            "display_name": FieldRule(("name",), coerce_str),
+            "primary_email": FieldRule(("email",), coerce_str),
+            "groups": FieldRule(("groups",), coerce_str_list),
         }
         raw = {"name": "Alice", "email": "alice@corp.com", "groups": []}
 
@@ -679,11 +687,16 @@ class TestApplyFieldRules:
         raw_attributes.get(key) returns None; each coerce_str/coerce_str_list
         call receives None and must return its safe default.
         """
-        from app.adapters._mapping import FieldRule, apply_field_rules, coerce_str, coerce_str_list
+        from app.adapters._mapping import (
+            FieldRule,
+            apply_field_rules,
+            coerce_str,
+            coerce_str_list,
+        )
 
         rules = {
-            "display_name": FieldRule(("name",),   coerce_str),
-            "groups":       FieldRule(("groups",), coerce_str_list),
+            "display_name": FieldRule(("name",), coerce_str),
+            "groups": FieldRule(("groups",), coerce_str_list),
         }
 
         result = apply_field_rules({}, rules)

@@ -1,30 +1,12 @@
 """naas_shared Spec 2 additions: LDAP_ENRICHMENT_CACHE_PREFIX constant and ldap_pool_size config field."""
 
 import sys
-from pathlib import Path
 
 # third-party
 import pytest
 
+from tests.helpers import REPO_ROOT
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery and sys.path injection
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find docs/architecture/ — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        f"Could not locate repo root. Started from: {Path(__file__).resolve()}"
-    )
-
-
-REPO_ROOT = _find_repo_root()
 SHARED_DIR = REPO_ROOT / "shared"
 
 if str(SHARED_DIR) not in sys.path:
@@ -141,6 +123,7 @@ class TestLdapPoolSizeDefault:
     def clear_settings_cache(self) -> None:
         """Clear lru_cache before and after each test so env changes take effect."""
         from naas_shared.config import get_settings
+
         get_settings.cache_clear()
         yield
         get_settings.cache_clear()
@@ -202,7 +185,9 @@ class TestLdapPoolSizeDefault:
         # Verify all existing LDAP fields are intact
         assert settings.ldap_host == "openldap", "ldap_host default disturbed"
         assert settings.ldap_port == 389, "ldap_port default disturbed"
-        assert settings.ldap_base_dn == "dc=corp,dc=com", "ldap_base_dn default disturbed"
+        assert settings.ldap_base_dn == "dc=corp,dc=com", (
+            "ldap_base_dn default disturbed"
+        )
         assert settings.ldap_admin_dn == "cn=admin,dc=corp,dc=com", (
             "ldap_admin_dn default disturbed"
         )
@@ -229,6 +214,7 @@ class TestLdapPoolSizeEnvOverride:
     @pytest.fixture(autouse=True)
     def clear_settings_cache(self) -> None:
         from naas_shared.config import get_settings
+
         get_settings.cache_clear()
         yield
         get_settings.cache_clear()
@@ -294,6 +280,7 @@ class TestLdapPoolSizeConstraints:
     @pytest.fixture(autouse=True)
     def clear_settings_cache(self) -> None:
         from naas_shared.config import get_settings
+
         get_settings.cache_clear()
         yield
         get_settings.cache_clear()

@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
@@ -15,16 +13,8 @@ import pytest
 # sys.path injection
 # ---------------------------------------------------------------------------
 
-def _repo_root() -> Path:
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError("Cannot find repo root")
+from tests.helpers import REPO_ROOT as _REPO
 
-
-_REPO = _repo_root()
 _SVC = str(_REPO / "services" / "identity-normalization")
 _SHARED = str(_REPO / "shared")
 for _p in [_SVC, _SHARED]:
@@ -83,11 +73,13 @@ def _get_publisher():
     """
     try:
         from app.service import NormalizationPublisher
+
         return NormalizationPublisher()
     except (ImportError, AttributeError):
         pass
     try:
         from app.publisher import NormalizationPublisher
+
         return NormalizationPublisher()
     except (ImportError, AttributeError):
         pass
@@ -97,42 +89,45 @@ def _get_publisher():
     )
 
 
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
 # ===========================================================================
 # C.6. Publisher — uses shared publish_to_stream (not hand-rolled XADD)
 # ===========================================================================
 
+
 class TestPublisherUsesSharedHelper:
     """The publisher calls naas_shared.redis_client.publish_to_stream."""
 
-    def test_publish_normalized_calls_shared_publish_to_stream(self):
+    async def test_publish_normalized_calls_shared_publish_to_stream(self):
         """publish_normalized() must call publish_to_stream — not a hand-rolled r.xadd()."""
         publisher = _get_publisher()
         record = _make_record()
         normalized = _make_normalized()
 
-        with patch("naas_shared.redis_client.publish_to_stream", new_callable=AsyncMock) as mock_pub:
-            _run(publisher.publish_normalized(record, normalized))
+        with patch(
+            "naas_shared.redis_client.publish_to_stream", new_callable=AsyncMock
+        ) as mock_pub:
+            await publisher.publish_normalized(record, normalized)
 
         assert mock_pub.called, (
             "publish_to_stream must be called — do not hand-roll XADD (§3.2)"
         )
 
-    def test_publish_normalized_uses_stream_normalized_events_constant(self):
+    async def test_publish_normalized_uses_stream_normalized_events_constant(self):
         """The first arg to publish_to_stream must be STREAM_NORMALIZED_EVENTS."""
         publisher = _get_publisher()
         record = _make_record()
         normalized = _make_normalized()
 
-        with patch("naas_shared.redis_client.publish_to_stream", new_callable=AsyncMock) as mock_pub:
-            _run(publisher.publish_normalized(record, normalized))
+        with patch(
+            "naas_shared.redis_client.publish_to_stream", new_callable=AsyncMock
+        ) as mock_pub:
+            await publisher.publish_normalized(record, normalized)
 
         call_args = mock_pub.call_args
         assert call_args is not None, "publish_to_stream was not called"
-        stream_arg = call_args.args[0] if call_args.args else call_args.kwargs.get("stream")
+        stream_arg = (
+            call_args.args[0] if call_args.args else call_args.kwargs.get("stream")
+        )
         assert stream_arg == STREAM_NORMALIZED_EVENTS, (
             f"publish_to_stream must be called with stream={STREAM_NORMALIZED_EVENTS!r}, "
             f"got {stream_arg!r}"
@@ -143,10 +138,11 @@ class TestPublisherUsesSharedHelper:
 # C.6. Publisher — full LoginEventRecord with normalized_attributes populated
 # ===========================================================================
 
+
 class TestPublisherFullRecordPayload:
     """Per ADR-0011: publish the FULL LoginEventRecord with normalized_attributes populated."""
 
-    def test_publish_normalized_sets_normalized_attributes_on_record(self):
+    async def test_publish_normalized_sets_normalized_attributes_on_record(self):
         """record.normalized_attributes must be set to normalized.model_dump(mode='json') before publish."""
         publisher = _get_publisher()
         record = _make_record()
@@ -159,9 +155,11 @@ class TestPublisherFullRecordPayload:
             return "mock-id"
 
         with patch("naas_shared.redis_client.publish_to_stream", side_effect=_capture):
-            _run(publisher.publish_normalized(record, normalized))
+            await publisher.publish_normalized(record, normalized)
 
-        assert len(captured_payload) == 1, "publish_to_stream must be called exactly once"
+        assert len(captured_payload) == 1, (
+            "publish_to_stream must be called exactly once"
+        )
         payload = captured_payload[0]
 
         assert "normalized_attributes" in payload, (
@@ -171,7 +169,7 @@ class TestPublisherFullRecordPayload:
             "normalized_attributes must not be None in the published payload"
         )
 
-    def test_published_payload_contains_full_login_event_record_fields(self):
+    async def test_published_payload_contains_full_login_event_record_fields(self):
         """The payload must be the full LoginEventRecord — not a stripped-down dict."""
         publisher = _get_publisher()
         record = _make_record()
@@ -183,21 +181,30 @@ class TestPublisherFullRecordPayload:
             return "mock-id"
 
         with patch("naas_shared.redis_client.publish_to_stream", side_effect=_capture):
-            _run(publisher.publish_normalized(record, normalized))
+            await publisher.publish_normalized(record, normalized)
 
         payload = captured[0]
 
         # Full LoginEventRecord fields must be present
-        expected_fields = {"id", "user_id", "protocol", "client_ip", "timestamp",
-                           "source", "is_synthetic", "is_historical", "raw_attributes",
-                           "normalized_attributes"}
+        expected_fields = {
+            "id",
+            "user_id",
+            "protocol",
+            "client_ip",
+            "timestamp",
+            "source",
+            "is_synthetic",
+            "is_historical",
+            "raw_attributes",
+            "normalized_attributes",
+        }
         missing = expected_fields - set(payload.keys())
         assert not missing, (
             f"Published payload missing LoginEventRecord fields: {missing}. "
             "Per ADR-0011, the full record must be published."
         )
 
-    def test_published_normalized_attributes_matches_normalized_model_dump(self):
+    async def test_published_normalized_attributes_matches_normalized_model_dump(self):
         """The normalized_attributes in the payload matches normalized.model_dump(mode='json')."""
         publisher = _get_publisher()
         record = _make_record()
@@ -209,7 +216,7 @@ class TestPublisherFullRecordPayload:
             return "mock-id"
 
         with patch("naas_shared.redis_client.publish_to_stream", side_effect=_capture):
-            _run(publisher.publish_normalized(record, normalized))
+            await publisher.publish_normalized(record, normalized)
 
         payload = captured[0]
         expected_normalized = normalized.model_dump(mode="json")
@@ -219,7 +226,7 @@ class TestPublisherFullRecordPayload:
             f"Expected: {expected_normalized}. Got: {payload['normalized_attributes']}"
         )
 
-    def test_published_payload_carries_correct_event_id(self):
+    async def test_published_payload_carries_correct_event_id(self):
         """The published payload carries the correct event id as the correlation key."""
         publisher = _get_publisher()
         record = _make_record()
@@ -231,7 +238,7 @@ class TestPublisherFullRecordPayload:
             return "mock-id"
 
         with patch("naas_shared.redis_client.publish_to_stream", side_effect=_capture):
-            _run(publisher.publish_normalized(record, normalized))
+            await publisher.publish_normalized(record, normalized)
 
         payload = captured[0]
         # id is serialized as a string by model_dump(mode="json")
@@ -245,6 +252,7 @@ class TestPublisherFullRecordPayload:
 # C.6. Publisher — does not mutate the record before returning to caller
 # ===========================================================================
 
+
 class TestPublisherDoesNotMutateRecordPermanently:
     """publish_normalized() sets normalized_attributes on the record for publishing.
 
@@ -253,16 +261,20 @@ class TestPublisherDoesNotMutateRecordPermanently:
     per message anyway.)
     """
 
-    def test_record_normalized_attributes_set_after_publish(self):
+    async def test_record_normalized_attributes_set_after_publish(self):
         """After publish_normalized(), record.normalized_attributes == normalized.model_dump(mode='json')."""
         publisher = _get_publisher()
         record = _make_record()
-        assert record.normalized_attributes is None, "record must start with normalized_attributes=None"
+        assert record.normalized_attributes is None, (
+            "record must start with normalized_attributes=None"
+        )
         normalized = _make_normalized()
 
-        with patch("naas_shared.redis_client.publish_to_stream", new_callable=AsyncMock) as mock_pub:
+        with patch(
+            "naas_shared.redis_client.publish_to_stream", new_callable=AsyncMock
+        ) as mock_pub:
             mock_pub.return_value = "mock-id"
-            _run(publisher.publish_normalized(record, normalized))
+            await publisher.publish_normalized(record, normalized)
 
         expected = normalized.model_dump(mode="json")
         assert record.normalized_attributes == expected, (

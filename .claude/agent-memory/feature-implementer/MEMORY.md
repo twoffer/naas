@@ -37,3 +37,4 @@
 ## Feedback
 - [feedback_ruff_format_test_files.md](feedback_ruff_format_test_files.md) — ruff format must be applied to test files, not just ruff check
 - [patterns_integration_test_infra.md](patterns_integration_test_infra.md) — ruff only on .py paths; pytest.fail unbound var fix; docker-compose.test.yml pattern (explicit image tag both files, exec-array command, rich in requirements-dev); marker single-sourced in pyproject.toml
+- [patterns_health_session_factory.md](patterns_health_session_factory.md) — /health tests must patch get_session_factory (not get_db_session) when handler uses factory()-as-async-CM pattern

@@ -12,23 +12,7 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find the directory that contains
-    docs/architecture/ — that is the repo root.  This avoids hardcoding any
-    absolute path, so the tests are portable across machines and CI.
-    """
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):  # cap at 10 levels to prevent infinite walk
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        "Could not locate repo root (expected a directory containing docs/architecture/). "
-        f"Started from: {Path(__file__).resolve()}"
-    )
-
-
-REPO_ROOT = _find_repo_root()
+from tests.helpers import REPO_ROOT
 
 # ---------------------------------------------------------------------------
 # Fixtures

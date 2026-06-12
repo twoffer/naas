@@ -2,9 +2,9 @@
 
 import uuid
 from typing import Any
+from unittest.mock import MagicMock
 
 # third-party
-import pytest
 
 
 # ---------------------------------------------------------------------------
@@ -46,6 +46,7 @@ def _make_bulk_events(n: int, **overrides: Any) -> list[dict]:
 # Fake IngestionService — replaces the real service via dependency_overrides
 # ---------------------------------------------------------------------------
 
+
 class FakeIngestionService:
     """Fake IngestionService injected via dependency_overrides.
 
@@ -84,41 +85,19 @@ class FakeIngestionService:
 # Helper: get the app and the service dependency callable
 # ---------------------------------------------------------------------------
 
+
 def _import_app_and_service_dep():
     """Import app + the dependency callable used for IngestionService injection.
 
     Returns (app, get_ingestion_service) where get_ingestion_service is the
-    callable used as the FastAPI Depends(...) argument in routes.py / main.py.
+    callable used as the FastAPI Depends(...) argument in routes.py.
 
-    ASSUMPTION: The implementer will expose the IngestionService dependency as
-    `get_ingestion_service` from either `app.routes` or `app.main`. We try
-    both locations and fall back to a sentinel that causes the test to fail
-    clearly rather than with an obscure AttributeError.
-
-    If neither location works after implementation, the implementer should
-    update the override target here to match their chosen name. The comment
-    below documents exactly what to change.
+    get_ingestion_service lives in app.routes — the single canonical home.
     """
-    # The router must be mounted for these tests to matter.
-    from app.main import app  # routes must be mounted for these tests to matter
+    from app.main import app
+    from app.routes import get_ingestion_service
 
-    # Try to locate the dependency callable. Implementer: if you name your
-    # IngestionService dependency differently, update the lookup below.
-    dep_callable = None
-    for module_path, attr_name in [
-        ("app.main", "get_ingestion_service"),
-        ("app.routes", "get_ingestion_service"),
-    ]:
-        try:
-            import importlib
-            mod = importlib.import_module(module_path)
-            dep_callable = getattr(mod, attr_name, None)
-            if dep_callable is not None:
-                break
-        except (ImportError, ModuleNotFoundError):
-            continue
-
-    return app, dep_callable
+    return app, get_ingestion_service
 
 
 # ===========================================================================
@@ -145,8 +124,10 @@ class TestEndpointSurface:
     def _application_routes(self, app) -> list:
         """Return non-OpenAPI APIRoute instances from the app."""
         from fastapi.routing import APIRoute
+
         return [
-            r for r in app.routes
+            r
+            for r in app.routes
             if isinstance(r, APIRoute) and r.path not in self._OPENAPI_PATHS
         ]
 
@@ -159,9 +140,7 @@ class TestEndpointSurface:
         from app.main import app
 
         routes = self._application_routes(app)
-        route_descriptions = [
-            f"{sorted(r.methods)} {r.path}" for r in routes
-        ]
+        route_descriptions = [f"{sorted(r.methods)} {r.path}" for r in routes]
         assert len(routes) == 3, (
             f"Expected exactly 3 application routes, found {len(routes)}: "
             f"{route_descriptions}. "
@@ -174,7 +153,8 @@ class TestEndpointSurface:
 
         routes = self._application_routes(app)
         matched = [
-            r for r in routes
+            r
+            for r in routes
             if r.path == "/events/ingest" and "POST" in (r.methods or set())
         ]
         assert len(matched) == 1, (
@@ -188,7 +168,8 @@ class TestEndpointSurface:
 
         routes = self._application_routes(app)
         matched = [
-            r for r in routes
+            r
+            for r in routes
             if r.path == "/events/bulk" and "POST" in (r.methods or set())
         ]
         assert len(matched) == 1, (
@@ -202,8 +183,7 @@ class TestEndpointSurface:
 
         routes = self._application_routes(app)
         matched = [
-            r for r in routes
-            if r.path == "/health" and "GET" in (r.methods or set())
+            r for r in routes if r.path == "/health" and "GET" in (r.methods or set())
         ]
         assert len(matched) == 1, (
             f"Expected exactly 1 route for GET /health, found {len(matched)}. "
@@ -222,7 +202,8 @@ class TestEndpointSurface:
 
         routes = self._application_routes(app)
         auth_pattern_paths = [
-            r.path for r in routes
+            r.path
+            for r in routes
             if any(seg in r.path for seg in ("/auth", "/token", "/login", "/oauth"))
         ]
         assert len(auth_pattern_paths) == 0, (
@@ -261,14 +242,6 @@ class TestSingleIngestHappyPath:
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         app_dep, dep_callable = _import_app_and_service_dep()
 
-        if dep_callable is None:
-            pytest.fail(
-                "Could not find 'get_ingestion_service' in app.main or app.routes. "
-                "The implementer must expose the IngestionService dependency under "
-                "that name for test overrides to work. Update _import_app_and_service_dep "
-                "if a different name is used."
-            )
-
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -294,8 +267,6 @@ class TestSingleIngestHappyPath:
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found — see _import_app_and_service_dep")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -327,8 +298,6 @@ class TestSingleIngestHappyPath:
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -357,8 +326,6 @@ class TestSingleIngestHappyPath:
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -386,8 +353,6 @@ class TestSingleIngestHappyPath:
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -422,8 +387,6 @@ class TestBulkIngestHappyPath:
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -444,8 +407,6 @@ class TestBulkIngestHappyPath:
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -468,8 +429,6 @@ class TestBulkIngestHappyPath:
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -494,8 +453,6 @@ class TestBulkIngestHappyPath:
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -521,8 +478,6 @@ class TestBulkIngestHappyPath:
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -543,8 +498,6 @@ class TestBulkIngestHappyPath:
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -571,8 +524,6 @@ class TestBulkIngestHappyPath:
 
         fake = FakeIngestionService(many_returns=[_KNOWN_UUID_1])
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         # Bare array of 1 event — this is the spec-required format
         bare_array = [_VALID_SINGLE_EVENT]
@@ -633,8 +584,6 @@ class TestPublishFailureResilience:
         # guarantees per spec §5.5).
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
-        if dep_callable is None:
-            pytest.fail("get_ingestion_service dependency not found")
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -652,4 +601,184 @@ class TestPublishFailureResilience:
         assert body.get("id") == str(_KNOWN_UUID_1), (
             f"Response id must be the UUID returned by the service ({_KNOWN_UUID_1}), "
             f"got {body.get('id')!r}."
+        )
+
+
+# ===========================================================================
+# CLASS 5 — DB failure: route returns 500 and nothing is published
+# ===========================================================================
+
+
+class _FailingRepo:
+    """In-test FailingRepo fake for route-level 5xx propagation tests.
+
+    Records calls to call_log then raises RuntimeError, simulating a DB
+    commit failure.  Defined here (rather than imported from test_service.py)
+    to keep each test file self-contained — the two files are independent
+    pytest modules and cross-file imports between test modules are fragile.
+    """
+
+    def __init__(self, call_log: list) -> None:
+        self._call_log = call_log
+
+    async def persist(self, record) -> None:
+        self._call_log.append(("persist", record))
+        raise RuntimeError("Simulated DB failure (route test)")
+
+    async def persist_many(self, records: list) -> None:
+        self._call_log.append(("persist_many", records))
+        raise RuntimeError("Simulated DB failure (route test)")
+
+
+class _CapturingPublisher:
+    """Minimal publisher fake that records calls without raising.
+
+    Used alongside _FailingRepo to assert that publish is never called when
+    the DB fails — the call_log absence is the assertion.
+    """
+
+    def __init__(self, call_log: list) -> None:
+        self._call_log = call_log
+        self.published_records: list = []
+
+    async def publish(self, record) -> None:
+        self._call_log.append(("publish", record))
+        self.published_records.append(record)
+
+
+def _make_failing_service():
+    """Build an IngestionService wired to a FailingRepo and a CapturingPublisher.
+
+    Returns (service, call_log, publisher) so tests can inspect side-effects.
+    Imports IngestionService at call time (same pattern as service tests).
+    """
+    from app.service import IngestionService
+
+    call_log: list = []
+    publisher = _CapturingPublisher(call_log)
+    service = IngestionService(
+        repo=_FailingRepo(call_log),
+        publisher=publisher,
+        logger=MagicMock(),
+    )
+    return service, call_log, publisher
+
+
+class TestPersistFailureRouteResponse:
+    """Route returns HTTP 500 when the service raises on persist (spec §5.5 step 3).
+
+    The DB failure propagates out of IngestionService.ingest_one/ingest_many (no
+    try/except around persist) so FastAPI's default exception handler converts it to
+    a 500.  Nothing must be published because publish only runs after a successful
+    commit.
+
+    TestClient is constructed with raise_server_exceptions=False so 5xx responses
+    are returned as normal response objects rather than re-raising the exception in
+    the test process — consistent with the file's existing test pattern.
+    """
+
+    def test_single_ingest_returns_500_when_persist_fails(self) -> None:
+        """POST /events/ingest must return HTTP 500 when the DB commit raises.
+
+        WHY (spec §5.5 step 3): the exception propagates out of ingest_one so
+        FastAPI converts it to a 500, signalling the caller that the event was
+        NOT accepted and should be retried.  A 202 here would be a lie — nothing
+        was written to PostgreSQL.
+        """
+        from starlette.testclient import TestClient
+        from app.main import app
+
+        service, _call_log, _publisher = _make_failing_service()
+        _, dep_callable = _import_app_and_service_dep()
+
+        app.dependency_overrides[dep_callable] = lambda: service
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                response = client.post("/events/ingest", json=_VALID_SINGLE_EVENT)
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 500, (
+            f"POST /events/ingest must return HTTP 500 when persist raises. "
+            f"Got {response.status_code}. Body: {response.text!r}. "
+            "Spec §5.5 step 3: commit failure must propagate as 5xx."
+        )
+
+    def test_single_ingest_nothing_published_when_persist_fails(self) -> None:
+        """When persist raises on POST /events/ingest, the publisher must not be called.
+
+        WHY (spec §5.5 step 3): publishing follows a successful commit only.
+        A stream message for an un-committed event would leave dangling references
+        in the pipeline — normalization would fail to find the corresponding PG row.
+        """
+        from starlette.testclient import TestClient
+        from app.main import app
+
+        service, _call_log, publisher = _make_failing_service()
+        _, dep_callable = _import_app_and_service_dep()
+
+        app.dependency_overrides[dep_callable] = lambda: service
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.post("/events/ingest", json=_VALID_SINGLE_EVENT)
+        finally:
+            app.dependency_overrides.clear()
+
+        assert publisher.published_records == [], (
+            f"No records must be published when persist raises. "
+            f"Got {len(publisher.published_records)} published records. "
+            "Spec §5.5 step 3: nothing enters the pipeline on commit failure."
+        )
+
+    def test_bulk_ingest_returns_500_when_persist_fails(self) -> None:
+        """POST /events/bulk must return HTTP 500 when the DB commit raises.
+
+        WHY (spec §5.5 step 3 + bulk semantics): persist_many is the single
+        all-or-nothing transaction for the batch.  If it raises, all events in
+        the batch are un-committed and the route must return 5xx so the caller
+        knows to retry the entire batch.
+        """
+        from starlette.testclient import TestClient
+        from app.main import app
+
+        service, _call_log, _publisher = _make_failing_service()
+        _, dep_callable = _import_app_and_service_dep()
+
+        app.dependency_overrides[dep_callable] = lambda: service
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                response = client.post("/events/bulk", json=_make_bulk_events(3))
+        finally:
+            app.dependency_overrides.clear()
+
+        assert response.status_code == 500, (
+            f"POST /events/bulk must return HTTP 500 when persist_many raises. "
+            f"Got {response.status_code}. Body: {response.text!r}. "
+            "Spec §5.5 step 3: commit failure must propagate as 5xx."
+        )
+
+    def test_bulk_ingest_nothing_published_when_persist_fails(self) -> None:
+        """When persist_many raises on POST /events/bulk, the publisher must not be called.
+
+        WHY (spec §5.5 step 3): zero publish attempts on batch commit failure.
+        All 3 events are un-committed; attempting to publish any of them would
+        create dangling stream messages.
+        """
+        from starlette.testclient import TestClient
+        from app.main import app
+
+        service, _call_log, publisher = _make_failing_service()
+        _, dep_callable = _import_app_and_service_dep()
+
+        app.dependency_overrides[dep_callable] = lambda: service
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.post("/events/bulk", json=_make_bulk_events(3))
+        finally:
+            app.dependency_overrides.clear()
+
+        assert publisher.published_records == [], (
+            f"No records must be published when persist_many raises. "
+            f"Got {len(publisher.published_records)} published records. "
+            "Spec §5.5 step 3: nothing enters the pipeline on batch commit failure."
         )

@@ -13,7 +13,6 @@ import sys
 from unittest.mock import AsyncMock, MagicMock
 
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -86,10 +85,6 @@ class _FakeRedis:
         self.set_calls.append({"key": key, "ttl": ex, "value": value})
 
 
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
 # ===========================================================================
 # D — Corrupted-cache PII redaction
 # ===========================================================================
@@ -110,7 +105,7 @@ class TestCorruptedCacheLogRedaction:
     exposing PII.
     """
 
-    def test_corrupted_cache_warning_does_not_echo_pii_email(
+    async def test_corrupted_cache_warning_does_not_echo_pii_email(
         self, monkeypatch
     ) -> None:
         """Corrupted cache warning must not include the user's email in logged content."""
@@ -154,7 +149,7 @@ class TestCorruptedCacheLogRedaction:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        _run(adapter.enrich("primary_email", pii_token))
+        await adapter.enrich("primary_email", pii_token)
 
         assert len(logged_warning_kwargs) >= 1, (
             "Expected at least one logger.warning call on corrupted cache entry, got none. "
@@ -226,7 +221,7 @@ class TestMalformedMessageLogRedaction:
 
         return _CapturingBoundLogger(_consumer_mod._logger)
 
-    def test_malformed_message_error_log_truncates_long_error(self) -> None:
+    async def test_malformed_message_error_log_truncates_long_error(self) -> None:
         """Non-ValidationError exception: consumer error log must truncate to <= 300 chars.
 
         service.normalize raises a RuntimeError whose message is 500+ chars. After
@@ -245,17 +240,17 @@ class TestMalformedMessageLogRedaction:
 
         long_error_payload = "RUNTIME-ERR-PAYLOAD-" + ("X" * 500)
         service = AsyncMock()
-        service.normalize = AsyncMock(
-            side_effect=RuntimeError(long_error_payload)
-        )
+        service.normalize = AsyncMock(side_effect=RuntimeError(long_error_payload))
         repository = AsyncMock()
         publisher = AsyncMock()
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            one_good_message_bad_normalize,
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                one_good_message_bad_normalize,
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock()
 
         logged_errors: list[dict] = []
@@ -263,12 +258,12 @@ class TestMalformedMessageLogRedaction:
         _consumer_mod._logger = self._make_capturing_logger(logged_errors)
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
         finally:
@@ -323,7 +318,7 @@ class TestValidationErrorLogRedaction:
 
         return _CapturingBoundLogger(_consumer_mod._logger)
 
-    def test_validation_error_log_does_not_contain_pii_email(self) -> None:
+    async def test_validation_error_log_does_not_contain_pii_email(self) -> None:
         """ValidationError log must record field locations, not input_value PII.
 
         Scenario: a stream message whose 'id' field contains a user email instead
@@ -337,32 +332,34 @@ class TestValidationErrorLogRedaction:
 
         pii_email = "alice@corp.com"
 
-        message_data = json.dumps({
-            "id": pii_email,          # invalid UUID — triggers ValidationError with
-                                       # input_value='alice@corp.com' in str(exc)
-            "user_id": "alice",
-            "client_ip": "192.168.1.1",
-            "protocol": "oidc",
-            "timestamp": "2024-01-15T10:30:00Z",
-            "source": "user",
-            "is_synthetic": False,
-            "is_historical": False,
-            "raw_attributes": {},
-        })
+        message_data = json.dumps(
+            {
+                "id": pii_email,  # invalid UUID — triggers ValidationError with
+                # input_value='alice@corp.com' in str(exc)
+                "user_id": "alice",
+                "client_ip": "192.168.1.1",
+                "protocol": "oidc",
+                "timestamp": "2024-01-15T10:30:00Z",
+                "source": "user",
+                "is_synthetic": False,
+                "is_historical": False,
+                "raw_attributes": {},
+            }
+        )
 
-        one_pii_message = [
-            [STREAM_LOGIN_EVENTS, [("pii-1-0", {"data": message_data})]]
-        ]
+        one_pii_message = [[STREAM_LOGIN_EVENTS, [("pii-1-0", {"data": message_data})]]]
 
         service = AsyncMock()
         repository = AsyncMock()
         publisher = AsyncMock()
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            one_pii_message,
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                one_pii_message,
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock()
 
         logged_errors: list[dict] = []
@@ -370,12 +367,12 @@ class TestValidationErrorLogRedaction:
         _consumer_mod._logger = self._make_capturing_logger(logged_errors)
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
         finally:
@@ -396,9 +393,7 @@ class TestValidationErrorLogRedaction:
             )
 
         location_present = any(
-            "id" in repr(v)
-            for log_event in logged_errors
-            for v in log_event.values()
+            "id" in repr(v) for log_event in logged_errors for v in log_event.values()
         )
         assert location_present, (
             "The error log event for a ValidationError must include location "

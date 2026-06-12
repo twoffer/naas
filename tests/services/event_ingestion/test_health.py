@@ -1,5 +1,6 @@
 """GET /health endpoint happy-path, degraded, and unhealthy states for event-ingestion."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # third-party
@@ -9,6 +10,7 @@ import pytest
 # ---------------------------------------------------------------------------
 # Mock builders for DB session and Redis client
 # ---------------------------------------------------------------------------
+
 
 def _make_ok_db_session() -> AsyncMock:
     """Async mock session whose execute() succeeds (SELECT 1 returns a row).
@@ -71,36 +73,36 @@ from contextlib import contextmanager
 
 @contextmanager
 def _patch_health_deps(db_session=None, redis_client=None):
-    """Patch naas_shared.database.get_db_session and naas_shared.redis_client.get_redis.
+    """Patch naas_shared.database.get_session_factory and naas_shared.redis_client.get_redis.
 
-    ASSUMPTION: The /health endpoint uses:
-        - get_db_session (as a FastAPI dependency OR called directly)
-        - get_redis() (called directly or via dependency)
+    The /health endpoint uses get_session_factory() to obtain a session factory,
+    then uses it as an async context manager (async with factory() as session).
+    We patch get_session_factory to return a callable that yields an async context
+    manager wrapping our fake session.
 
-    We patch at the naas_shared module level because app.main imports these symbols
-    from naas_shared at module import time. Patching the naas_shared namespace
-    ensures the in-process references used by the handler get the mock.
-
-    If the implementer imports `from naas_shared.database import get_db_session`
-    in routes.py or main.py, we also patch at the app.routes / app.main namespace
-    (both patches are applied via dependency_overrides + these module-level patches
-    for belt-and-suspenders coverage).
+    get_redis is patched as a regular async function returning the fake client.
+    Both patches are applied at the naas_shared module level so the module-reference
+    lookup in the health handler (_db_mod.get_session_factory()) picks them up.
     """
     db_sess = db_session if db_session is not None else _make_ok_db_session()
     redis_cli = redis_client if redis_client is not None else _make_ok_redis_client()
 
-    # Build async generator wrapper for get_db_session (it's an async generator dep)
-    async def _fake_get_db_session():
+    # Build a fake session factory: a sync callable that returns an async CM.
+    @asynccontextmanager
+    async def _fake_session_cm():
         yield db_sess
+
+    def _fake_get_session_factory():
+        return _fake_session_cm
 
     # Build coroutine wrapper for get_redis (it's a regular async function)
     async def _fake_get_redis():
         return redis_cli
 
-    # We apply dependency_overrides via app after importing it inside the context.
-    # The caller must import app themselves — this context manager only patches modules.
     with (
-        patch("naas_shared.database.get_db_session", new=_fake_get_db_session),
+        patch(
+            "naas_shared.database.get_session_factory", new=_fake_get_session_factory
+        ),
         patch("naas_shared.redis_client.get_redis", new=_fake_get_redis),
     ):
         yield db_sess, redis_cli
@@ -377,7 +379,9 @@ class TestHealthStatusUnhealthy:
             "When PG is down (regardless of Redis), status must be 'unhealthy'."
         )
 
-    def test_health_body_conforms_to_health_response_schema_when_unhealthy(self) -> None:
+    def test_health_body_conforms_to_health_response_schema_when_unhealthy(
+        self,
+    ) -> None:
         """GET /health body must validate against HealthResponse when unhealthy."""
         from naas_shared.models import HealthResponse
         from pydantic import ValidationError
@@ -435,12 +439,15 @@ class TestHealthAlwaysReturnsHttp200:
     can't reach its dependencies).
     """
 
-    @pytest.mark.parametrize("scenario,db_ok,redis_ok,expected_body_status", [
-        ("both_ok", True, True, "healthy"),
-        ("redis_down", True, False, "degraded"),
-        ("pg_down", False, True, "unhealthy"),
-        ("both_down", False, False, "unhealthy"),
-    ])
+    @pytest.mark.parametrize(
+        "scenario,db_ok,redis_ok,expected_body_status",
+        [
+            ("both_ok", True, True, "healthy"),
+            ("redis_down", True, False, "degraded"),
+            ("pg_down", False, True, "unhealthy"),
+            ("both_down", False, False, "unhealthy"),
+        ],
+    )
     def test_health_always_http_200(
         self,
         scenario: str,
@@ -458,7 +465,9 @@ class TestHealthAlwaysReturnsHttp200:
         from app.main import app
 
         db_session = _make_ok_db_session() if db_ok else _make_failing_db_session()
-        redis_client = _make_ok_redis_client() if redis_ok else _make_failing_redis_client()
+        redis_client = (
+            _make_ok_redis_client() if redis_ok else _make_failing_redis_client()
+        )
 
         with _patch_health_deps(db_session=db_session, redis_client=redis_client) as _:
             with TestClient(app, raise_server_exceptions=False) as client:

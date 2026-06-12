@@ -5,26 +5,9 @@ from pathlib import Path
 # third-party
 import pytest
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery and sys.path injection
-# ---------------------------------------------------------------------------
-
-
-
-
-def _find_repo_root() -> Path:
-    """Walk up until docs/architecture/ is found — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
-
-REPO_ROOT = _find_repo_root()
+from tests.helpers import REPO_ROOT
 
 CONFIG_PATH = REPO_ROOT / "config" / "normalization.yaml"
-
 
 
 # ---------------------------------------------------------------------------
@@ -213,7 +196,9 @@ class TestSingleSourceResolution:
         )
 
         detail = result.resolution_details.get("display_name")
-        assert detail is not None, "display_name must appear in resolution_details when one source is present."
+        assert detail is not None, (
+            "display_name must appear in resolution_details when one source is present."
+        )
         assert isinstance(detail, SingleSourceResolution), (
             f"Expected SingleSourceResolution for single-source display_name, got {type(detail)!r}."
         )
@@ -366,7 +351,9 @@ class TestUnanimousResolution:
 
         cfg = _load_real_config()
         result = resolve(
-            attribute_sources={"display_name": {"oidc": "Alice Smith", "ldap": "Alice Smith"}},
+            attribute_sources={
+                "display_name": {"oidc": "Alice Smith", "ldap": "Alice Smith"}
+            },
             config=cfg,
             source_protocol="oidc",
             enrichment=_applied_enrichment(),
@@ -464,7 +451,11 @@ class TestUnanimousResolution:
         cfg = _load_real_config()
         result = resolve(
             attribute_sources={
-                "display_name": {"ldap": "Charlie", "saml": "Charlie", "oidc": "Charlie"}
+                "display_name": {
+                    "ldap": "Charlie",
+                    "saml": "Charlie",
+                    "oidc": "Charlie",
+                }
             },
             config=cfg,
             source_protocol="oidc",
@@ -602,9 +593,7 @@ class TestPriorityResolution:
 
         cfg = _load_real_config()
         result = resolve(
-            attribute_sources={
-                "employee_type": {"ldap": "FTE", "saml": "contractor"}
-            },
+            attribute_sources={"employee_type": {"ldap": "FTE", "saml": "contractor"}},
             config=cfg,
             source_protocol="saml",
             enrichment=_skip_enrichment(),
@@ -729,7 +718,6 @@ class TestPriorityResolution:
         We also verify the weight-based fallback by using a custom minimal config
         with NO priority list for the attribute in conflict.
         """
-        from pathlib import Path
 
         from app.normalization_config import load_config
         from app.resolution import resolve
@@ -764,7 +752,9 @@ enrichment:
 
         cfg = load_config(tmp_path)
         result = resolve(
-            attribute_sources={"display_name": {"ldap": "Alice Smith", "saml": "alice"}},
+            attribute_sources={
+                "display_name": {"ldap": "Alice Smith", "saml": "alice"}
+            },
             config=cfg,
             source_protocol="saml",
             enrichment=_skip_enrichment(),
@@ -911,7 +901,10 @@ class TestReturnedObjectValidation:
             attribute_sources={
                 "display_name": {"oidc": "Alice", "ldap": "Alice"},
                 "primary_email": {"oidc": "a@corp.com"},
-                "department": {"ldap": ("Engineering", True), "oidc": ("Finance", True)},
+                "department": {
+                    "ldap": ("Engineering", True),
+                    "oidc": ("Finance", True),
+                },
                 "employee_type": {"ldap": "FTE"},
                 "groups": {"oidc": ["admin"], "ldap": ["engineering"]},
             },

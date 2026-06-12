@@ -1,12 +1,10 @@
 """LdapAdapter.enrich(): LDAP search, attribute extraction, and cache write mechanics."""
 
-import asyncio
 import sys
 from unittest.mock import AsyncMock, MagicMock
 
 # third-party
 import pytest
-
 
 
 # ---------------------------------------------------------------------------
@@ -159,7 +157,7 @@ class TestEnrichIsAwaitable:
     requires wrapping blocking LDAP calls in asyncio.to_thread().
     """
 
-    def test_enrich_returns_coroutine_on_call(self, monkeypatch) -> None:
+    async def test_enrich_returns_coroutine_on_call(self, monkeypatch) -> None:
         """LdapAdapter().enrich(...) must return a coroutine, not a plain value.
 
         Spec §5.3 requires asyncio.to_thread wrapping; a non-coroutine return
@@ -188,7 +186,7 @@ class TestEnrichIsAwaitable:
         # Close the coroutine to avoid ResourceWarning
         result.close()
 
-    def test_enrich_can_be_awaited(self, monkeypatch) -> None:
+    async def test_enrich_can_be_awaited(self, monkeypatch) -> None:
         """await LdapAdapter().enrich(...) must complete without RuntimeError."""
         _inject_fake_ldap(monkeypatch)
         fake_redis = _make_fake_redis(get_return=b'"null"')
@@ -202,9 +200,7 @@ class TestEnrichIsAwaitable:
         adapter = LdapAdapter()
 
         # Must not raise RuntimeError("cannot reuse already awaited coroutine") etc.
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         # Negative cache hit → attrs is None (no LDAP search); outcome is a str
         assert attrs is None or isinstance(attrs, dict), (
@@ -230,7 +226,7 @@ class TestEnrichReverseMapping:
     search will always return zero results — a silent misconfiguration.
     """
 
-    def test_known_correlation_field_does_not_return_immediately_as_none(
+    async def test_known_correlation_field_does_not_return_immediately_as_none(
         self, monkeypatch
     ) -> None:
         """A correlation_field in UNIFIED_TO_LDAP must attempt an LDAP query.
@@ -257,16 +253,14 @@ class TestEnrichReverseMapping:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert conn_mock.search_s.called, (
             "LdapAdapter.enrich('primary_email', ...) must call search_s at least once. "
             "The correlation_field 'primary_email' is in UNIFIED_TO_LDAP and must be queried."
         )
 
-    def test_unknown_correlation_field_returns_none_without_ldap_query(
+    async def test_unknown_correlation_field_returns_none_without_ldap_query(
         self, monkeypatch
     ) -> None:
         """A correlation_field NOT in UNIFIED_TO_LDAP must return None immediately.
@@ -294,9 +288,7 @@ class TestEnrichReverseMapping:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("favorite_color", "blue")
-        )
+        attrs, outcome = await adapter.enrich("favorite_color", "blue")
 
         assert attrs is None, (
             f"enrich('favorite_color', ...) must return attrs=None for an unmappable "
@@ -321,7 +313,7 @@ class TestEnrichReverseMapping:
             ("groups", "memberOf"),
         ],
     )
-    def test_correlation_field_reverse_maps_to_correct_ldap_attr(
+    async def test_correlation_field_reverse_maps_to_correct_ldap_attr(
         self,
         monkeypatch,
         unified_field: str,
@@ -368,9 +360,7 @@ class TestEnrichReverseMapping:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        asyncio.get_event_loop().run_until_complete(
-            adapter.enrich(unified_field, "test_value")
-        )
+        await adapter.enrich(unified_field, "test_value")
 
         assert len(search_calls) >= 1, (
             f"enrich('{unified_field}', ...) must call search_s — no search was recorded."
@@ -399,7 +389,9 @@ class TestEnrichSearchAndMatch:
     ensures the same normalization path as direct LDAP events.
     """
 
-    def test_enrich_match_returns_dict_with_unified_keys(self, monkeypatch) -> None:
+    async def test_enrich_match_returns_dict_with_unified_keys(
+        self, monkeypatch
+    ) -> None:
         """A successful LDAP match must return a dict with unified schema keys.
 
         WHY: The unified dict is merged with primary-source attributes during
@@ -431,9 +423,7 @@ class TestEnrichSearchAndMatch:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is not None, (
             "enrich() returned attrs=None on a successful LDAP match — expected a dict. "
@@ -461,7 +451,7 @@ class TestEnrichSearchAndMatch:
             f"Missing: {expected_keys - actual_keys}. Got keys: {actual_keys}"
         )
 
-    def test_enrich_match_decodes_bytes_to_str(self, monkeypatch) -> None:
+    async def test_enrich_match_decodes_bytes_to_str(self, monkeypatch) -> None:
         """LDAP attribute values are bytes; enrich() must decode them to str.
 
         WHY: python-ldap returns attribute values as lists of bytes
@@ -492,9 +482,7 @@ class TestEnrichSearchAndMatch:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is not None, "Expected a match result, got attrs=None"
 
@@ -507,7 +495,7 @@ class TestEnrichSearchAndMatch:
                     f"got {type(val).__name__!r}: {val!r}"
                 )
 
-    def test_enrich_match_applies_value_normalization(self, monkeypatch) -> None:
+    async def test_enrich_match_applies_value_normalization(self, monkeypatch) -> None:
         """enrich() must apply value normalization (via extract()) to LDAP results.
 
         WHY: The caller (NormalizationService) runs conflict resolution expecting
@@ -541,9 +529,7 @@ class TestEnrichSearchAndMatch:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is not None, "Expected a match result, got attrs=None"
         assert attrs.get("department") == "Engineering", (
@@ -573,7 +559,7 @@ class TestEnrichNoMatchAndErrors:
     from being processed. All LDAP error conditions must be absorbed.
     """
 
-    def test_enrich_empty_search_result_returns_none(self, monkeypatch) -> None:
+    async def test_enrich_empty_search_result_returns_none(self, monkeypatch) -> None:
         """An empty LDAP search result (no directory entry) must return None.
 
         WHY: This is the 'no_ldap_match' path. The consumer maps None to
@@ -597,9 +583,7 @@ class TestEnrichNoMatchAndErrors:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "unknown@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "unknown@corp.com")
 
         assert attrs is None, (
             f"enrich() must return attrs=None when LDAP search returns no results, "
@@ -609,7 +593,7 @@ class TestEnrichNoMatchAndErrors:
             f"enrich() outcome must be 'ldap_no_match' on empty result, got {outcome!r}"
         )
 
-    def test_enrich_ldap_connection_error_returns_none(self, monkeypatch) -> None:
+    async def test_enrich_ldap_connection_error_returns_none(self, monkeypatch) -> None:
         """An LDAP connection error (SERVER_DOWN) must not propagate out of enrich().
 
         WHY: If LDAP is down, the event must still be processed using primary-
@@ -634,9 +618,7 @@ class TestEnrichNoMatchAndErrors:
 
         adapter = LdapAdapter()
         # Must NOT raise — graceful degradation
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is None, (
             f"enrich() must return attrs=None on connection error, not propagate SERVER_DOWN. "
@@ -647,7 +629,7 @@ class TestEnrichNoMatchAndErrors:
             f"got {outcome!r}"
         )
 
-    def test_enrich_ldap_search_error_returns_none(self, monkeypatch) -> None:
+    async def test_enrich_ldap_search_error_returns_none(self, monkeypatch) -> None:
         """An LDAP search error (OPERATIONS_ERROR) must not propagate out of enrich().
 
         WHY: Search errors can occur due to LDAP server load, ACL issues, or
@@ -673,9 +655,7 @@ class TestEnrichNoMatchAndErrors:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is None, (
             f"enrich() must return attrs=None on LDAP search error, "
@@ -686,7 +666,7 @@ class TestEnrichNoMatchAndErrors:
             f"got {outcome!r}"
         )
 
-    def test_enrich_ldap_timeout_returns_none(self, monkeypatch) -> None:
+    async def test_enrich_ldap_timeout_returns_none(self, monkeypatch) -> None:
         """An LDAP timeout (TIMEOUT_EXCEEDED) must not propagate out of enrich().
 
         WHY: The config specifies timeout_ms (§5.6). A timeout is a transient
@@ -712,9 +692,7 @@ class TestEnrichNoMatchAndErrors:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is None, (
             f"enrich() must return attrs=None on LDAP timeout, "
@@ -725,7 +703,7 @@ class TestEnrichNoMatchAndErrors:
             f"got {outcome!r}"
         )
 
-    def test_enrich_unexpected_exception_returns_none(self, monkeypatch) -> None:
+    async def test_enrich_unexpected_exception_returns_none(self, monkeypatch) -> None:
         """Unexpected exceptions during LDAP query must not propagate out of enrich().
 
         WHY: Belt-and-suspenders test. Even an unexpected exception (RuntimeError,
@@ -751,9 +729,7 @@ class TestEnrichNoMatchAndErrors:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = asyncio.get_event_loop().run_until_complete(
-            adapter.enrich("primary_email", "alice@corp.com")
-        )
+        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is None, (
             f"enrich() must return attrs=None on unexpected exceptions, got {attrs!r}"

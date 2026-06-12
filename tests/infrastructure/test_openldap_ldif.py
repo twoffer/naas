@@ -7,38 +7,25 @@
 # with Keycloak users. Optional deep-parse test using python-ldap if available.
 # stdlib
 import re
-from pathlib import Path
 
 # third-party
 import pytest
 
+from tests.helpers import REPO_ROOT
+from tests.infrastructure.ldif_helpers import load_ldif_lines as _ldif_load
+from tests.infrastructure.ldif_helpers import parse_ldif_blocks as _ldif_parse
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find docs/architecture/ — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError("Could not locate repo root (looked for docs/architecture/ sentinel)")
-
-
-REPO_ROOT = _find_repo_root()
 LDIF_FILE = REPO_ROOT / "infrastructure" / "openldap" / "bootstrap.ldif"
 
 
 # ---------------------------------------------------------------------------
-# Shared helpers
+# Shared helpers — delegated to tests/infrastructure/ldif_helpers.py
 # ---------------------------------------------------------------------------
+
 
 def _load_ldif_lines() -> list[str]:
     """Return every line from the LDIF file, with newlines stripped."""
-    return LDIF_FILE.read_text(encoding="utf-8").splitlines()
+    return _ldif_load(LDIF_FILE)
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +89,13 @@ class TestLdifNoBadBaseDn:
 class TestLdifOrganizationalUnits:
     """Tests that both required OU entries are present."""
 
-    @pytest.mark.parametrize("expected_dn", [
-        "dn: ou=users,dc=corp,dc=com",
-        "dn: ou=groups,dc=corp,dc=com",
-    ])
+    @pytest.mark.parametrize(
+        "expected_dn",
+        [
+            "dn: ou=users,dc=corp,dc=com",
+            "dn: ou=groups,dc=corp,dc=com",
+        ],
+    )
     def test_ou_dn_entry_present(self, expected_dn):
         """LDIF must contain the specified OU dn: line.
 
@@ -152,9 +142,7 @@ class TestLdifOrdering:
             (i for i, ln in enumerate(lines) if user_dn_pattern.match(ln)), None
         )
 
-        assert ou_users_line is not None, (
-            f"'{ou_users_dn}' not found in LDIF"
-        )
+        assert ou_users_line is not None, f"'{ou_users_dn}' not found in LDIF"
         assert first_user_line is not None, (
             "No user DN entries (uid=...,ou=users,dc=corp,dc=com) found in LDIF"
         )
@@ -184,12 +172,8 @@ class TestLdifOrdering:
             (i for i, ln in enumerate(lines) if user_dn_pattern.match(ln)), None
         )
 
-        assert ou_groups_line is not None, (
-            f"'{ou_groups_dn}' not found in LDIF"
-        )
-        assert first_user_line is not None, (
-            "No user DN entries found in LDIF"
-        )
+        assert ou_groups_line is not None, f"'{ou_groups_dn}' not found in LDIF"
+        assert first_user_line is not None, "No user DN entries found in LDIF"
         assert ou_groups_line < first_user_line, (
             f"'{ou_groups_dn}' appears at line {ou_groups_line} but first user entry "
             f"appears at line {first_user_line}. OUs must precede their children."
@@ -248,9 +232,7 @@ class TestLdifUserEntries:
         """
         uids = {_extract_uid_from_dn(dn) for dn in user_dns}
         expected = {"alice", "bob", "charlie", "diana", "eve"}
-        assert uids == expected, (
-            f"Expected uid set={expected!r}, got {uids!r}"
-        )
+        assert uids == expected, f"Expected uid set={expected!r}, got {uids!r}"
 
 
 # ---------------------------------------------------------------------------
@@ -259,55 +241,12 @@ class TestLdifUserEntries:
 
 
 def _parse_ldif_blocks(lines: list[str]) -> dict[str, dict[str, list[str]]]:
-    """Parse LDIF lines into blocks keyed by dn value.
+    """Parse LDIF lines into blocks keyed by dn value (RFC-2849 correct).
 
-    Returns a dict mapping dn_value -> {attr_name: [value, ...]}. This is a
-    structural parser only — it handles simple attribute:value pairs and
-    blank-line-separated blocks.  It does NOT handle base64-encoded values
-    (::), continuation lines (space-prefixed), or multi-valued attributes
-    beyond accumulating them into a list.  Sufficient for spec §5.3 validation.
+    Delegates to the shared implementation in tests/infrastructure/ldif_helpers.py
+    which handles blank lines, comments, and RFC-2849 continuation lines.
     """
-    blocks: dict[str, dict[str, list[str]]] = {}
-    current_dn: str | None = None
-    current_block: dict[str, list[str]] = {}
-
-    for line in lines:
-        stripped = line.strip()
-
-        # Blank line or comment ends the current block
-        if not stripped or stripped.startswith("#"):
-            if current_dn is not None:
-                blocks[current_dn] = current_block
-                current_dn = None
-                current_block = {}
-            continue
-
-        # Handle continuation lines (wrapped attribute values start with a space)
-        if line.startswith(" ") and current_dn is not None:
-            # Append continuation to last attribute value — simplified handling
-            continue
-
-        if ":" not in stripped:
-            continue
-
-        attr, _, value = stripped.partition(":")
-        attr = attr.strip().lower()
-        value = value.strip()
-
-        if attr == "dn":
-            # Start of a new block
-            if current_dn is not None:
-                blocks[current_dn] = current_block
-            current_dn = value
-            current_block = {"dn": [value]}
-        elif current_dn is not None:
-            current_block.setdefault(attr, []).append(value)
-
-    # Flush last block (file may not end with a blank line)
-    if current_dn is not None:
-        blocks[current_dn] = current_block
-
-    return blocks
+    return _ldif_parse(lines)
 
 
 class TestLdifUserAttributes:
@@ -460,13 +399,16 @@ class TestLdifEmployeeTypeCoverage:
             "All three types (FTE, contractor, vendor) must appear across the 5 users."
         )
 
-    @pytest.mark.parametrize("uid,expected_type", [
-        ("alice", "FTE"),
-        ("bob", "FTE"),
-        ("charlie", "contractor"),
-        ("diana", "vendor"),
-        ("eve", "contractor"),
-    ])
+    @pytest.mark.parametrize(
+        "uid,expected_type",
+        [
+            ("alice", "FTE"),
+            ("bob", "FTE"),
+            ("charlie", "contractor"),
+            ("diana", "vendor"),
+            ("eve", "contractor"),
+        ],
+    )
     def test_specific_user_employee_type(self, blocks, uid, expected_type):
         """Each user's employeeType must match the value in spec §5.3.
 
@@ -504,11 +446,14 @@ class TestLdifCrossProtocolCorrelation:
         assert LDIF_FILE.exists(), f"File missing: {LDIF_FILE}"
         return _parse_ldif_blocks(_load_ldif_lines())
 
-    @pytest.mark.parametrize("uid,expected_email", [
-        ("alice", "alice@corp.com"),
-        ("bob", "bob@corp.com"),
-        ("charlie", "charlie@corp.com"),
-    ])
+    @pytest.mark.parametrize(
+        "uid,expected_email",
+        [
+            ("alice", "alice@corp.com"),
+            ("bob", "bob@corp.com"),
+            ("charlie", "charlie@corp.com"),
+        ],
+    )
     def test_shared_user_email_matches_keycloak(self, blocks, uid, expected_email):
         """alice/bob/charlie must have the same email in LDAP as in Keycloak.
 
@@ -526,10 +471,13 @@ class TestLdifCrossProtocolCorrelation:
             f"got mail={mail_values!r}. This breaks cross-protocol correlation."
         )
 
-    @pytest.mark.parametrize("uid,expected_email", [
-        ("diana", "diana@corp.com"),
-        ("eve", "eve@partner.com"),
-    ])
+    @pytest.mark.parametrize(
+        "uid,expected_email",
+        [
+            ("diana", "diana@corp.com"),
+            ("eve", "eve@partner.com"),
+        ],
+    )
     def test_ldap_only_user_email(self, blocks, uid, expected_email):
         """diana and eve (LDAP-only users) must have the emails specified in spec §5.3.
 
@@ -543,8 +491,7 @@ class TestLdifCrossProtocolCorrelation:
         block = blocks[key]
         mail_values = block.get("mail", [])
         assert expected_email in mail_values, (
-            f"User {uid!r}: expected mail={expected_email!r}, "
-            f"got mail={mail_values!r}"
+            f"User {uid!r}: expected mail={expected_email!r}, got mail={mail_values!r}"
         )
 
 
@@ -563,10 +510,13 @@ def test_ldif_deep_parse_via_python_ldap_if_available():
     The structural checks in the other test classes are always unconditional and
     do NOT depend on this test passing.
     """
-    ldif_mod = pytest.importorskip("ldif", reason="python-ldap/ldif not installed — skip deep parse")
+    ldif_mod = pytest.importorskip(
+        "ldif", reason="python-ldap/ldif not installed — skip deep parse"
+    )
     assert LDIF_FILE.exists(), f"File missing: {LDIF_FILE}"
 
     import io
+
     content = LDIF_FILE.read_text(encoding="utf-8")
     # Filter comment lines (ldif parser may choke on them depending on version)
     non_comment_lines = [ln for ln in content.splitlines() if not ln.startswith("#")]

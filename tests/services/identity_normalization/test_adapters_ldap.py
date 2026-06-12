@@ -1,6 +1,5 @@
 """LdapAdapter: enrich() method attribute mapping, cache, and LDAP search contract."""
 
-
 # third-party
 import pytest
 
@@ -141,9 +140,9 @@ class TestLdapAdapterFieldMapping:
         """extract({'memberOf': [...]}) must include groups as a list."""
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "memberOf": ["cn=engineering,ou=groups,dc=corp,dc=com"]
-        })
+        result = LdapAdapter().extract(
+            {"memberOf": ["cn=engineering,ou=groups,dc=corp,dc=com"]}
+        )
 
         assert isinstance(result.get("groups"), list), (
             f"Expected groups to be a list, got {type(result.get('groups')).__name__!r}. "
@@ -182,9 +181,9 @@ class TestLdapAdapterMemberOfDnReduction:
         """
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "memberOf": ["cn=engineering,ou=groups,dc=corp,dc=com"]
-        })
+        result = LdapAdapter().extract(
+            {"memberOf": ["cn=engineering,ou=groups,dc=corp,dc=com"]}
+        )
 
         groups = result.get("groups", [])
         assert "engineering" in groups, (
@@ -204,20 +203,20 @@ class TestLdapAdapterMemberOfDnReduction:
         """
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "memberOf": [
-                "cn=engineering,ou=groups,dc=corp,dc=com",
-                "cn=admin,ou=groups,dc=corp,dc=com",
-            ]
-        })
+        result = LdapAdapter().extract(
+            {
+                "memberOf": [
+                    "cn=engineering,ou=groups,dc=corp,dc=com",
+                    "cn=admin,ou=groups,dc=corp,dc=com",
+                ]
+            }
+        )
 
         groups = result.get("groups", [])
         assert "engineering" in groups, (
             f"Expected 'engineering' in groups. Got groups={groups!r}."
         )
-        assert "admin" in groups, (
-            f"Expected 'admin' in groups. Got groups={groups!r}."
-        )
+        assert "admin" in groups, f"Expected 'admin' in groups. Got groups={groups!r}."
         assert len(groups) == 2, (
             f"Expected exactly 2 group names for 2 DNs, got {len(groups)}: {groups!r}."
         )
@@ -268,9 +267,9 @@ class TestLdapAdapterMemberOfDnReduction:
         from app.adapters.ldap import LdapAdapter
 
         # Should not raise
-        result = LdapAdapter().extract({
-            "memberOf": ["uid=alice,ou=users,dc=corp,dc=com"]
-        })
+        result = LdapAdapter().extract(
+            {"memberOf": ["uid=alice,ou=users,dc=corp,dc=com"]}
+        )
 
         assert isinstance(result.get("groups"), list), (
             f"Malformed DN should yield groups as a list (even if empty or with fallback). "
@@ -287,12 +286,14 @@ class TestLdapAdapterMemberOfDnReduction:
         """
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "memberOf": [
-                "cn=engineering,ou=groups,dc=corp,dc=com",
-                "cn=admin,ou=groups,dc=corp,dc=com",
-            ]
-        })
+        result = LdapAdapter().extract(
+            {
+                "memberOf": [
+                    "cn=engineering,ou=groups,dc=corp,dc=com",
+                    "cn=admin,ou=groups,dc=corp,dc=com",
+                ]
+            }
+        )
 
         groups = result.get("groups", [])
         # The cn values in the DNs above are 'engineering' and 'admin'
@@ -310,25 +311,28 @@ class TestLdapAdapterMemberOfDnReduction:
 class TestLdapAdapterValueNormalization:
     """LdapAdapter.extract must apply the same normalization as OIDC/SAML adapters."""
 
-    @pytest.mark.parametrize("raw_dept,expected_dept", [
-        ("eng", "Engineering"),
-        ("ENGINEERING", "Engineering"),
-        (" Engineering ", "Engineering"),
-        ("r&d", "Engineering"),
-        ("product development", "Engineering"),
-        ("fin", "Finance"),
-        ("finance", "Finance"),
-        ("accounting", "Finance"),
-        ("hr", "Human Resources"),
-        ("human resources", "Human Resources"),
-        ("it", "Information Technology"),
-        ("information technology", "Information Technology"),
-        ("infra", "Information Technology"),
-        ("sales", "Sales"),
-        ("revenue", "Sales"),
-        ("mktg", "Marketing"),
-        ("marketing", "Marketing"),
-    ])
+    @pytest.mark.parametrize(
+        "raw_dept,expected_dept",
+        [
+            ("eng", "Engineering"),
+            ("ENGINEERING", "Engineering"),
+            (" Engineering ", "Engineering"),
+            ("r&d", "Engineering"),
+            ("product development", "Engineering"),
+            ("fin", "Finance"),
+            ("finance", "Finance"),
+            ("accounting", "Finance"),
+            ("hr", "Human Resources"),
+            ("human resources", "Human Resources"),
+            ("it", "Information Technology"),
+            ("information technology", "Information Technology"),
+            ("infra", "Information Technology"),
+            ("sales", "Sales"),
+            ("revenue", "Sales"),
+            ("mktg", "Marketing"),
+            ("marketing", "Marketing"),
+        ],
+    )
     def test_departmentNumber_normalization_variants(
         self, raw_dept: str, expected_dept: str
     ) -> None:
@@ -342,21 +346,24 @@ class TestLdapAdapterValueNormalization:
             f"{expected_dept!r}, got {result.get('department')!r}."
         )
 
-    @pytest.mark.parametrize("raw_et,expected_et", [
-        ("FTE", "FTE"),
-        ("fte", "FTE"),
-        ("E", "FTE"),
-        ("e", "FTE"),
-        ("employee", "FTE"),
-        ("full-time", "FTE"),
-        ("contractor", "contractor"),
-        ("c", "contractor"),
-        ("temp", "contractor"),
-        ("vendor", "vendor"),
-        ("v", "vendor"),
-        ("external", "vendor"),
-        ("partner", "vendor"),
-    ])
+    @pytest.mark.parametrize(
+        "raw_et,expected_et",
+        [
+            ("FTE", "FTE"),
+            ("fte", "FTE"),
+            ("E", "FTE"),
+            ("e", "FTE"),
+            ("employee", "FTE"),
+            ("full-time", "FTE"),
+            ("contractor", "contractor"),
+            ("c", "contractor"),
+            ("temp", "contractor"),
+            ("vendor", "vendor"),
+            ("v", "vendor"),
+            ("external", "vendor"),
+            ("partner", "vendor"),
+        ],
+    )
     def test_employeeType_normalization_variants(
         self, raw_et: str, expected_et: str
     ) -> None:
@@ -421,7 +428,11 @@ class TestLdapAdapterCrossProtocolCanonicalIdentity:
         ldap_result = LdapAdapter().extract({"departmentNumber": "r&d"})
         oidc_result = OidcAdapter().extract({"department": "eng"})
 
-        assert ldap_result.get("department") == oidc_result.get("department") == "Engineering", (
+        assert (
+            ldap_result.get("department")
+            == oidc_result.get("department")
+            == "Engineering"
+        ), (
             f"LDAP 'r&d' → {ldap_result.get('department')!r}, "
             f"OIDC 'eng' → {oidc_result.get('department')!r}. "
             "Both must equal 'Engineering' byte-for-byte."
@@ -435,7 +446,11 @@ class TestLdapAdapterCrossProtocolCanonicalIdentity:
         ldap_result = LdapAdapter().extract({"employeeType": "FTE"})
         oidc_result = OidcAdapter().extract({"employee_type": "E"})
 
-        assert ldap_result.get("employee_type") == oidc_result.get("employee_type") == "FTE", (
+        assert (
+            ldap_result.get("employee_type")
+            == oidc_result.get("employee_type")
+            == "FTE"
+        ), (
             f"LDAP 'FTE' → {ldap_result.get('employee_type')!r}, "
             f"OIDC 'E' → {oidc_result.get('employee_type')!r}. "
             "Both must equal 'FTE'."
@@ -449,7 +464,11 @@ class TestLdapAdapterCrossProtocolCanonicalIdentity:
         ldap_result = LdapAdapter().extract({"departmentNumber": "r&d"})
         saml_result = SamlAdapter().extract({"dept": "engineering"})
 
-        assert ldap_result.get("department") == saml_result.get("department") == "Engineering", (
+        assert (
+            ldap_result.get("department")
+            == saml_result.get("department")
+            == "Engineering"
+        ), (
             f"LDAP 'r&d' → {ldap_result.get('department')!r}, "
             f"SAML 'engineering' → {saml_result.get('department')!r}. "
             "Both must equal 'Engineering'."
@@ -623,9 +642,7 @@ class TestLdapAdapterBareStringMemberOf:
         """
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "memberOf": "cn=eng,ou=groups,dc=corp,dc=com"
-        })
+        result = LdapAdapter().extract({"memberOf": "cn=eng,ou=groups,dc=corp,dc=com"})
 
         groups = result.get("groups", "ABSENT_SENTINEL")
         assert groups == [], (
@@ -648,7 +665,9 @@ class TestLdapAdapterBareStringMemberOf:
 
         groups = result.get("groups", [])
         # If groups contains single-char strings from 'engineering', that's the bug
-        single_chars_from_value = [g for g in groups if isinstance(g, str) and len(g) == 1]
+        single_chars_from_value = [
+            g for g in groups if isinstance(g, str) and len(g) == 1
+        ]
         assert len(single_chars_from_value) == 0, (
             f"groups={groups!r} contains single-char entries: {single_chars_from_value!r}. "
             "This indicates character-by-character iteration of the bare string. "
@@ -666,9 +685,9 @@ class TestLdapAdapterBareStringMemberOf:
         """
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "memberOf": ["cn=eng,ou=groups,dc=corp,dc=com"]
-        })
+        result = LdapAdapter().extract(
+            {"memberOf": ["cn=eng,ou=groups,dc=corp,dc=com"]}
+        )
 
         groups = result.get("groups", [])
         assert "eng" in groups, (
@@ -704,12 +723,14 @@ class TestLdapAdapterMemberOfNonStrElements:
         """
         from app.adapters.ldap import LdapAdapter
 
-        result = LdapAdapter().extract({
-            "memberOf": [
-                "cn=engineering,ou=groups,dc=corp,dc=com",
-                123,
-            ]
-        })
+        result = LdapAdapter().extract(
+            {
+                "memberOf": [
+                    "cn=engineering,ou=groups,dc=corp,dc=com",
+                    123,
+                ]
+            }
+        )
 
         groups = result.get("groups", [])
         assert groups == ["engineering"], (

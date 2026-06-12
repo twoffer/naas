@@ -39,6 +39,7 @@ def _minimal_valid_event(user_id: str = "u") -> dict:
 # Fake IngestionService — call-counter only, no side effects
 # ---------------------------------------------------------------------------
 
+
 class SpyIngestionService:
     """Minimal spy: records call counts. Returns deterministic values.
 
@@ -65,26 +66,12 @@ class SpyIngestionService:
 # Helper: locate the IngestionService dependency callable
 # ---------------------------------------------------------------------------
 
-def _get_dep_callable():
-    """Locate get_ingestion_service from app.main or app.routes.
 
-    Returns None if routes.py is absent.
-    In that case, dependency_overrides cannot be set and the test will fail
-    for a different reason (no route exists → 404 or ImportError).
-    """
-    import importlib
-    for module_path, attr_name in [
-        ("app.main", "get_ingestion_service"),
-        ("app.routes", "get_ingestion_service"),
-    ]:
-        try:
-            mod = importlib.import_module(module_path)
-            callable_ = getattr(mod, attr_name, None)
-            if callable_ is not None:
-                return callable_
-        except (ImportError, ModuleNotFoundError):
-            continue
-    return None
+def _get_dep_callable():
+    """Return get_ingestion_service from app.routes — the single canonical home."""
+    from app.routes import get_ingestion_service
+
+    return get_ingestion_service
 
 
 # ===========================================================================
@@ -240,6 +227,7 @@ class TestBulkSizeValidation:
         class _MaxFake:
             async def ingest_one(self, event):
                 return uuid.uuid4()
+
             async def ingest_many(self, events):
                 return fake_ids[: len(events)]
 
@@ -259,13 +247,18 @@ class TestBulkSizeValidation:
             "Spec §2.2: 'at most 5000 events' — 5000 is allowed."
         )
 
-    @pytest.mark.parametrize("length,expect_422", [
-        (0, True),
-        (1, False),
-        (5000, False),
-        (5001, True),
-    ])
-    def test_bulk_size_boundary_parametrized(self, length: int, expect_422: bool) -> None:
+    @pytest.mark.parametrize(
+        "length,expect_422",
+        [
+            (0, True),
+            (1, False),
+            (5000, False),
+            (5001, True),
+        ],
+    )
+    def test_bulk_size_boundary_parametrized(
+        self, length: int, expect_422: bool
+    ) -> None:
         """Parametrized boundary check for bulk array length constraints.
 
         WHY: Parametrized tests catch off-by-one errors at both boundaries
@@ -281,6 +274,7 @@ class TestBulkSizeValidation:
         class _BoundaryFake:
             async def ingest_one(self, event):
                 return uuid.uuid4()
+
             async def ingest_many(self, evts):
                 return fake_ids[: len(evts)]
 
@@ -474,14 +468,17 @@ class TestFieldValidationRejections:
             "service.ingest_one must not be called when user_id is missing."
         )
 
-    @pytest.mark.parametrize("bad_ip", [
-        "256.0.0.1",       # octet 256 out of range
-        "192.168.1.999",   # octet 999 out of range
-        "not-an-ip",       # not IP format at all
-        "::1",             # IPv6 — spec §7 prohibits IPv6
-        "192.168.1",       # too few octets
-        "192.168.1.1.1",   # too many octets
-    ])
+    @pytest.mark.parametrize(
+        "bad_ip",
+        [
+            "256.0.0.1",  # octet 256 out of range
+            "192.168.1.999",  # octet 999 out of range
+            "not-an-ip",  # not IP format at all
+            "::1",  # IPv6 — spec §7 prohibits IPv6
+            "192.168.1",  # too few octets
+            "192.168.1.1.1",  # too many octets
+        ],
+    )
     def test_invalid_ip_variants_return_422(self, bad_ip: str) -> None:
         """Multiple invalid IP forms must all return 422 (not 500 or 200).
 
@@ -510,13 +507,16 @@ class TestFieldValidationRejections:
             "All non-IPv4 values must be rejected per spec §2.1."
         )
 
-    @pytest.mark.parametrize("valid_ip", [
-        "192.168.1.1",     # project reference IP
-        "8.8.8.8",         # project reference IP
-        "198.51.100.1",    # project reference IP
-        "0.0.0.0",         # all-zero edge
-        "255.255.255.255", # all-max edge
-    ])
+    @pytest.mark.parametrize(
+        "valid_ip",
+        [
+            "192.168.1.1",  # project reference IP
+            "8.8.8.8",  # project reference IP
+            "198.51.100.1",  # project reference IP
+            "0.0.0.0",  # all-zero edge
+            "255.255.255.255",  # all-max edge
+        ],
+    )
     def test_valid_ip_variants_are_not_rejected(self, valid_ip: str) -> None:
         """Valid IPv4 addresses must not be rejected with 422.
 
@@ -533,6 +533,7 @@ class TestFieldValidationRejections:
         class _GoodFake:
             async def ingest_one(self, event):
                 return fake_ids[0]
+
             async def ingest_many(self, events):
                 return fake_ids[: len(events)]
 

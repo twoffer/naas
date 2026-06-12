@@ -1,12 +1,19 @@
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from collections.abc import AsyncGenerator
+
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
 from naas_shared.config import get_settings
 
-_engine = None
-_session_factory = None
+_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-def get_engine():
+def get_engine() -> AsyncEngine:
     """Return (or lazily create) the shared async SQLAlchemy engine.
 
     Module-level singleton so all coroutines share the same connection pool.
@@ -41,7 +48,7 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
     return _session_factory
 
 
-async def get_db_session() -> AsyncSession:
+async def get_db_session() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency for DB sessions.
 
     Yields a session, commits on clean exit, rolls back on exception.
@@ -54,3 +61,16 @@ async def get_db_session() -> AsyncSession:
         except Exception:
             await session.rollback()
             raise
+
+
+async def dispose_engine() -> None:
+    """Dispose the engine and reset the module singletons.
+
+    For service lifespan shutdown. Safe to call when never initialized.
+    Disposes the connection pool so all pooled connections are closed cleanly.
+    """
+    global _engine, _session_factory
+    if _engine is not None:
+        await _engine.dispose()
+        _engine = None
+        _session_factory = None

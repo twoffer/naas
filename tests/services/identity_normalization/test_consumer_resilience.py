@@ -88,10 +88,6 @@ class _FakeRedis:
         self.set_calls.append({"key": key, "ttl": ex, "value": value})
 
 
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
 def _make_correct_hierarchy_fake_ldap() -> MagicMock:
     """Build a fake ldap module mirroring the REAL python-ldap exception hierarchy.
 
@@ -167,7 +163,7 @@ class TestConsumerLoopXreadgroupResilience:
     CancelledError MUST still propagate — it signals intentional shutdown.
     """
 
-    def test_transient_xreadgroup_error_does_not_kill_loop(self) -> None:
+    async def test_transient_xreadgroup_error_does_not_kill_loop(self) -> None:
         """A generic Exception from xreadgroup must be caught; loop continues.
 
         Test strategy: xreadgroup side_effect sequence:
@@ -224,20 +220,22 @@ class TestConsumerLoopXreadgroupResilience:
         one_message = [[STREAM_LOGIN_EVENTS, [("1-0", {"data": data_str})]]]
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            RuntimeError("transient redis error"),
-            one_message,
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                RuntimeError("transient redis error"),
+                one_message,
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock()
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
@@ -248,7 +246,7 @@ class TestConsumerLoopXreadgroupResilience:
             "The loop must NOT die on a transient Redis error."
         )
 
-    def test_cancelled_error_propagates_through_loop(self) -> None:
+    async def test_cancelled_error_propagates_through_loop(self) -> None:
         """asyncio.CancelledError from xreadgroup must propagate (clean shutdown).
 
         WHY: CancelledError is the mechanism by which the lifespan cancels the
@@ -266,12 +264,12 @@ class TestConsumerLoopXreadgroupResilience:
 
         cancelled_propagated = False
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             cancelled_propagated = True
 
@@ -281,7 +279,7 @@ class TestConsumerLoopXreadgroupResilience:
             "transient-error handler."
         )
 
-    def test_loop_sleeps_after_transient_error(self) -> None:
+    async def test_loop_sleeps_after_transient_error(self) -> None:
         """After a transient xreadgroup error the loop must sleep before retrying.
 
         WHY: Without a sleep, a persistent error would spin the event loop at 100%
@@ -302,20 +300,22 @@ class TestConsumerLoopXreadgroupResilience:
         publisher = AsyncMock()
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            RuntimeError("redis down"),
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                RuntimeError("redis down"),
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock()
 
         with patch("asyncio.sleep", side_effect=_capturing_sleep):
             try:
-                _run(run_consumer_loop(
+                await run_consumer_loop(
                     service=service,
                     repository=repository,
                     publisher=publisher,
                     redis=redis,
-                ))
+                )
             except asyncio.CancelledError:
                 pass
 
@@ -347,8 +347,12 @@ class TestWeightForUnknownSource:
     def _make_minimal_config(self):
         """Build a NormalizationConfig with known default weights."""
         from app.normalization_config import (
-            NormalizationConfig, Defaults, AttributeConfig,
-            EnrichmentConfig, EnrichmentSources, LdapEnrichmentConfig,
+            NormalizationConfig,
+            Defaults,
+            AttributeConfig,
+            EnrichmentConfig,
+            EnrichmentSources,
+            LdapEnrichmentConfig,
         )
 
         return NormalizationConfig(
@@ -416,9 +420,7 @@ class TestWeightForUnknownSource:
                 f"Got: {exc}"
             )
 
-        assert isinstance(result, float), (
-            f"Expected float return, got {type(result)!r}"
-        )
+        assert isinstance(result, float), f"Expected float return, got {type(result)!r}"
 
     def test_weight_for_known_source_not_in_defaults_falls_back_correctly(
         self,
@@ -467,7 +469,7 @@ class TestPoolSearchUnbindOnBrokenConnection:
 
         return conn
 
-    def test_unbind_s_called_on_search_failure(self, monkeypatch) -> None:
+    async def test_unbind_s_called_on_search_failure(self, monkeypatch) -> None:
         """When a pooled connection's search raises, unbind_s() must be called on it."""
         fake_ldap = _inject_fake_ldap(monkeypatch)
 
@@ -486,7 +488,7 @@ class TestPoolSearchUnbindOnBrokenConnection:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        _run(adapter.enrich("primary_email", "alice@corp.com"))
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         assert broken_conn.unbind_s.called, (
             "unbind_s() must be called on a broken pooled connection before the slot "
@@ -494,7 +496,9 @@ class TestPoolSearchUnbindOnBrokenConnection:
             f"unbind_s call count: {broken_conn.unbind_s.call_count}"
         )
 
-    def test_unbind_s_raising_does_not_prevent_slot_free(self, monkeypatch) -> None:
+    async def test_unbind_s_raising_does_not_prevent_slot_free(
+        self, monkeypatch
+    ) -> None:
         """If unbind_s() itself raises, the pool slot must still be freed (put_nowait(None)).
 
         WHY: If the slot is not freed when unbind_s raises, the pool is permanently
@@ -521,7 +525,7 @@ class TestPoolSearchUnbindOnBrokenConnection:
         adapter = LdapAdapter()
 
         # First call — broken connection, unbind raises
-        _run(adapter.enrich("primary_email", "alice@corp.com"))
+        await adapter.enrich("primary_email", "alice@corp.com")
 
         # Second call — must complete (pool has its slot back)
         new_conn = MagicMock()
@@ -529,11 +533,10 @@ class TestPoolSearchUnbindOnBrokenConnection:
         new_conn.search_s = MagicMock(return_value=[])
         fake_ldap.initialize = MagicMock(return_value=new_conn)
 
-        async def _second_call():
-            return await adapter.enrich("primary_email", "bob@corp.com")
-
         try:
-            _run(asyncio.wait_for(_second_call(), timeout=2.0))
+            await asyncio.wait_for(
+                adapter.enrich("primary_email", "bob@corp.com"), timeout=2.0
+            )
         except asyncio.TimeoutError:
             pytest.fail(
                 "Second enrich() call timed out — the pool slot was not freed after "
@@ -541,7 +544,7 @@ class TestPoolSearchUnbindOnBrokenConnection:
                 "unbind_s itself raises."
             )
 
-    def test_unbind_s_called_in_thread(self, monkeypatch) -> None:
+    async def test_unbind_s_called_in_thread(self, monkeypatch) -> None:
         """unbind_s() must be called via asyncio.to_thread (or equivalent thread-safe call).
 
         WHY: python-ldap is a blocking C extension. Calling unbind_s() on the event
@@ -550,9 +553,7 @@ class TestPoolSearchUnbindOnBrokenConnection:
         """
         fake_ldap = _inject_fake_ldap(monkeypatch)
 
-        broken_conn = self._make_recording_conn(
-            search_exc=Exception("search failed")
-        )
+        broken_conn = self._make_recording_conn(search_exc=Exception("search failed"))
         fake_ldap.initialize = MagicMock(return_value=broken_conn)
 
         fake_redis = _FakeRedis(get_return=None)
@@ -571,8 +572,9 @@ class TestPoolSearchUnbindOnBrokenConnection:
 
         with patch("asyncio.to_thread", side_effect=_recording_to_thread):
             from app.adapters.ldap import LdapAdapter
+
             adapter = LdapAdapter()
-            _run(adapter.enrich("primary_email", "alice@corp.com"))
+            await adapter.enrich("primary_email", "alice@corp.com")
 
         assert len(to_thread_call_funcs) >= 3, (
             f"Expected at least 3 asyncio.to_thread calls (connect, search, unbind). "
@@ -641,17 +643,13 @@ class TestReduceDnToGroupNameWithStr2dn:
         self._inject_ldap_with_str2dn(monkeypatch)
         from app.adapters.ldap import _reduce_dn_to_group_name
 
-        result = _reduce_dn_to_group_name(
-            "cn=engineering,ou=groups,dc=example,dc=com"
-        )
+        result = _reduce_dn_to_group_name("cn=engineering,ou=groups,dc=example,dc=com")
 
         assert result == "engineering", (
             f"Normal DN must reduce to its cn RDN value 'engineering', got {result!r}"
         )
 
-    def test_escaped_comma_dn_preserves_comma_in_group_name(
-        self, monkeypatch
-    ) -> None:
+    def test_escaped_comma_dn_preserves_comma_in_group_name(self, monkeypatch) -> None:
         """A DN with escaped comma: 'cn=Smith\\, John,...' → group name 'Smith, John'.
 
         With the regex approach this fails (returns 'Smith\\'). With str2dn the
@@ -684,9 +682,7 @@ class TestReduceDnToGroupNameWithStr2dn:
         """A DN that str2dn raises on must fall back without exception."""
         fake_ldap = _inject_fake_ldap(monkeypatch)
 
-        fake_ldap.dn.str2dn = MagicMock(
-            side_effect=Exception("malformed DN")
-        )
+        fake_ldap.dn.str2dn = MagicMock(side_effect=Exception("malformed DN"))
 
         from app.adapters.ldap import _reduce_dn_to_group_name
 
@@ -709,9 +705,7 @@ class TestReduceDnToGroupNameWithStr2dn:
 
         result = _reduce_dn_to_group_name("")
 
-        assert result is None, (
-            f"Empty DN must return None, got {result!r}"
-        )
+        assert result is None, f"Empty DN must return None, got {result!r}"
 
 
 # ===========================================================================
@@ -735,9 +729,7 @@ class TestClassifyLdapError:
       ValueError(...)              → 'ldap_unexpected_error' (non-LDAP)
     """
 
-    def test_timeout_exception_classifies_as_ldap_timeout(
-        self, monkeypatch
-    ) -> None:
+    def test_timeout_exception_classifies_as_ldap_timeout(self, monkeypatch) -> None:
         """ldap.TIMEOUT instance must classify as 'ldap_timeout'."""
         fake = _inject_correct_hierarchy_ldap(monkeypatch)
         from app.adapters.ldap import _classify_ldap_error
@@ -788,9 +780,7 @@ class TestClassifyLdapError:
             "ldap_module.TIMEOUT_EXCEEDED AttributeError escapes before reaching it."
         )
 
-    def test_ldap_base_error_classifies_as_ldap_search_error(
-        self, monkeypatch
-    ) -> None:
+    def test_ldap_base_error_classifies_as_ldap_search_error(self, monkeypatch) -> None:
         """ldap.LDAPError base instance must classify as 'ldap_search_error'."""
         fake = _inject_correct_hierarchy_ldap(monkeypatch)
         from app.adapters.ldap import _classify_ldap_error

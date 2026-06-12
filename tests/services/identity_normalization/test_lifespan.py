@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -15,16 +14,8 @@ from httpx import ASGITransport, AsyncClient
 # ---------------------------------------------------------------------------
 
 
-def _repo_root() -> Path:
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError("Cannot find repo root")
+from tests.helpers import REPO_ROOT as _REPO
 
-
-_REPO = _repo_root()
 _SVC = str(_REPO / "services" / "identity-normalization")
 _SHARED = str(_REPO / "shared")
 for _p in [_SVC, _SHARED]:
@@ -32,10 +23,6 @@ for _p in [_SVC, _SHARED]:
         sys.path.insert(0, _p)
 
 from naas_shared.constants import STREAM_LOGIN_EVENTS, GROUP_NORMALIZATION  # noqa: E402
-
-
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 # ===========================================================================
@@ -46,7 +33,7 @@ def _run(coro):
 class TestHealthRegression:
     """/health endpoint must remain functional after lifespan wiring is added."""
 
-    def test_health_endpoint_returns_200_with_healthy_deps(self):
+    async def test_health_endpoint_returns_200_with_healthy_deps(self):
         """GET /health returns 200 and service='identity-normalization' when deps are up."""
         # Import the module-level app (create_app() must remain intact)
         import app.main as _main
@@ -82,7 +69,7 @@ class TestHealthRegression:
                         resp = await ac.get("/health")
                         return resp
 
-        resp = _run(_run_health())
+        resp = await _run_health()
         assert resp.status_code == 200, (
             f"GET /health must return 200, got {resp.status_code}"
         )
@@ -121,7 +108,7 @@ class TestHealthRegression:
 class TestInvalidConfigAbortsStartup:
     """§5.1: invalid normalization.yaml must abort startup with a descriptive error."""
 
-    def test_invalid_config_propagates_during_lifespan_startup(self):
+    async def test_invalid_config_propagates_during_lifespan_startup(self):
         """If load_config() raises, the lifespan must let the exception propagate.
 
         We simulate by patching load_config to raise ValueError and running
@@ -158,7 +145,7 @@ class TestInvalidConfigAbortsStartup:
                     startup_raised[0] = True
                     startup_error[0] = e
 
-        _run(_run_startup_only())
+        await _run_startup_only()
 
         assert startup_raised[0], (
             "Invalid config must cause an exception during lifespan startup — "
@@ -168,7 +155,7 @@ class TestInvalidConfigAbortsStartup:
             "A descriptive error must be raised on invalid config"
         )
 
-    def test_valid_config_does_not_raise_during_startup(self):
+    async def test_valid_config_does_not_raise_during_startup(self):
         """Valid normalization.yaml allows startup to proceed without exception."""
         from fastapi import FastAPI
         import app.main as _main
@@ -190,7 +177,7 @@ class TestInvalidConfigAbortsStartup:
                 except Exception:
                     startup_raised[0] = True
 
-        _run(_run_startup())
+        await _run_startup()
 
         assert not startup_raised[0], (
             "Valid config must not raise during lifespan startup"
@@ -205,7 +192,7 @@ class TestInvalidConfigAbortsStartup:
 class TestLifespanEnsuresConsumerGroup:
     """§5.1, §2.1: ensure_consumer_group(STREAM_LOGIN_EVENTS, GROUP_NORMALIZATION) on startup."""
 
-    def test_ensure_consumer_group_called_on_startup(self):
+    async def test_ensure_consumer_group_called_on_startup(self):
         """ensure_consumer_group must be called exactly once during lifespan startup."""
         from fastapi import FastAPI
         import app.main as _main
@@ -226,7 +213,7 @@ class TestLifespanEnsuresConsumerGroup:
                 async with _main.lifespan(FastAPI()):
                     pass
 
-        _run(_run_startup())
+        await _run_startup()
 
         assert len(ensure_calls) == 1, (
             f"ensure_consumer_group must be called exactly once on startup, called {len(ensure_calls)} times"
@@ -248,7 +235,7 @@ class TestLifespanEnsuresConsumerGroup:
 class TestLifespanLaunchesConsumerLoop:
     """Consumer loop is launched as a background task on startup."""
 
-    def test_consumer_loop_launched_on_startup(self):
+    async def test_consumer_loop_launched_on_startup(self):
         """The consumer loop function is called/scheduled during lifespan startup."""
         from fastapi import FastAPI
         import app.main as _main
@@ -275,7 +262,7 @@ class TestLifespanLaunchesConsumerLoop:
                     pass  # yield point — consumer task already created
                 mock_loop_holder[0] = mock_loop
 
-        _run(_run_startup())
+        await _run_startup()
 
         # The lifespan must launch run_consumer_loop via asyncio.create_task.
         # With create_task, the mock coroutine runs (and sets loop_started=True)
@@ -293,7 +280,7 @@ class TestLifespanLaunchesConsumerLoop:
             f"mock.called={mock_loop.called}, loop_started={loop_started[0]}"
         )
 
-    def test_lifespan_imports_run_consumer_loop(self):
+    async def test_lifespan_imports_run_consumer_loop(self):
         """app.main must import (or reference) run_consumer_loop for the lifespan to wire it."""
         import app.main as _main
 
@@ -311,12 +298,12 @@ class TestLifespanLaunchesConsumerLoop:
             ),
         ):
 
-            async def _run():
+            async def _run_inner():
                 async with _main.lifespan(FastAPI()):
                     pass  # startup done
 
             try:
-                _run(_run())
+                await _run_inner()
             except Exception:
                 pass  # may fail if other deps are missing, but we want to confirm the patch is valid
 
@@ -339,7 +326,7 @@ class TestLifespanLaunchesConsumerLoop:
 class TestLifespanShutdown:
     """Consumer background task is cancelled cleanly on shutdown."""
 
-    def test_consumer_task_cancelled_on_shutdown(self):
+    async def test_consumer_task_cancelled_on_shutdown(self):
         """When the lifespan exits, the background consumer task must be cancelled.
 
         We verify this by making the consumer loop block forever until cancelled,
@@ -372,7 +359,7 @@ class TestLifespanShutdown:
 
         # Must complete without hanging (timeout)
         try:
-            _run(asyncio.wait_for(_run_lifecycle(), timeout=5.0))
+            await asyncio.wait_for(_run_lifecycle(), timeout=5.0)
         except asyncio.TimeoutError:
             pytest.fail(
                 "Lifespan shutdown timed out — the consumer task must be cancelled cleanly on shutdown"

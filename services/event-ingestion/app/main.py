@@ -5,30 +5,34 @@ the module-level `app` instance for uvicorn.
 
 Mounts the APIRouter from app.routes, which provides the three endpoints
 defined in spec §§5.6, 5.7: POST /events/ingest, POST /events/bulk, GET /health.
-Re-exports get_ingestion_service so tests can override it via app.main lookup.
 """
 
 from contextlib import asynccontextmanager
 
 import naas_shared.redis_client as _redis_mod
 from fastapi import FastAPI
-
+from naas_shared.database import dispose_engine
 from naas_shared.logging import get_logger, setup_logging
+from naas_shared.redis_client import close_redis
 
-from app.routes import get_ingestion_service, router  # noqa: F401 — re-exported
+from app.routes import router
 
 
 @asynccontextmanager
 async def lifespan(application: FastAPI):
-    """Warm the Redis client at startup so the first request is not penalised."""
+    """Warm the Redis client at startup; tear down connections on shutdown."""
     try:
         await _redis_mod.get_redis()
     except Exception:
-        get_logger("event-ingestion").debug(
+        get_logger("event-ingestion").warning(
             "redis_warmup_skipped",
             reason="Redis unavailable at startup — will retry on first request",
         )
-    yield
+    try:
+        yield
+    finally:
+        await close_redis()
+        await dispose_engine()
 
 
 def create_app() -> FastAPI:

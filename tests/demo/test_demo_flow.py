@@ -11,7 +11,6 @@ import argparse
 import importlib.util
 import io
 import sys
-from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -22,17 +21,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until docs/architecture/ is found — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 SHARED_DIR = str(REPO_ROOT / "shared")
 DEMO_SCRIPT = REPO_ROOT / "demo" / "demo_normalization.py"
 
@@ -202,9 +192,7 @@ def _scene1_frank_oidc() -> dict[str, Any]:
             "employee_type": _single_source("FTE", ["oidc"], 0.60),
             # The pipeline resolves groups as list_merge even for one source;
             # verify_results Check 1 requires exactly one contributing source.
-            "groups": _list_merge(
-                ["engineering", "vpn-users"], 0.80, sources=["oidc"]
-            ),
+            "groups": _list_merge(["engineering", "vpn-users"], 0.80, sources=["oidc"]),
         },
         enrichment=_skipped_enrichment("no_ldap_match"),
     )
@@ -232,9 +220,7 @@ def _scene2_frank_saml() -> dict[str, Any]:
             "department": _single_source("Engineering", ["saml"], 0.50),
             "employee_type": _single_source("FTE", ["saml"], 0.80),
             # Single-source groups are still a list_merge (see Scene 1 note).
-            "groups": _list_merge(
-                ["engineering", "vpn-users"], 0.60, sources=["saml"]
-            ),
+            "groups": _list_merge(["engineering", "vpn-users"], 0.60, sources=["saml"]),
         },
         enrichment=_skipped_enrichment("no_ldap_match"),
     )
@@ -262,9 +248,7 @@ def _scene3_grace_ldap() -> dict[str, Any]:
             "department": _single_source("R&D", ["ldap"], 0.90),
             "employee_type": _single_source("contractor", ["ldap"], 0.95),
             # Single-source groups are still a list_merge (see Scene 1 note).
-            "groups": _list_merge(
-                ["admins", "engineering"], 0.70, sources=["ldap"]
-            ),
+            "groups": _list_merge(["admins", "engineering"], 0.70, sources=["ldap"]),
         },
         enrichment=_skipped_enrichment("ldap_event"),
     )

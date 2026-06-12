@@ -6,7 +6,6 @@
 
 # stdlib
 import re
-from pathlib import Path
 
 # third-party
 import pytest
@@ -17,22 +16,8 @@ import pytest
 # ---------------------------------------------------------------------------
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find the directory that contains
-    docs/architecture/ — that is the repo root.
-    """
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        "Could not locate repo root (expected a directory containing docs/architecture/). "
-        f"Started from: {Path(__file__).resolve()}"
-    )
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 REDIS_CONF_PATH = REPO_ROOT / "infrastructure" / "redis" / "redis.conf"
 
 
@@ -45,9 +30,7 @@ REDIS_CONF_PATH = REPO_ROOT / "infrastructure" / "redis" / "redis.conf"
 def redis_conf_text() -> str:
     """Read redis.conf content once for the whole module."""
     if not REDIS_CONF_PATH.exists():
-        pytest.skip(
-            "infrastructure/redis/redis.conf not found"
-        )
+        pytest.skip("infrastructure/redis/redis.conf not found")
     return REDIS_CONF_PATH.read_text(encoding="utf-8")
 
 

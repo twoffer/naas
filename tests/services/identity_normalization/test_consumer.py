@@ -6,7 +6,6 @@ import asyncio
 import json
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -15,16 +14,8 @@ from uuid import UUID
 # sys.path injection
 # ---------------------------------------------------------------------------
 
-def _repo_root() -> Path:
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError("Cannot find repo root")
+from tests.helpers import REPO_ROOT as _REPO
 
-
-_REPO = _repo_root()
 _SVC = str(_REPO / "services" / "identity-normalization")
 _SHARED = str(_REPO / "shared")
 for _p in [_SVC, _SHARED]:
@@ -87,18 +78,15 @@ def _make_stream_message(record: LoginEventRecord, msg_id: str = "1-0") -> list:
     return [[STREAM_LOGIN_EVENTS, [(msg_id, {"data": data_str})]]]
 
 
-def _run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
-
-
 # ===========================================================================
 # D.7. Consumer loop — critical ordering: normalize → write(commit) → publish → XACK
 # ===========================================================================
 
+
 class TestConsumerOrdering:
     """Step ordering within one processed message is CRITICAL (§5.1, ADR-0002)."""
 
-    def test_normalize_then_write_then_publish_then_xack_order(self):
+    async def test_normalize_then_write_then_publish_then_xack_order(self):
         """For one message: normalize → write → publish → xack in that exact order.
 
         ⚠️ CRITICAL ordering (§5.1, ADR-0002):
@@ -114,42 +102,51 @@ class TestConsumerOrdering:
 
         # Mock service
         service = AsyncMock()
+
         async def _normalize(r):
             call_order.append("normalize")
             return normalized
+
         service.normalize = _normalize
 
         # Mock repository
         repository = AsyncMock()
+
         async def _write(event_id, norm):
             call_order.append("write")
+
         repository.write = _write
 
         # Mock publisher
         publisher = AsyncMock()
+
         async def _publish(rec, norm):
             call_order.append("publish")
+
         publisher.publish_normalized = _publish
 
         # Mock Redis — one message then StopAsyncIteration to break the loop
         msg_id = "1-0"
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            _make_stream_message(record, msg_id),
-            asyncio.CancelledError(),  # stop the loop after first batch
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                _make_stream_message(record, msg_id),
+                asyncio.CancelledError(),  # stop the loop after first batch
+            ]
+        )
 
         async def _xack(*args):
             call_order.append("xack")
+
         redis.xack = AsyncMock(side_effect=_xack)
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
@@ -159,14 +156,17 @@ class TestConsumerOrdering:
         assert "xack" in call_order, "xack must be called on success"
 
         # Ordering: normalize < write < publish < xack
-        idx = {step: call_order.index(step) for step in ["normalize", "write", "publish", "xack"]}
+        idx = {
+            step: call_order.index(step)
+            for step in ["normalize", "write", "publish", "xack"]
+        }
         assert idx["normalize"] < idx["write"], "normalize must precede write"
         assert idx["write"] < idx["publish"], (
             "write (commit) must precede publish — §5.1 ⚠️ CRITICAL ordering"
         )
         assert idx["publish"] < idx["xack"], "publish must precede xack"
 
-    def test_xack_only_after_both_write_and_publish_succeed(self):
+    async def test_xack_only_after_both_write_and_publish_succeed(self):
         """XACK is the last step; it must not occur if either write or publish raises."""
         from app.consumer import run_consumer_loop
 
@@ -178,27 +178,31 @@ class TestConsumerOrdering:
         service.normalize = AsyncMock(return_value=normalized)
 
         repository = AsyncMock()
+
         async def _write_then_raise(event_id, norm):
             call_order.append("write")
             raise RuntimeError("DB commit failed")
+
         repository.write = _write_then_raise
 
         publisher = AsyncMock()
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            _make_stream_message(record, "2-0"),
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                _make_stream_message(record, "2-0"),
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock(side_effect=lambda *a: call_order.append("xack"))
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
@@ -211,10 +215,11 @@ class TestConsumerOrdering:
 # D.8. Failure handling — no XACK on exception
 # ===========================================================================
 
+
 class TestConsumerFailureHandling:
     """On any step exception, message is NOT XACKed (stays pending for redelivery)."""
 
-    def test_normalize_exception_no_xack(self):
+    async def test_normalize_exception_no_xack(self):
         """If normalize() raises, message is not ACKed and loop continues."""
         from app.consumer import run_consumer_loop
 
@@ -228,22 +233,25 @@ class TestConsumerFailureHandling:
         publisher = AsyncMock()
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            _make_stream_message(record, "3-0"),
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                _make_stream_message(record, "3-0"),
+                asyncio.CancelledError(),
+            ]
+        )
 
         async def _xack(*args):
             xack_call_count[0] += 1
+
         redis.xack = AsyncMock(side_effect=_xack)
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
@@ -251,7 +259,7 @@ class TestConsumerFailureHandling:
             "XACK must NOT be called when normalize() raises — message must stay in pending-entries list"
         )
 
-    def test_repository_write_exception_no_xack(self):
+    async def test_repository_write_exception_no_xack(self):
         """If repository.write() raises, message is not ACKed."""
         from app.consumer import run_consumer_loop
 
@@ -268,25 +276,31 @@ class TestConsumerFailureHandling:
         publisher = AsyncMock()
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            _make_stream_message(record, "4-0"),
-            asyncio.CancelledError(),
-        ])
-        redis.xack = AsyncMock(side_effect=lambda *a: xack_count.__setitem__(0, xack_count[0] + 1))
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                _make_stream_message(record, "4-0"),
+                asyncio.CancelledError(),
+            ]
+        )
+        redis.xack = AsyncMock(
+            side_effect=lambda *a: xack_count.__setitem__(0, xack_count[0] + 1)
+        )
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
-        assert xack_count[0] == 0, "XACK must NOT be called when repository.write() raises"
+        assert xack_count[0] == 0, (
+            "XACK must NOT be called when repository.write() raises"
+        )
 
-    def test_publish_exception_no_xack(self):
+    async def test_publish_exception_no_xack(self):
         """If publisher.publish_normalized() raises, message is not ACKed."""
         from app.consumer import run_consumer_loop
 
@@ -304,25 +318,31 @@ class TestConsumerFailureHandling:
         publisher.publish_normalized = AsyncMock(side_effect=RuntimeError("Redis down"))
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            _make_stream_message(record, "5-0"),
-            asyncio.CancelledError(),
-        ])
-        redis.xack = AsyncMock(side_effect=lambda *a: xack_count.__setitem__(0, xack_count[0] + 1))
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                _make_stream_message(record, "5-0"),
+                asyncio.CancelledError(),
+            ]
+        )
+        redis.xack = AsyncMock(
+            side_effect=lambda *a: xack_count.__setitem__(0, xack_count[0] + 1)
+        )
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
-        assert xack_count[0] == 0, "XACK must NOT be called when publish_normalized() raises"
+        assert xack_count[0] == 0, (
+            "XACK must NOT be called when publish_normalized() raises"
+        )
 
-    def test_enrichment_skip_does_not_cause_no_xack(self):
+    async def test_enrichment_skip_does_not_cause_no_xack(self):
         """⚠️ Enrichment skip/failure is NOT a processing failure.
 
         A message where enrichment is skipped (EnrichmentSkipped in the result)
@@ -354,22 +374,25 @@ class TestConsumerFailureHandling:
         publisher.publish_normalized = AsyncMock(return_value=None)
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            _make_stream_message(record, "6-0"),
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                _make_stream_message(record, "6-0"),
+                asyncio.CancelledError(),
+            ]
+        )
 
         async def _xack(*args):
             xack_count[0] += 1
+
         redis.xack = AsyncMock(side_effect=_xack)
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
@@ -382,6 +405,7 @@ class TestConsumerFailureHandling:
 # ===========================================================================
 # D.9. DB session obtained from session_factory (not request-scoped get_db_session)
 # ===========================================================================
+
 
 class TestConsumerSessionFactory:
     """Consumer loop uses get_session_factory(), not request-scoped get_db_session."""
@@ -413,10 +437,11 @@ class TestConsumerSessionFactory:
 # D.10. Consumer name and XREADGROUP arguments
 # ===========================================================================
 
+
 class TestConsumerXreadgroupArgs:
     """Consumer reads using XREADGROUP with correct stream, group, and key pattern."""
 
-    def test_xreadgroup_uses_login_events_stream_and_normalization_group(self):
+    async def test_xreadgroup_uses_login_events_stream_and_normalization_group(self):
         """XREADGROUP must use STREAM_LOGIN_EVENTS and GROUP_NORMALIZATION."""
         from app.consumer import run_consumer_loop
 
@@ -428,19 +453,21 @@ class TestConsumerXreadgroupArgs:
         publisher.publish_normalized = AsyncMock(return_value=None)
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            [],  # empty batch
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                [],  # empty batch
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock()
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
@@ -460,7 +487,7 @@ class TestConsumerXreadgroupArgs:
             f"xreadgroup must read from stream={STREAM_LOGIN_EVENTS!r}. Call args: {call_kwargs}"
         )
 
-    def test_xreadgroup_uses_new_messages_marker(self):
+    async def test_xreadgroup_uses_new_messages_marker(self):
         """XREADGROUP must use '>' as the stream ID to read only undelivered messages."""
         from app.consumer import run_consumer_loop
 
@@ -472,19 +499,21 @@ class TestConsumerXreadgroupArgs:
         publisher.publish_normalized = AsyncMock(return_value=None)
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            [],
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                [],
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock()
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
@@ -497,7 +526,7 @@ class TestConsumerXreadgroupArgs:
                 f"Call args: {c}"
             )
 
-    def test_xack_uses_correct_stream_and_msg_id(self):
+    async def test_xack_uses_correct_stream_and_msg_id(self):
         """XACK must be called with STREAM_LOGIN_EVENTS, GROUP_NORMALIZATION, and the message id."""
         from app.consumer import run_consumer_loop
 
@@ -513,19 +542,21 @@ class TestConsumerXreadgroupArgs:
         publisher.publish_normalized = AsyncMock(return_value=None)
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            _make_stream_message(record, msg_id),
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                _make_stream_message(record, msg_id),
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock()
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 
@@ -546,10 +577,11 @@ class TestConsumerXreadgroupArgs:
 # D.7 (continued): Message parsing — LoginEventRecord.model_validate
 # ===========================================================================
 
+
 class TestConsumerMessageParsing:
     """Consumer correctly parses the stream message envelope per §2.2."""
 
-    def test_consumer_parses_data_field_from_stream_message(self):
+    async def test_consumer_parses_data_field_from_stream_message(self):
         """Consumer reads fields['data'] and validates as LoginEventRecord."""
         from app.consumer import run_consumer_loop
 
@@ -569,19 +601,21 @@ class TestConsumerMessageParsing:
         publisher.publish_normalized = AsyncMock(return_value=None)
 
         redis = AsyncMock()
-        redis.xreadgroup = AsyncMock(side_effect=[
-            _make_stream_message(record, "99-1"),
-            asyncio.CancelledError(),
-        ])
+        redis.xreadgroup = AsyncMock(
+            side_effect=[
+                _make_stream_message(record, "99-1"),
+                asyncio.CancelledError(),
+            ]
+        )
         redis.xack = AsyncMock()
 
         try:
-            _run(run_consumer_loop(
+            await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
-            ))
+            )
         except asyncio.CancelledError:
             pass
 

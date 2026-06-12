@@ -1,39 +1,28 @@
 """Docker Compose service definition for identity-normalization."""
 
-from pathlib import Path
 from typing import Any
 
 # third-party
 import pytest
 
+from tests.helpers import REPO_ROOT
 
-# ---------------------------------------------------------------------------
-# Repo-root discovery (needed to locate docker-compose.yml under test)
-# ---------------------------------------------------------------------------
-
-
-def _find_repo_root() -> Path:
-    """Walk up until docs/architecture/ is found — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(f"Could not locate repo root from {Path(__file__).resolve()}")
-
-
-REPO_ROOT = _find_repo_root()
 COMPOSE_PATH = REPO_ROOT / "docker-compose.yml"
 
 # Services that must remain present after adding identity-normalization
 REQUIRED_EXISTING_SERVICES = {
-    "postgres", "redis", "keycloak", "openldap", "event-ingestion"
+    "postgres",
+    "redis",
+    "keycloak",
+    "openldap",
+    "event-ingestion",
 }
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _load_compose() -> dict[str, Any]:
     """Parse docker-compose.yml. Fails the calling test if absent or invalid YAML."""
@@ -207,9 +196,7 @@ class TestIdentityNormalizationServiceEntry:
             "The consumer loop reads from login_events and writes to normalized_events streams."
         )
         redis_dep = depends_on["redis"]
-        condition = (
-            redis_dep.get("condition") if isinstance(redis_dep, dict) else None
-        )
+        condition = redis_dep.get("condition") if isinstance(redis_dep, dict) else None
         assert condition == "service_healthy", (
             f"identity-normalization depends_on.redis.condition must be 'service_healthy', "
             f"got {condition!r}."
@@ -273,7 +260,9 @@ class TestIdentityNormalizationServiceEntry:
         svc = _compose_in_service()
         healthcheck = svc.get("healthcheck", {})
         test = healthcheck.get("test", [])
-        test_str = " ".join(str(t) for t in test) if isinstance(test, list) else str(test)
+        test_str = (
+            " ".join(str(t) for t in test) if isinstance(test, list) else str(test)
+        )
         assert "8002" in test_str, (
             f"identity-normalization healthcheck.test must reference port 8002. "
             f"Got: {test_str!r}"
@@ -324,7 +313,9 @@ class TestConfigBindMount:
                 # Long syntax: {source: ./config, target: /app/config, ...}
                 source = v.get("source", "")
                 target = v.get("target", "")
-                if ("config" in source or "./config" in source) and "/app/config" in target:
+                if (
+                    "config" in source or "./config" in source
+                ) and "/app/config" in target:
                     has_config_mount = True
                     break
         assert has_config_mount, (
@@ -350,7 +341,9 @@ class TestConfigBindMount:
             elif isinstance(v, dict):
                 source = v.get("source", "")
                 target = v.get("target", "")
-                if ("config" in source or "./config" in source) and "/app/config" in target:
+                if (
+                    "config" in source or "./config" in source
+                ) and "/app/config" in target:
                     config_vol = v
                     break
 
@@ -372,8 +365,7 @@ class TestConfigBindMount:
             # Long syntax: read_only: true
             read_only = config_vol.get("read_only", False)
             assert read_only is True, (
-                f"Config mount must have read_only: true. "
-                f"Got: {config_vol!r}."
+                f"Config mount must have read_only: true. Got: {config_vol!r}."
             )
 
 

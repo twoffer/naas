@@ -1,5 +1,6 @@
 """app.main exists, exposes a FastAPI instance, and serves GET /health for event-ingestion."""
 
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # third-party
@@ -78,20 +79,27 @@ class TestHealthEndpoint:
         # Mock async DB session that succeeds on execute("SELECT 1")
         mock_session = AsyncMock()
         mock_session.execute = AsyncMock(return_value=MagicMock())
-        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
-        mock_session.__aexit__ = AsyncMock(return_value=None)
+
+        # The health handler calls get_session_factory() to get a factory,
+        # then uses it as an async context manager: async with factory() as session.
+        @asynccontextmanager
+        async def _fake_session_cm():
+            yield mock_session
+
+        def _fake_get_session_factory():
+            return _fake_session_cm
 
         # Mock Redis client that succeeds on ping()
         mock_redis = AsyncMock()
         mock_redis.ping = AsyncMock(return_value=True)
 
-        # We use broad patches targeting where the symbols are looked up by app/main.py.
-        # If the implementer uses `from naas_shared.database import get_db_session`,
-        # we patch naas_shared.database.get_db_session.
-        # If the implementer uses `from naas_shared.redis_client import get_redis`,
-        # we patch naas_shared.redis_client.get_redis.
+        # Patch get_session_factory and get_redis at the naas_shared module level
+        # so the module-reference lookups in the health handler pick them up.
         with (
-            patch("naas_shared.database.get_db_session", return_value=mock_session),
+            patch(
+                "naas_shared.database.get_session_factory",
+                new=_fake_get_session_factory,
+            ),
             patch("naas_shared.redis_client.get_redis", return_value=mock_redis),
         ):
             yield

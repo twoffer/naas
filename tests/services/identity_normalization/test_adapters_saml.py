@@ -1,6 +1,5 @@
 """SAMLAdapter: extract() method attribute mapping and field normalization."""
 
-
 # third-party
 import pytest
 
@@ -177,7 +176,11 @@ class TestSamlAdapterCrossProtocolCanonicalIdentity:
         oidc_result = OidcAdapter().extract({"employee_type": "E"})
         saml_result = SamlAdapter().extract({"employeeType": "E"})
 
-        assert oidc_result.get("employee_type") == saml_result.get("employee_type") == "FTE", (
+        assert (
+            oidc_result.get("employee_type")
+            == saml_result.get("employee_type")
+            == "FTE"
+        ), (
             f"OIDC 'E' → {oidc_result.get('employee_type')!r}, "
             f"SAML 'E' → {saml_result.get('employee_type')!r}. "
             "Both must equal 'FTE'."
@@ -192,17 +195,20 @@ class TestSamlAdapterCrossProtocolCanonicalIdentity:
 class TestSamlAdapterValueNormalization:
     """SamlAdapter.extract must apply the same value normalization as OidcAdapter."""
 
-    @pytest.mark.parametrize("raw_dept,expected_dept", [
-        ("eng", "Engineering"),
-        ("ENGINEERING", "Engineering"),
-        (" Engineering ", "Engineering"),
-        ("r&d", "Engineering"),
-        ("fin", "Finance"),
-        ("hr", "Human Resources"),
-        ("it", "Information Technology"),
-        ("sales", "Sales"),
-        ("mktg", "Marketing"),
-    ])
+    @pytest.mark.parametrize(
+        "raw_dept,expected_dept",
+        [
+            ("eng", "Engineering"),
+            ("ENGINEERING", "Engineering"),
+            (" Engineering ", "Engineering"),
+            ("r&d", "Engineering"),
+            ("fin", "Finance"),
+            ("hr", "Human Resources"),
+            ("it", "Information Technology"),
+            ("sales", "Sales"),
+            ("mktg", "Marketing"),
+        ],
+    )
     def test_department_normalization_via_dept_key(
         self, raw_dept: str, expected_dept: str
     ) -> None:

@@ -20,22 +20,10 @@ handles same-basename files in sibling directories without collision.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 
 
-def _find_repo_root() -> Path:
-    """Walk up from this file until we find docs/architecture/ — repo root marker."""
-    candidate = Path(__file__).resolve().parent
-    for _ in range(10):
-        if (candidate / "docs" / "architecture").is_dir():
-            return candidate
-        candidate = candidate.parent
-    raise RuntimeError(
-        f"Could not locate repo root. Started from: {Path(__file__).resolve()}"
-    )
+from tests.helpers import REPO_ROOT
 
-
-REPO_ROOT = _find_repo_root()
 # Production service dir stays hyphenated — only test dirs use underscores.
 SERVICE_DIR = str(REPO_ROOT / "services" / "identity-normalization")
 SHARED_DIR = str(REPO_ROOT / "shared")

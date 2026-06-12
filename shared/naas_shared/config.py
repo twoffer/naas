@@ -2,7 +2,7 @@ from functools import lru_cache
 from typing import Optional
 
 from pydantic import Field
-from pydantic_settings import BaseSettings
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -11,6 +11,12 @@ class Settings(BaseSettings):
     Defaults match docker-compose service names so containers work out of the
     box.  Override via environment variables or a .env file for local dev.
     """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
     # PostgreSQL
     postgres_host: str = "postgres"
@@ -60,11 +66,6 @@ class Settings(BaseSettings):
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
-
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
-        extra = "ignore"
 
 
 @lru_cache

@@ -1,6 +1,5 @@
 """normalization_values.py: department/employee_type canonical maps and normalize helpers."""
 
-
 # third-party
 import pytest
 
@@ -208,7 +207,10 @@ class TestDepartmentCanonicalContents:
         """DEPARTMENT_CANONICAL['information technology'] == 'Information Technology'."""
         from app.normalization_values import DEPARTMENT_CANONICAL
 
-        assert DEPARTMENT_CANONICAL.get("information technology") == "Information Technology", (
+        assert (
+            DEPARTMENT_CANONICAL.get("information technology")
+            == "Information Technology"
+        ), (
             f"Expected 'information technology' → 'Information Technology', "
             f"got {DEPARTMENT_CANONICAL.get('information technology')!r}."
         )
@@ -503,7 +505,11 @@ class TestUnifiedToLdapContents:
         from app.normalization_values import UNIFIED_TO_LDAP
 
         expected_keys = {
-            "display_name", "primary_email", "department", "employee_type", "groups"
+            "display_name",
+            "primary_email",
+            "department",
+            "employee_type",
+            "groups",
         }
         assert set(UNIFIED_TO_LDAP.keys()) == expected_keys, (
             f"UNIFIED_TO_LDAP must have exactly these keys: {expected_keys}. "
@@ -829,10 +835,28 @@ class TestNormalizeEmployeeType:
 
         allowed_values = {"FTE", "contractor", "vendor", None}
         test_inputs = [
-            "FTE", "fte", "E", "e", "employee", "full-time", "full time", "regular",
-            "contractor", "c", "contract", "contingent", "temp",
-            "vendor", "v", "external", "partner", "third-party",
-            "XYZ", "Consultant", "intern", "unknown_type",
+            "FTE",
+            "fte",
+            "E",
+            "e",
+            "employee",
+            "full-time",
+            "full time",
+            "regular",
+            "contractor",
+            "c",
+            "contract",
+            "contingent",
+            "temp",
+            "vendor",
+            "v",
+            "external",
+            "partner",
+            "third-party",
+            "XYZ",
+            "Consultant",
+            "intern",
+            "unknown_type",
         ]
         for inp in test_inputs:
             result = normalize_employee_type(inp)
@@ -1058,10 +1082,21 @@ class TestNormalizeDepartmentValue:
         from app.normalization_values import normalize_department_value
 
         test_inputs = [
-            "eng", "ENGINEERING", " Engineering ", "r&d",
-            "fin", "hr", "it", "sales", "mktg",
-            "astrophysics", "quantum computing",
-            None, 123, ["eng"], {"dept": "eng"},
+            "eng",
+            "ENGINEERING",
+            " Engineering ",
+            "r&d",
+            "fin",
+            "hr",
+            "it",
+            "sales",
+            "mktg",
+            "astrophysics",
+            "quantum computing",
+            None,
+            123,
+            ["eng"],
+            {"dept": "eng"},
         ]
         for inp in test_inputs:
             result = normalize_department_value(inp)
@@ -1070,20 +1105,23 @@ class TestNormalizeDepartmentValue:
                 f"Got {type(result).__name__!r}: {result!r}."
             )
 
-    @pytest.mark.parametrize("raw,expected", [
-        ("eng",            "Engineering"),
-        ("ENGINEERING",    "Engineering"),
-        ("r&d",            "Engineering"),
-        ("fin",            "Finance"),
-        ("hr",             "Human Resources"),
-        ("it",             "Information Technology"),
-        ("sales",          "Sales"),
-        ("mktg",           "Marketing"),
-        ("astrophysics",   "Astrophysics"),
-        ("Unknown Dept",   "Unknown Dept"),
-        (None,             None),
-        (123,              None),
-    ])
+    @pytest.mark.parametrize(
+        "raw,expected",
+        [
+            ("eng", "Engineering"),
+            ("ENGINEERING", "Engineering"),
+            ("r&d", "Engineering"),
+            ("fin", "Finance"),
+            ("hr", "Human Resources"),
+            ("it", "Information Technology"),
+            ("sales", "Sales"),
+            ("mktg", "Marketing"),
+            ("astrophysics", "Astrophysics"),
+            ("Unknown Dept", "Unknown Dept"),
+            (None, None),
+            (123, None),
+        ],
+    )
     def test_normalize_department_value_parametrized(
         self, raw: object, expected
     ) -> None:
