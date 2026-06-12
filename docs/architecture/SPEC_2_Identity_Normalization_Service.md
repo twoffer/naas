@@ -402,7 +402,7 @@ enrichment:
       enabled: true
       correlation_key: primary_email   # unified field; adapter reverse-maps to the LDAP attribute
       timeout_ms: 2000
-      on_failure: continue             # "continue" = graceful degradation; "fail" = reject event
+      on_failure: continue    # only "continue" is supported; "fail" violates ADR-0008 graceful-degradation
       cache_ttl_seconds: 60
       # enrich_attributes:             # optional; unified field names. If omitted, all mapped attrs are fetched.
       #   - display_name
@@ -412,12 +412,12 @@ enrichment:
       #   - groups
 ```
 
-Semantics: `priority` resolves disagreements; `weights` (0.0–1.0) drive confidence; `rationale` is human-readable only (surfaced in the dashboard); `defaults` apply to any attribute without an explicit entry; `merge_strategy` applies to list attributes only. `correlation_key` is a **unified** field name; `on_failure: continue` is recommended; `cache_ttl_seconds` is the LDAP cache TTL; `enrich_attributes` (if present) lists unified field names only.
+Semantics: `priority` resolves disagreements; `weights` (0.0–1.0) drive confidence; `rationale` is human-readable only (surfaced in the dashboard); `defaults` apply to any attribute without an explicit entry; `merge_strategy` applies to list attributes only. `correlation_key` is a **unified** field name; `on_failure: continue` is the only supported value (see below); `cache_ttl_seconds` is the LDAP cache TTL; `enrich_attributes` (if present) lists unified field names only.
 
 **⚠️ Startup validation (config is loaded once at startup; no hot-reload).** Validate with a Pydantic model and **abort startup with a descriptive error** on any of:
 
 - `correlation_key` is not a unified field the LDAP adapter can reverse-map to an LDAP attribute (valid: `display_name`→`cn`, `primary_email`→`mail`, `department`→`departmentNumber`, `employee_type`→`employeeType`, `groups`→`memberOf`).
-- `on_failure` is not `"continue"` or `"fail"`.
+- `on_failure` is not `"continue"`. The `"fail"` option (rejecting events on enrichment failure) is not implemented — events are never rejected on enrichment failure (§5.4 / ADR-0008 graceful-degradation invariant). The option is reserved.
 - `enrich_attributes` (if present) contains a name that is not a reverse-mappable unified field.
 - `cache_ttl_seconds` is not a positive integer.
 

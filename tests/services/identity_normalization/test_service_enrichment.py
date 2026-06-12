@@ -446,3 +446,235 @@ class TestEnrichmentDecision:
         assert pos_args[1] == "alice@corp.com", (
             f"enrich() lookup_value must be 'alice@corp.com', got {pos_args[1]!r}"
         )
+
+
+# ===========================================================================
+# D. Config kwargs are passed from service to enrich() (Change 1)
+# ===========================================================================
+
+
+class TestEnrichConfigKwargs:
+    """Service must pass YAML-loaded config values as kwargs into enrich().
+
+    WHY: If the service ignores the config values, timeout_ms / cache_ttl_seconds /
+    enrich_attributes are effectively dead knobs — always the adapter defaults.
+    Wiring the config per-call allows YAML changes to take effect without code
+    changes (op hygiene).
+    """
+
+    async def test_service_passes_yaml_cache_ttl_to_enrich(self):
+        """cache_ttl_seconds kwarg == config/normalization.yaml value (60)."""
+        svc = _make_service(enrich_return=(None, "ldap_no_match"), ldap_enabled=True)
+        record = _oidc_record()
+
+        await svc.normalize(record)
+
+        call_kwargs = svc._ldap_adapter.enrich.call_args.kwargs
+        assert "cache_ttl_seconds" in call_kwargs, (
+            "enrich() must be called with cache_ttl_seconds kwarg"
+        )
+        assert call_kwargs["cache_ttl_seconds"] == 60, (
+            f"cache_ttl_seconds must be 60 (from config/normalization.yaml), "
+            f"got {call_kwargs['cache_ttl_seconds']!r}"
+        )
+
+    async def test_service_passes_yaml_timeout_ms_to_enrich(self):
+        """timeout_ms kwarg == config/normalization.yaml value (2000)."""
+        svc = _make_service(enrich_return=(None, "ldap_no_match"), ldap_enabled=True)
+        record = _oidc_record()
+
+        await svc.normalize(record)
+
+        call_kwargs = svc._ldap_adapter.enrich.call_args.kwargs
+        assert "timeout_ms" in call_kwargs, (
+            "enrich() must be called with timeout_ms kwarg"
+        )
+        assert call_kwargs["timeout_ms"] == 2000, (
+            f"timeout_ms must be 2000 (from config/normalization.yaml), "
+            f"got {call_kwargs['timeout_ms']!r}"
+        )
+
+    async def test_service_passes_enrich_attributes_none_when_not_configured(self):
+        """enrich_attributes kwarg is None when not set in config (default)."""
+        svc = _make_service(enrich_return=(None, "ldap_no_match"), ldap_enabled=True)
+        record = _oidc_record()
+
+        await svc.normalize(record)
+
+        call_kwargs = svc._ldap_adapter.enrich.call_args.kwargs
+        assert "enrich_attributes" in call_kwargs, (
+            "enrich() must be called with enrich_attributes kwarg"
+        )
+        assert call_kwargs["enrich_attributes"] is None, (
+            f"enrich_attributes must be None when not configured, "
+            f"got {call_kwargs['enrich_attributes']!r}"
+        )
+
+
+# ===========================================================================
+# E. Connection-error state-change logging (Change 6)
+# ===========================================================================
+
+
+class TestConnectionErrorStatefulLogging:
+    """Service logs ERROR only on the first connection error; subsequent errors log DEBUG.
+
+    WHY: With LDAP down, every OIDC/SAML event would otherwise emit an ERROR log,
+    flooding the log stream with identical messages. State-change logging emits
+    ERROR once (state change: healthy → degraded) and DEBUG thereafter (repeated
+    known condition). On recovery, an INFO log signals the state change back.
+    """
+
+    def _make_service_with_ldap_outcome(self, outcome: str):
+        """Build NormalizationService with ldap.enrich always returning (None, outcome)."""
+        from app.service import NormalizationService
+        from app.adapters.oidc import OidcAdapter
+        from app.adapters.saml import SamlAdapter
+        from app.adapters.ldap import LdapAdapter
+
+        cfg = _load_real_config()
+        oidc = OidcAdapter()
+        saml = SamlAdapter()
+        ldap = LdapAdapter()
+        ldap.enrich = AsyncMock(return_value=(None, outcome))
+        return NormalizationService(
+            config=cfg, oidc_adapter=oidc, saml_adapter=saml, ldap_adapter=ldap
+        )
+
+    async def test_first_connection_error_logs_error(self):
+        """First ldap_connection_error outcome → service logs at ERROR level."""
+        import app.service as svc_mod
+
+        logged_events: list[dict] = []
+
+        class CapturingLogger:
+            def error(self, event, **kwargs):
+                logged_events.append({"level": "error", "event": event, **kwargs})
+
+            def debug(self, event, **kwargs):
+                logged_events.append({"level": "debug", "event": event, **kwargs})
+
+            def bind(self, **kwargs):
+                return self
+
+            def __getattr__(self, name):
+                return lambda *a, **kw: None
+
+        svc = self._make_service_with_ldap_outcome("ldap_connection_error")
+        record = _oidc_record()
+
+        orig_logger = svc_mod._logger
+        svc_mod._logger = CapturingLogger()
+        try:
+            await svc.normalize(record)
+        finally:
+            svc_mod._logger = orig_logger
+
+        error_events = [e for e in logged_events if e["level"] == "error"]
+        assert len(error_events) >= 1, "First connection error must log at ERROR level"
+        assert any("connection_error" in e["event"] for e in error_events), (
+            f"ERROR event must be 'ldap_enrichment_connection_error'. Got: {error_events}"
+        )
+
+    async def test_second_connection_error_does_not_log_error(self):
+        """Second consecutive ldap_connection_error → ERROR count remains 1 (debug only)."""
+        import app.service as svc_mod
+
+        logged_events: list[dict] = []
+
+        class CapturingLogger:
+            def error(self, event, **kwargs):
+                logged_events.append({"level": "error", "event": event, **kwargs})
+
+            def debug(self, event, **kwargs):
+                logged_events.append({"level": "debug", "event": event, **kwargs})
+
+            def bind(self, **kwargs):
+                return self
+
+            def __getattr__(self, name):
+                return lambda *a, **kw: None
+
+        svc = self._make_service_with_ldap_outcome("ldap_connection_error")
+        record = _oidc_record()
+
+        orig_logger = svc_mod._logger
+        svc_mod._logger = CapturingLogger()
+        try:
+            await svc.normalize(record)  # first — sets degraded flag
+            logged_events.clear()
+            await svc.normalize(record)  # second — should be DEBUG only
+        finally:
+            svc_mod._logger = orig_logger
+
+        error_events = [e for e in logged_events if e["level"] == "error"]
+        assert len(error_events) == 0, (
+            f"Second connection error must NOT emit ERROR log. Got: {error_events}"
+        )
+
+    async def test_recovery_after_degradation_logs_info(self):
+        """After a connection error, a successful ldap_no_match logs INFO recovered."""
+        import app.service as svc_mod
+
+        logged_events: list[dict] = []
+
+        class CapturingLogger:
+            def error(self, event, **kwargs):
+                logged_events.append({"level": "error", "event": event, **kwargs})
+
+            def info(self, event, **kwargs):
+                logged_events.append({"level": "info", "event": event, **kwargs})
+
+            def debug(self, event, **kwargs):
+                logged_events.append({"level": "debug", "event": event, **kwargs})
+
+            def bind(self, **kwargs):
+                return self
+
+            def warning(self, event, **kwargs):
+                logged_events.append({"level": "warning", "event": event, **kwargs})
+
+            def __getattr__(self, name):
+                return lambda *a, **kw: None
+
+        from app.service import NormalizationService
+        from app.adapters.oidc import OidcAdapter
+        from app.adapters.saml import SamlAdapter
+        from app.adapters.ldap import LdapAdapter
+
+        cfg = _load_real_config()
+        oidc = OidcAdapter()
+        saml = SamlAdapter()
+        ldap = LdapAdapter()
+
+        # First call: connection error; second call: no_match (recovery evidence)
+        ldap.enrich = AsyncMock(
+            side_effect=[
+                (None, "ldap_connection_error"),
+                (None, "ldap_no_match"),
+            ]
+        )
+        svc = NormalizationService(
+            config=cfg, oidc_adapter=oidc, saml_adapter=saml, ldap_adapter=ldap
+        )
+
+        record = _oidc_record()
+
+        orig_logger = svc_mod._logger
+        svc_mod._logger = CapturingLogger()
+        try:
+            await svc.normalize(record)  # sets degraded flag
+            logged_events.clear()
+            await svc.normalize(record)  # recovery
+        finally:
+            svc_mod._logger = orig_logger
+
+        recovery_events = [
+            e
+            for e in logged_events
+            if e["level"] == "info" and "recovered" in e["event"]
+        ]
+        assert len(recovery_events) >= 1, (
+            f"Recovery after degradation must log INFO 'ldap_enrichment_recovered'. "
+            f"Got logged events: {logged_events}"
+        )

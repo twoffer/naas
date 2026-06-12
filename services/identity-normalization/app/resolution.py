@@ -293,6 +293,7 @@ def _resolve_groups(
         (ListMergeResolution, confidence)
     """
     strategy = config.merge_strategy_for("groups")
+    priority = config.priority_for("groups")
     n_sources = len(groups_map)
 
     if n_sources == 1:
@@ -310,7 +311,7 @@ def _resolve_groups(
         return detail, conf
 
     # Multiple sources
-    merged = _apply_merge_strategy(strategy, groups_map)
+    merged = _apply_merge_strategy(strategy, groups_map, priority)
 
     # Confidence: fraction of merged groups present in >1 source
     if merged:
@@ -339,31 +340,37 @@ def _resolve_groups(
 def _apply_merge_strategy(
     strategy: str,
     groups_map: dict[str, list[str]],
+    priority: list[str] | None = None,
 ) -> list[str]:
     """Apply the configured merge strategy to produce a sorted, de-duplicated list.
 
     §5.5: union (default), intersection, priority are supported.
-    """
-    if strategy == "union":
-        all_groups: set[str] = set()
-        for grp_list in groups_map.values():
-            all_groups.update(grp_list)
-        return sorted(all_groups)
 
+    For "priority": walks the configured priority list (passed by _resolve_groups)
+    and returns the first source that is present with a non-empty list.  Sources not
+    in the priority list (or when no priority is configured) fall back to sorted-key
+    order for deterministic behaviour.
+    """
     if strategy == "intersection":
         sets = [set(grp_list) for grp_list in groups_map.values()]
         result = sets[0].intersection(*sets[1:]) if sets else set()
         return sorted(result)
 
     if strategy == "priority":
-        # Return the first non-empty source's list (deterministic: sorted source keys)
-        for _src in sorted(groups_map.keys()):
-            if groups_map[_src]:
-                return sorted(set(groups_map[_src]))
+        # Walk configured priority; return first source with a non-empty list.
+        for src in priority or []:
+            if src in groups_map and groups_map[src]:
+                return sorted(set(groups_map[src]))
+        # Fallback: sorted-key order (deterministic when no priority configured or
+        # all priority sources are absent/empty).
+        for src in sorted(groups_map.keys()):
+            if groups_map[src]:
+                return sorted(set(groups_map[src]))
         return []
 
-    # Unknown strategy: default to union
-    all_fallback: set[str] = set()
+    # "union" is the default (and the final catch-all for any unknown strategy,
+    # which is unreachable in practice given the Literal type constraint).
+    all_groups: set[str] = set()
     for grp_list in groups_map.values():
-        all_fallback.update(grp_list)
-    return sorted(all_fallback)
+        all_groups.update(grp_list)
+    return sorted(all_groups)

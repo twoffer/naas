@@ -78,10 +78,10 @@ async def lifespan(application: FastAPI):
     """Startup: load config, ensure consumer group, construct pipeline components, launch consumer.
 
     WHY exception propagation on invalid config: the service MUST NOT start
-    with a broken normalization configuration.  A bad correlation_key or
-    on_failure value would silently produce wrong enrichment decisions for every
-    event.  Letting the exception propagate aborts startup with a descriptive
-    error (§5.1, §5.6).
+    with a broken normalization configuration.  An invalid correlation_key or
+    unsupported on_failure value would silently produce wrong enrichment decisions
+    for every event.  Letting the exception propagate aborts startup with a
+    descriptive error (§5.1, §5.6).
 
     WHY asyncio.create_task: the consumer loop runs indefinitely; blocking the
     lifespan with await would prevent FastAPI from completing startup and serving

@@ -163,12 +163,17 @@ def _validate_ldap_enrichment(ldap_cfg: LdapEnrichmentConfig) -> None:
             "This field is reverse-mapped to an LDAP attribute at enrichment time."
         )
 
-    # (b) on_failure must be in the closed set
-    _valid_on_failure = {"continue", "fail"}
+    # (b) on_failure must be "continue" — "fail" (rejecting events on LDAP error)
+    #     violates the graceful-degradation invariant (§5.4 / ADR-0008): enrichment
+    #     failure must never drop an event. The option is reserved for a future
+    #     opt-in mode but is not yet implemented.
+    _valid_on_failure = {"continue"}
     if ldap_cfg.on_failure not in _valid_on_failure:
         raise ValueError(
-            f"Invalid on_failure {ldap_cfg.on_failure!r}: must be one of "
-            f"{sorted(_valid_on_failure)}."
+            f"Invalid on_failure {ldap_cfg.on_failure!r}: only 'continue' is supported. "
+            f"The 'fail' option (rejecting events on enrichment failure) is not "
+            f"implemented — events are never rejected on LDAP enrichment failure "
+            f"(§5.4 / ADR-0008 graceful-degradation invariant)."
         )
 
     # (c) enrich_attributes — if present, every entry must be reverse-mappable

@@ -26,7 +26,10 @@ def _make_fake_ldap_module() -> MagicMock:
     class LDAPError(Exception):
         pass
 
-    class TIMEOUT_EXCEEDED(LDAPError):
+    class TIMEOUT(LDAPError):
+        pass
+
+    class TIMELIMIT_EXCEEDED(LDAPError):
         pass
 
     class SERVER_DOWN(LDAPError):
@@ -39,7 +42,8 @@ def _make_fake_ldap_module() -> MagicMock:
         pass
 
     fake_ldap.LDAPError = LDAPError
-    fake_ldap.TIMEOUT_EXCEEDED = TIMEOUT_EXCEEDED
+    fake_ldap.TIMEOUT = TIMEOUT
+    fake_ldap.TIMELIMIT_EXCEEDED = TIMELIMIT_EXCEEDED
     fake_ldap.SERVER_DOWN = SERVER_DOWN
     fake_ldap.NO_SUCH_OBJECT = NO_SUCH_OBJECT
     fake_ldap.OPERATIONS_ERROR = OPERATIONS_ERROR

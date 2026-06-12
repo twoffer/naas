@@ -191,25 +191,26 @@ class TestCorrelationKeyValidation:
 
 
 class TestOnFailureValidation:
-    """load_config must raise when on_failure is not 'continue' or 'fail'.
+    """load_config must raise when on_failure is anything other than 'continue'.
 
-    WHY: on_failure determines whether an LDAP outage aborts event processing
-    ('fail') or allows graceful degradation ('continue'). An unrecognized value
-    like 'explode' would leave the service with no defined behaviour on LDAP errors.
-    Catching it at startup is safer than a runtime AttributeError during an outage.
+    WHY: 'fail' (rejecting events on LDAP error) violates the pipeline's
+    graceful-degradation invariant (§5.4 / ADR-0008 — enrichment failure must
+    never drop an event). Only 'continue' is supported. An unrecognized value
+    like 'explode' or the reserved 'fail' must be rejected at startup with a
+    descriptive error.
     """
 
     def test_invalid_on_failure_explode_raises(self, tmp_path: Path) -> None:
-        """load_config raises when on_failure == 'explode'.
+        """load_config raises ValueError when on_failure == 'explode'.
 
-        WHY: 'explode' is not in the closed set {'continue', 'fail'}.
+        WHY: 'explode' is not in the supported set {'continue'}.
         An unrecognized value leaves error handling undefined.
         """
         from app.normalization_config import load_config
 
         p = _write_enrichment_yaml(tmp_path, on_failure="explode")
 
-        with pytest.raises(Exception) as exc_info:
+        with pytest.raises(ValueError) as exc_info:
             load_config(p)
 
         exc_message = str(exc_info.value)
@@ -220,22 +221,47 @@ class TestOnFailureValidation:
         )
 
     def test_invalid_on_failure_ignore_raises(self, tmp_path: Path) -> None:
-        """load_config raises when on_failure == 'ignore'.
+        """load_config raises ValueError when on_failure == 'ignore'.
 
-        WHY: 'ignore' sounds plausible but is not in the closed enum. Guards against
+        WHY: 'ignore' sounds plausible but is not supported. Guards against
         the implementer only checking for a single invalid value.
         """
         from app.normalization_config import load_config
 
         p = _write_enrichment_yaml(tmp_path, on_failure="ignore")
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             load_config(p)
+
+    def test_on_failure_fail_raises_descriptive_error(self, tmp_path: Path) -> None:
+        """load_config raises ValueError when on_failure == 'fail'.
+
+        WHY: 'fail' (reject the event on LDAP error) violates the
+        graceful-degradation invariant — enrichment failure must never drop an
+        event (§5.4 / ADR-0008). The error message must explain why 'fail' is
+        not supported.
+        """
+        from app.normalization_config import load_config
+
+        p = _write_enrichment_yaml(tmp_path, on_failure="fail")
+
+        with pytest.raises(ValueError) as exc_info:
+            load_config(p)
+
+        exc_message = str(exc_info.value)
+        # Error must name the value and explain why it is not supported
+        assert "fail" in exc_message, (
+            f"Error message must reference 'fail'. Got: {exc_message!r}."
+        )
+        assert "continue" in exc_message, (
+            f"Error message must mention the supported value 'continue'. "
+            f"Got: {exc_message!r}."
+        )
 
     def test_on_failure_continue_is_valid(self, tmp_path: Path) -> None:
         """load_config does NOT raise when on_failure == 'continue'.
 
-        WHY: 'continue' is the recommended value (§5.6) and is in the valid set.
+        WHY: 'continue' is the only supported value (§5.6).
         The committed config uses this value.
         """
         from app.normalization_config import load_config
@@ -244,19 +270,6 @@ class TestOnFailureValidation:
 
         cfg = load_config(p)
         assert cfg is not None, "load_config must succeed for on_failure='continue'."
-
-    def test_on_failure_fail_is_valid(self, tmp_path: Path) -> None:
-        """load_config does NOT raise when on_failure == 'fail'.
-
-        WHY: 'fail' is the strict mode — reject the event on LDAP error. It is in
-        the valid set and must be accepted.
-        """
-        from app.normalization_config import load_config
-
-        p = _write_enrichment_yaml(tmp_path, on_failure="fail")
-
-        cfg = load_config(p)
-        assert cfg is not None, "load_config must succeed for on_failure='fail'."
 
 
 # ===========================================================================

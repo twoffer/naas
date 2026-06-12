@@ -34,13 +34,13 @@ Outcome codes:
   "cache_hit_negative"    — returned None from negative sentinel
   "ldap_match"            — live LDAP returned a match (result written to cache)
   "ldap_no_match"         — live LDAP returned empty (negative sentinel cached)
-  "ldap_timeout"          — TIMEOUT_EXCEEDED; not cached; returns None
+  "ldap_timeout"          — LDAP client/server timeout; not cached; returns None
   "ldap_connection_error" — SERVER_DOWN or other connection failure; not cached
   "ldap_search_error"     — search-level error (OPERATIONS_ERROR etc.); not cached
   "ldap_unexpected_error" — any other exception; not cached
   "unmappable_field"      — correlation_field not in UNIFIED_TO_LDAP; no query
 
-Chunk 6 unpacks the tuple to build the skip_reason / EnrichmentApplied
+The consumer layer unpacks the tuple to build the skip_reason / EnrichmentApplied
 discriminator without reading shared mutable state.
 """
 
@@ -64,9 +64,13 @@ import naas_shared.redis_client as _redis_module
 
 _logger = get_logger(__name__)
 
-# Default enrichment cache TTL (seconds). Callers may override by subclassing
-# or passing cache_ttl_seconds= (see enrich() signature).
+# Default enrichment cache TTL (seconds). Service passes the YAML-configured
+# value per-call; this constant is the fallback when called without kwargs.
 _DEFAULT_CACHE_TTL = 60
+
+# Default LDAP network/operation timeout (milliseconds). Service passes the
+# YAML-configured value per-call; this constant is the adapter fallback.
+_DEFAULT_TIMEOUT_MS = 2000
 
 # Matches the cn= RDN at the start or after a comma in an LDAP DN.
 # Captures the attribute value verbatim (case-preserving, per spec §5.2 note).
@@ -192,7 +196,7 @@ def _decode_first(value: object) -> str | None:
     plain strings for scalar fields.  This helper normalises both raw bytes and
     lists-of-bytes to a single str so extract() can operate unchanged.
 
-    Returns None when the value is absent, empty, or not decodable.
+    Returns None when the value is absent, empty, or not decodable as UTF-8.
     """
     if value is None:
         return None
@@ -201,18 +205,28 @@ def _decode_first(value: object) -> str | None:
             return None
         value = value[0]
     if isinstance(value, bytes):
-        return value.decode("utf-8")
+        try:
+            return value.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
     return str(value)
 
 
 def _decode_list(value: list | bytes | None) -> list[str]:
-    """Decode an LDAP multi-value attribute (list of bytes) to a list of str."""
+    """Decode an LDAP multi-value attribute (list of bytes) to a list of str.
+
+    Items that cannot be decoded as UTF-8 are silently skipped so the caller
+    always receives a clean list of string values.
+    """
     if not value:
         return []
     result: list[str] = []
     for item in value:  # type: ignore[union-attr]
         if isinstance(item, bytes):
-            result.append(item.decode("utf-8"))
+            try:
+                result.append(item.decode("utf-8"))
+            except UnicodeDecodeError:
+                continue
         else:
             result.append(str(item))
     return result
@@ -244,12 +258,8 @@ def build_search_filter(ldap_attr: str, lookup_value: str) -> str:
     LDAP metacharacters cannot alter the filter semantics.
 
     The returned filter is parenthesised as required by RFC 4515. This function
-    is exported for use by external callers (e.g., chunk 6, diagnostic tools).
-
-    Note: enrich() builds its search filter inline (without outer parens) so
-    that structural `(` / `)` characters in the filter do not mask injection
-    sanitization assertions in unit tests. This function is the canonical form
-    for external callers that need RFC-compliant parenthesisation.
+    is used by enrich() internally and exported for external callers (diagnostic
+    tools, etc.).
 
     Args:
         ldap_attr:    The LDAP attribute name (e.g. 'mail').
@@ -262,32 +272,6 @@ def build_search_filter(ldap_attr: str, lookup_value: str) -> str:
 
     escaped = ldap.filter.escape_filter_chars(lookup_value)
     return f"({ldap_attr}={escaped})"
-
-
-def _build_search_filter_internal(ldap_attr: str, lookup_value: str) -> str:
-    """Build the equality filter WITHOUT outer parens for enrich()'s internal use.
-
-    WHY: The parenthesised RFC 4515 format includes `(` and `)` as structural
-    characters.  Unit-test sanitization assertions check that LDAP metacharacters
-    from the lookup_value do not appear raw in the filter string.  Using an
-    unparenthesised `attr=escaped_value` form prevents the structural characters
-    from masking or conflicting with that assertion while still protecting against
-    injection (the escape step is identical).
-
-    In production (Docker), python-ldap's search_s and search_st accept both
-    parenthesised and bare equality assertions for simple filters.
-
-    Args:
-        ldap_attr:    The LDAP attribute name.
-        lookup_value: The raw (unescaped) value to search for.
-
-    Returns:
-        An unparenthesised equality filter, e.g. 'mail=alice@corp.com'.
-    """
-    import ldap.filter  # noqa: PLC0415  lazy import
-
-    escaped = ldap.filter.escape_filter_chars(lookup_value)
-    return f"{ldap_attr}={escaped}"
 
 
 def _get_pool(uri: str, admin_dn: str, password: str) -> asyncio.Queue:
@@ -315,15 +299,27 @@ def _get_pool(uri: str, admin_dn: str, password: str) -> asyncio.Queue:
     return _pool_queue
 
 
-def _create_ldap_connection(uri: str, admin_dn: str, password: str) -> object:
+def _create_ldap_connection(
+    uri: str,
+    admin_dn: str,
+    password: str,
+    timeout_ms: int = _DEFAULT_TIMEOUT_MS,
+) -> object:
     """Create and bind a new LDAP connection (blocking — call via to_thread).
 
     WHY: python-ldap is a blocking C extension; all I/O must run in a thread.
+    OPT_NETWORK_TIMEOUT bounds the TCP connect + initial data wait; OPT_TIMEOUT
+    bounds synchronous operations (search_s, bind_s) client-side and raises
+    ldap.TIMEOUT on expiry — already classified by _classify_ldap_error.
+
+    Pooled connections are created once and reused; config is fixed per process,
+    so setting timeout options at connection creation time is correct.
 
     Args:
-        uri:       LDAP server URI (e.g. 'ldap://ldap:389').
-        admin_dn:  Bind DN for the service account.
-        password:  Bind password.
+        uri:        LDAP server URI (e.g. 'ldap://ldap:389').
+        admin_dn:   Bind DN for the service account.
+        password:   Bind password.
+        timeout_ms: Network and operation timeout in milliseconds.
 
     Returns:
         A bound LDAP connection object.
@@ -333,7 +329,10 @@ def _create_ldap_connection(uri: str, admin_dn: str, password: str) -> object:
     """
     import ldap  # noqa: PLC0415  lazy import
 
+    timeout_s = timeout_ms / 1000.0
     conn = ldap.initialize(uri)
+    conn.set_option(ldap.OPT_NETWORK_TIMEOUT, timeout_s)
+    conn.set_option(ldap.OPT_TIMEOUT, timeout_s)
     conn.simple_bind_s(admin_dn, password)
     return conn
 
@@ -375,6 +374,7 @@ async def _pool_search(
     base_dn: str,
     filter_str: str,
     attrlist: list[str],
+    timeout_ms: int = _DEFAULT_TIMEOUT_MS,
 ) -> list:
     """Acquire a connection from the pool, search, then return it to the pool.
 
@@ -391,8 +391,9 @@ async def _pool_search(
         admin_dn:   Service-account bind DN.
         password:   Bind password.
         base_dn:    LDAP search base.
-        filter_str: Pre-escaped search filter (no outer parens required).
+        filter_str: Pre-escaped search filter.
         attrlist:   Attributes to fetch.
+        timeout_ms: Timeout passed to _create_ldap_connection for new connections.
 
     Returns:
         List of (dn, attrs) tuples from search_s.
@@ -407,7 +408,7 @@ async def _pool_search(
         if conn is None:
             # Slot was empty — create and bind a new connection in a thread
             conn = await asyncio.to_thread(
-                _create_ldap_connection, uri, admin_dn, password
+                _create_ldap_connection, uri, admin_dn, password, timeout_ms
             )
         results = await asyncio.to_thread(
             _ldap_search_on_conn, conn, base_dn, filter_str, attrlist
@@ -447,9 +448,8 @@ class LdapAdapter:
         returns a list ([] when absent or when memberOf is empty or non-list) so
         the resolution engine can iterate it without a None guard.
 
-        The bootstrap.ldif seeded users carry no memberOf attributes, so real
-        queries to the test directory will produce groups=[]; the DN-reduction
-        logic is exercised only against production directories or synthetic test data.
+        Seeded users in bootstrap.ldif DO have memberOf back-links (via the
+        memberOf overlay); live enrichment returns real groups for those entries.
 
         Args:
             raw_attributes: Raw LDAP attribute dict (cn, mail, departmentNumber,
@@ -467,7 +467,10 @@ class LdapAdapter:
         self,
         correlation_field: str,
         lookup_value: str,
+        *,
         cache_ttl_seconds: int = _DEFAULT_CACHE_TTL,
+        timeout_ms: int = _DEFAULT_TIMEOUT_MS,
+        enrich_attributes: list[str] | None = None,
     ) -> tuple[dict | None, str]:
         """Query LDAP for a user and return (normalized_attrs, outcome_code).
 
@@ -476,9 +479,9 @@ class LdapAdapter:
           NEGATIVE HIT      — key holds JSON sentinel ``"null"`` → return None
           POSITIVE HIT      — key holds JSON dict → return cached dict
 
-        Transient LDAP failures (TIMEOUT_EXCEEDED, SERVER_DOWN, OPERATIONS_ERROR,
-        unexpected exceptions) are NOT cached so the service recovers automatically
-        when LDAP becomes healthy again.
+        Transient LDAP failures (TIMEOUT, TIMELIMIT_EXCEEDED, SERVER_DOWN,
+        OPERATIONS_ERROR, unexpected exceptions) are NOT cached so the service
+        recovers automatically when LDAP becomes healthy again.
 
         Args:
             correlation_field:  Unified schema field used as the LDAP search key
@@ -487,6 +490,12 @@ class LdapAdapter:
                 if not mappable.
             lookup_value:       The value to search for (e.g., 'alice@corp.com').
             cache_ttl_seconds:  TTL for both positive and negative cache entries.
+            timeout_ms:         Network and operation timeout in milliseconds,
+                applied when creating a new connection from the pool.
+            enrich_attributes:  When not None, restricts the LDAP fetch to only
+                the specified unified field names (reverse-mapped to LDAP attrs).
+                When None, all five unified fields are fetched (sorted for
+                deterministic attrlist ordering).
 
         Returns:
             (attrs, outcome) where attrs is the unified dict on match (else None)
@@ -525,10 +534,15 @@ class LdapAdapter:
                 _logger.debug("ldap_enrich_positive_cache_hit", ldap_attr=ldap_attr)
                 return attrs, "cache_hit_positive"
             except (json.JSONDecodeError, TypeError):
-                # Corrupted cache entry — fall through to live query.
+                # Corrupted cache entry — best-effort delete so the next call
+                # is a clean miss rather than hitting the corrupt value again.
                 # Log the length only (not the raw content) to prevent PII leakage:
                 # the cached string may contain the user's email address, display name,
                 # or other directory attributes collected during a prior successful query.
+                try:
+                    await redis.delete(cache_key)
+                except Exception:
+                    pass
                 _logger.warning(
                     "ldap_enrich_cache_decode_error",
                     ldap_attr=ldap_attr,
@@ -538,8 +552,15 @@ class LdapAdapter:
         # --- Cache miss: query LDAP via connection pool ---
         settings = get_settings()
         uri = f"ldap://{settings.ldap_host}:{settings.ldap_port}"
-        attrlist = list(UNIFIED_TO_LDAP.values())
-        search_filter = _build_search_filter_internal(ldap_attr, lookup_value)
+
+        # Build attrlist: restrict to requested fields (sorted for determinism),
+        # or fetch all five unified fields when enrich_attributes is not set.
+        if enrich_attributes is not None:
+            attrlist = sorted(UNIFIED_TO_LDAP[f] for f in enrich_attributes)
+        else:
+            attrlist = sorted(UNIFIED_TO_LDAP.values())
+
+        search_filter = build_search_filter(ldap_attr, lookup_value)
 
         try:
             results = await _pool_search(
@@ -549,15 +570,26 @@ class LdapAdapter:
                 settings.ldap_base_dn,
                 search_filter,
                 attrlist,
+                timeout_ms=timeout_ms,
             )
         except Exception as exc:
             outcome = _classify_ldap_error(exc)
-            _logger.warning(
-                "ldap_enrich_error",
-                outcome=outcome,
-                ldap_attr=ldap_attr,
-                error=str(exc),
-            )
+            # For connection errors the service owns operator-facing logging;
+            # log at DEBUG here to avoid duplicate ERRORs per event.
+            if outcome == "ldap_connection_error":
+                _logger.debug(
+                    "ldap_enrich_error",
+                    outcome=outcome,
+                    ldap_attr=ldap_attr,
+                    error=str(exc)[:200],
+                )
+            else:
+                _logger.warning(
+                    "ldap_enrich_error",
+                    outcome=outcome,
+                    ldap_attr=ldap_attr,
+                    error=str(exc)[:200],
+                )
             # Transient errors are NOT cached
             return None, outcome
 
@@ -581,18 +613,17 @@ class LdapAdapter:
 
 
 def _classify_ldap_error(exc: Exception) -> str:
-    """Map an LDAP exception to an outcome code string for the chunk-6 seam.
+    """Map an LDAP exception to an outcome code string for the consumer layer.
 
-    WHY: chunk 6 needs to distinguish transient error types (timeout vs
-    connection_error vs search_error) to build the correct skip_reason for
-    EnrichmentSkipped.  Using outcome strings (not exception types) keeps
-    chunk 6 decoupled from python-ldap's exception hierarchy.
+    WHY: The consumer layer needs to distinguish transient error types (timeout
+    vs connection_error vs search_error) to build the correct skip_reason for
+    EnrichmentSkipped.  Using outcome strings (not exception types) keeps it
+    decoupled from python-ldap's exception hierarchy.
 
     python-ldap timeout names:
       ldap.TIMEOUT            — client / network timeout
       ldap.TIMELIMIT_EXCEEDED — server time-limit exceeded
-    Both map to 'ldap_timeout'.  The former buggy name (TIMEOUT_EXCEEDED) does
-    not exist on the real library and raised AttributeError.
+    Both map to 'ldap_timeout'.
 
     Args:
         exc: Any exception raised during the LDAP operation.
@@ -604,18 +635,15 @@ def _classify_ldap_error(exc: Exception) -> str:
     try:
         import ldap as ldap_module  # noqa: PLC0415  lazy import
 
-        # Collect timeout exception types from the real attribute names.
+        # Collect timeout exception types from the canonical attribute names.
         # ldap.TIMEOUT = client/network timeout; ldap.TIMELIMIT_EXCEEDED = server
-        # time-limit.  The old (incorrect) name TIMEOUT_EXCEEDED is also included
-        # via getattr so pre-existing test stubs using that name stay classified
-        # correctly.  All three are guarded with getattr + isinstance(t, type) to
-        # tolerate stub modules that may be missing any of these attributes.
+        # time-limit.  Both are guarded with getattr + isinstance(t, type) to
+        # tolerate stub modules that may be missing either attribute.
         _timeout_types = tuple(
             t
             for t in (
                 getattr(ldap_module, "TIMEOUT", None),
                 getattr(ldap_module, "TIMELIMIT_EXCEEDED", None),
-                getattr(ldap_module, "TIMEOUT_EXCEEDED", None),
             )
             if isinstance(t, type)
         )
