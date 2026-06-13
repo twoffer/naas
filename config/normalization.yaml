@@ -37,7 +37,7 @@ enrichment:
       enabled: true
       correlation_key: primary_email
       timeout_ms: 2000
-      on_failure: continue
+      on_failure: continue    # only "continue" is supported; "fail" violates ADR-0008 graceful-degradation
       cache_ttl_seconds: 60
       # enrich_attributes:
       #   - display_name

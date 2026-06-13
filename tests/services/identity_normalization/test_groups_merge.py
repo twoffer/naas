@@ -22,8 +22,17 @@ def _load_real_config():
     return load_config(CONFIG_PATH)
 
 
-def _load_config_with_strategy(strategy: str):
-    """Load a modified config with the specified merge strategy for groups."""
+def _load_config_with_strategy(strategy: str, priority: list[str] | None = None):
+    """Load a modified config with the specified merge strategy for groups.
+
+    When priority is given, it is written into the groups priority block so the
+    priority-strategy tests can assert the configured winner.
+    """
+    priority_line = ""
+    if priority is not None:
+        items = ", ".join(priority)
+        priority_line = f"\n    priority: [{items}]"
+
     yaml_content = f"""
 defaults:
   source_weights:
@@ -33,7 +42,7 @@ defaults:
 
 attributes:
   groups:
-    merge_strategy: {strategy}
+    merge_strategy: {strategy}{priority_line}
     rationale: "test"
 
 enrichment:
@@ -718,22 +727,23 @@ class TestPriorityMergeSources:
     """Priority strategy: sources lists all protocols in the groups_map.
 
     WHY: §5.5 — sources records provenance for consumers; the priority strategy
-    selects the first non-empty source by sorted key order, but all contributing
-    protocols are still recorded in sources (matching union/intersection behaviour).
+    selects the first non-empty source from the configured priority list, but all
+    contributing protocols are still recorded in sources (matching union/intersection
+    behaviour). When no priority is configured, sorted-key order is the fallback.
     """
 
-    def test_priority_sources_lists_all_contributing_protocols(self) -> None:
-        """sources lists every protocol in the groups_map, not only the winner.
+    def test_priority_configured_winner_wins(self) -> None:
+        """When priority=[oidc, ldap], oidc wins even though ldap sorts first.
 
-        ldap=['engineering', 'vpn-users'] wins (sorts first), oidc=['admin']
-        is present but loses. Both must appear in sources since both contributed
-        groups to the resolution — consumers need full provenance.
-        sources must be sorted alphabetically for deterministic output.
+        WHY: Priority strategy must consult the configured priority list, not
+        just sort the source keys. Without this fix, the priority knob is ignored
+        and sorted-key alphabetical order always decides.
         """
         from app.resolution import resolve
         from naas_shared.models import ListMergeResolution
 
-        cfg = _load_config_with_strategy("priority")
+        # oidc is priority-1; ldap is priority-2; sorted-key order would pick ldap
+        cfg = _load_config_with_strategy("priority", priority=["oidc", "ldap"])
         result = resolve(
             attribute_sources={
                 "groups": {
@@ -750,29 +760,91 @@ class TestPriorityMergeSources:
         assert isinstance(detail, ListMergeResolution), (
             f"Expected ListMergeResolution for priority strategy, got {type(detail)!r}."
         )
-        # ldap sorts before oidc → ldap's list is selected
-        assert detail.resolved_value == ["engineering", "vpn-users"], (
-            f"Expected priority winner ldap=['engineering', 'vpn-users'], "
+        # oidc is first in configured priority → oidc wins
+        assert detail.resolved_value == ["admin"], (
+            f"Expected configured priority winner oidc=['admin'], "
             f"got {detail.resolved_value!r}."
         )
-        assert detail.strategy == "priority", (
-            f"Expected strategy='priority', got {detail.strategy!r}."
-        )
+        assert detail.strategy == "priority"
         assert detail.sources == ["ldap", "oidc"], (
-            f"Expected sources=['ldap', 'oidc'] (both protocols recorded, sorted), "
+            f"Expected sources=['ldap', 'oidc'] (all protocols, sorted), "
             f"got {detail.sources!r}."
         )
 
-    def test_priority_sources_three_protocols(self) -> None:
-        """sources includes all three protocols when three contribute groups.
+    def test_priority_top_source_absent_falls_to_next(self) -> None:
+        """When the priority-1 source is absent, priority-2 source wins.
 
-        saml sorts first (lexicographic), so saml's list wins the priority merge.
+        WHY: Priority list walk must skip sources not in groups_map; it should not
+        silently return an empty list or crash.
+        """
+        from app.resolution import resolve
+        from naas_shared.models import ListMergeResolution
+
+        # saml is priority-1 but absent; ldap is priority-2 and present
+        cfg = _load_config_with_strategy("priority", priority=["saml", "ldap", "oidc"])
+        result = resolve(
+            attribute_sources={
+                "groups": {
+                    "oidc": ["admin"],
+                    "ldap": ["engineering"],
+                    # saml intentionally absent
+                }
+            },
+            config=cfg,
+            source_protocol="oidc",
+            enrichment=_applied_enrichment(),
+        )
+
+        detail = result.resolution_details["groups"]
+        assert isinstance(detail, ListMergeResolution)
+        # saml absent → ldap (priority-2) wins
+        assert detail.resolved_value == ["engineering"], (
+            f"When priority-1 source is absent, priority-2 must win. "
+            f"Got: {detail.resolved_value!r}"
+        )
+
+    def test_priority_no_config_falls_back_to_sorted_key_order(self) -> None:
+        """When no priority is configured, sorted source key order is the fallback.
+
+        WHY: When priority=[] (no groups priority in the YAML), the code falls
+        back to sorted key order. ldap sorts before oidc → ldap wins.
+        """
+        from app.resolution import resolve
+        from naas_shared.models import ListMergeResolution
+
+        # No priority configured — fallback to sorted-key order
+        cfg = _load_config_with_strategy("priority", priority=None)
+        result = resolve(
+            attribute_sources={
+                "groups": {
+                    "oidc": ["admin"],
+                    "ldap": ["engineering", "vpn-users"],
+                }
+            },
+            config=cfg,
+            source_protocol="oidc",
+            enrichment=_applied_enrichment(),
+        )
+
+        detail = result.resolution_details["groups"]
+        assert isinstance(detail, ListMergeResolution)
+        # No priority configured: sorted key order → ldap < oidc → ldap wins
+        assert detail.resolved_value == ["engineering", "vpn-users"], (
+            f"Without configured priority, sorted-key fallback must pick ldap. "
+            f"Got: {detail.resolved_value!r}"
+        )
+        assert detail.sources == ["ldap", "oidc"]
+
+    def test_priority_sources_three_protocols_configured_winner(self) -> None:
+        """sources includes all three protocols; configured priority winner wins.
+
+        priority=[saml, ldap, oidc] → saml wins (even though ldap sorts first).
         All three protocols still appear in sources for full provenance.
         """
         from app.resolution import resolve
         from naas_shared.models import ListMergeResolution
 
-        cfg = _load_config_with_strategy("priority")
+        cfg = _load_config_with_strategy("priority", priority=["saml", "ldap", "oidc"])
         result = resolve(
             attribute_sources={
                 "groups": {
@@ -787,12 +859,11 @@ class TestPriorityMergeSources:
         )
 
         detail = result.resolution_details["groups"]
-        assert isinstance(detail, ListMergeResolution), (
-            f"Expected ListMergeResolution, got {type(detail)!r}."
-        )
-        # ldap < oidc < saml alphabetically → ldap's list selected
-        assert detail.resolved_value == ["engineering"], (
-            f"Expected priority winner ldap=['engineering'], got {detail.resolved_value!r}."
+        assert isinstance(detail, ListMergeResolution)
+        # saml is priority-1 and present → saml wins
+        assert detail.resolved_value == ["finance-team", "vpn-users"], (
+            f"Expected configured priority winner saml=['finance-team','vpn-users'], "
+            f"got {detail.resolved_value!r}."
         )
         assert detail.sources == ["ldap", "oidc", "saml"], (
             f"Expected sources=['ldap', 'oidc', 'saml'] (all three protocols recorded), "

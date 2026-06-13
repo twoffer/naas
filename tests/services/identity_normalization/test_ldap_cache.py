@@ -7,58 +7,10 @@ from unittest.mock import MagicMock
 # third-party
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Shared helpers (duplicated for module isolation)
-# ---------------------------------------------------------------------------
-
-
-def _make_fake_ldap_module() -> MagicMock:
-    """Build a minimal fake ldap module."""
-    fake_ldap = MagicMock(name="ldap")
-    fake_ldap.SCOPE_SUBTREE = 2
-
-    class LDAPError(Exception):
-        pass
-
-    class TIMEOUT_EXCEEDED(LDAPError):
-        pass
-
-    class SERVER_DOWN(LDAPError):
-        pass
-
-    class NO_SUCH_OBJECT(LDAPError):
-        pass
-
-    class OPERATIONS_ERROR(LDAPError):
-        pass
-
-    fake_ldap.LDAPError = LDAPError
-    fake_ldap.TIMEOUT_EXCEEDED = TIMEOUT_EXCEEDED
-    fake_ldap.SERVER_DOWN = SERVER_DOWN
-    fake_ldap.NO_SUCH_OBJECT = NO_SUCH_OBJECT
-    fake_ldap.OPERATIONS_ERROR = OPERATIONS_ERROR
-
-    fake_filter = MagicMock(name="ldap.filter")
-    fake_filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
-    fake_ldap.filter = fake_filter
-
-    fake_dn = MagicMock(name="ldap.dn")
-    fake_ldap.dn = fake_dn
-
-    return fake_ldap
-
-
-def _inject_fake_ldap(monkeypatch) -> MagicMock:
-    """Inject fake ldap into sys.modules and clear cached app.adapters.ldap."""
-    fake_ldap = _make_fake_ldap_module()
-    monkeypatch.setitem(sys.modules, "ldap", fake_ldap)
-    monkeypatch.setitem(sys.modules, "ldap.filter", fake_ldap.filter)
-    monkeypatch.setitem(sys.modules, "ldap.dn", fake_ldap.dn)
-    for key in list(sys.modules.keys()):
-        if key == "app.adapters.ldap" or key == "app.adapters":
-            monkeypatch.delitem(sys.modules, key, raising=False)
-    return fake_ldap
+from tests.services.identity_normalization.conftest import (
+    FakeRedis as _FakeRedis,
+    inject_fake_ldap as _inject_fake_ldap,
+)
 
 
 def _make_ldap_result(
@@ -78,23 +30,12 @@ def _make_ldap_result(
     return [(dn, attrs)]
 
 
-class _FakeRedis:
-    """Fake async Redis client that records get/set/setex calls."""
+# _make_fake_ldap_module kept for the one test that re-injects mid-test.
+def _make_fake_ldap_module() -> MagicMock:
+    """Build a fresh fake ldap module (used by the mid-test re-inject contrast test)."""
+    from tests.services.identity_normalization.conftest import make_fake_ldap_module
 
-    def __init__(self, get_return=None):
-        self._get_return = get_return
-        self.get_calls: list = []
-        self.set_calls: list = []  # records (key, value, ttl) tuples
-
-    async def get(self, key: str):
-        self.get_calls.append(key)
-        return self._get_return
-
-    async def setex(self, key: str, ttl: int, value):
-        self.set_calls.append({"key": key, "ttl": ttl, "value": value})
-
-    async def set(self, key: str, value, ex=None):
-        self.set_calls.append({"key": key, "ttl": ex, "value": value})
+    return make_fake_ldap_module()
 
 
 # ===========================================================================
@@ -734,6 +675,83 @@ class TestCacheWrites:
 # ===========================================================================
 
 
+class TestCacheTtlPassthrough:
+    """cache_ttl_seconds kwarg must be used as the Redis TTL, not a hardcoded default.
+
+    WHY (Change 1b): The cache_ttl_seconds was accepted as a parameter but the
+    previous implementation always wrote with _DEFAULT_CACHE_TTL. Now the caller
+    passes the YAML-configured value per-call and it must be used exactly.
+    """
+
+    async def test_positive_match_writes_exact_cache_ttl(self, monkeypatch) -> None:
+        """A positive LDAP match must be cached with the exact cache_ttl_seconds passed."""
+        fake_ldap = _inject_fake_ldap(monkeypatch)
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
+
+        conn_mock = MagicMock()
+        conn_mock.simple_bind_s = MagicMock(return_value=None)
+        conn_mock.search_s = MagicMock(
+            return_value=[
+                (
+                    "uid=alice,ou=users,dc=corp,dc=com",
+                    {
+                        "cn": [b"Alice Smith"],
+                        "mail": [b"alice@corp.com"],
+                        "departmentNumber": [b"Engineering"],
+                        "employeeType": [b"FTE"],
+                    },
+                )
+            ]
+        )
+        fake_ldap.initialize = MagicMock(return_value=conn_mock)
+
+        fake_redis = _FakeRedis(get_return=None)
+        monkeypatch.setattr(
+            "naas_shared.redis_client.get_redis",
+            MagicMock(return_value=fake_redis),
+        )
+
+        from app.adapters.ldap import LdapAdapter
+
+        adapter = LdapAdapter()
+        await adapter.enrich("primary_email", "alice@corp.com", cache_ttl_seconds=120)
+
+        assert len(fake_redis.set_calls) >= 1, "A positive match must write to cache"
+        ttl_used = fake_redis.set_calls[0]["ttl"]
+        assert ttl_used == 120, (
+            f"Cache write must use the exact cache_ttl_seconds=120 passed in, "
+            f"got TTL={ttl_used!r}"
+        )
+
+    async def test_negative_match_writes_exact_cache_ttl(self, monkeypatch) -> None:
+        """A no-match LDAP result must be cached with the exact cache_ttl_seconds passed."""
+        fake_ldap = _inject_fake_ldap(monkeypatch)
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
+
+        conn_mock = MagicMock()
+        conn_mock.simple_bind_s = MagicMock(return_value=None)
+        conn_mock.search_s = MagicMock(return_value=[])
+        fake_ldap.initialize = MagicMock(return_value=conn_mock)
+
+        fake_redis = _FakeRedis(get_return=None)
+        monkeypatch.setattr(
+            "naas_shared.redis_client.get_redis",
+            MagicMock(return_value=fake_redis),
+        )
+
+        from app.adapters.ldap import LdapAdapter
+
+        adapter = LdapAdapter()
+        await adapter.enrich("primary_email", "ghost@corp.com", cache_ttl_seconds=30)
+
+        assert len(fake_redis.set_calls) >= 1, "A no-match must write sentinel to cache"
+        ttl_used = fake_redis.set_calls[0]["ttl"]
+        assert ttl_used == 30, (
+            f"Negative cache sentinel must use the exact cache_ttl_seconds=30 passed in, "
+            f"got TTL={ttl_used!r}"
+        )
+
+
 class TestTransientFailureNotCached:
     """Transient LDAP failures must NOT write to the Redis cache.
 
@@ -780,7 +798,7 @@ class TestTransientFailureNotCached:
         )
 
     async def test_ldap_timeout_does_not_write_to_cache(self, monkeypatch) -> None:
-        """TIMEOUT_EXCEEDED error must not write any sentinel to Redis.
+        """ldap.TIMEOUT error must not write any sentinel to Redis.
 
         WHY: A timeout is transient (network congestion, LDAP load spike). Caching
         the timeout result would prevent successful enrichment for 60 seconds after
@@ -791,9 +809,7 @@ class TestTransientFailureNotCached:
 
         conn_mock = MagicMock()
         conn_mock.simple_bind_s = MagicMock(return_value=None)
-        conn_mock.search_s = MagicMock(
-            side_effect=fake_ldap.TIMEOUT_EXCEEDED("timed out")
-        )
+        conn_mock.search_s = MagicMock(side_effect=fake_ldap.TIMEOUT("timed out"))
         fake_ldap.initialize = MagicMock(return_value=conn_mock)
 
         fake_redis = _FakeRedis(get_return=None)
@@ -808,7 +824,7 @@ class TestTransientFailureNotCached:
         await adapter.enrich("primary_email", "alice@corp.com")
 
         assert len(fake_redis.set_calls) == 0, (
-            f"A TIMEOUT_EXCEEDED error must NOT write to Redis cache. "
+            f"A ldap.TIMEOUT error must NOT write to Redis cache. "
             f"Got {len(fake_redis.set_calls)} write(s): {fake_redis.set_calls}."
         )
 
@@ -838,6 +854,60 @@ class TestTransientFailureNotCached:
         assert len(fake_redis.set_calls) == 0, (
             f"An OPERATIONS_ERROR (search error) must NOT write to Redis cache. "
             f"Got {len(fake_redis.set_calls)} write(s): {fake_redis.set_calls}."
+        )
+
+    async def test_corrupted_cache_entry_is_deleted_before_live_query(
+        self, monkeypatch
+    ) -> None:
+        """A corrupted cache entry must be deleted so the next call gets a clean miss.
+
+        WHY (Change 4a): Without deleting the corrupt key before the live query,
+        a subsequent call for the same user would hit the corrupt entry again,
+        always falling through to LDAP instead of caching. The delete ensures
+        the live query result is cached normally.
+        """
+        fake_ldap = _inject_fake_ldap(monkeypatch)
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
+
+        conn_mock = MagicMock()
+        conn_mock.simple_bind_s = MagicMock(return_value=None)
+        conn_mock.search_s = MagicMock(return_value=[])
+        fake_ldap.initialize = MagicMock(return_value=conn_mock)
+
+        corrupted = b"not-valid-json-{{{"
+
+        delete_calls: list = []
+
+        class DeletableRedis(_FakeRedis):
+            async def delete(self, key: str):
+                delete_calls.append(key)
+
+        fake_redis = DeletableRedis(get_return=corrupted)
+        monkeypatch.setattr(
+            "naas_shared.redis_client.get_redis",
+            MagicMock(return_value=fake_redis),
+        )
+
+        from app.adapters.ldap import LdapAdapter
+
+        adapter = LdapAdapter()
+        await adapter.enrich("primary_email", "alice@corp.com")
+
+        # The corrupt key must have been deleted
+        assert len(delete_calls) >= 1, (
+            "A corrupted cache entry must trigger redis.delete(cache_key) before the "
+            "live query, so the result can be cached cleanly. No delete was called."
+        )
+        from naas_shared.constants import LDAP_ENRICHMENT_CACHE_PREFIX
+
+        expected_key = f"{LDAP_ENRICHMENT_CACHE_PREFIX}alice@corp.com"
+        assert expected_key in delete_calls, (
+            f"delete must be called with the corrupt cache key {expected_key!r}. "
+            f"Got delete calls: {delete_calls}"
+        )
+        # Live query must still have been called (not short-circuited)
+        assert conn_mock.search_s.called, (
+            "After deleting the corrupt cache entry, the live LDAP query must still run"
         )
 
     async def test_no_match_sentinel_is_written_but_not_on_error(

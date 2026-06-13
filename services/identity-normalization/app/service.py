@@ -1,8 +1,8 @@
 """NormalizationService and NormalizationPublisher for the Identity Normalization Service.
 
 NormalizationService wires adapter selection, LDAP enrichment, and conflict
-resolution (chunks 1-5) into a single async `normalize()` entry point called
-by the consumer loop (chunk 6).
+resolution into a single async `normalize()` entry point called by the
+consumer layer.
 
 NormalizationPublisher satisfies the EventPublisher port: it sets
 record.normalized_attributes and publishes the full LoginEventRecord to
@@ -38,8 +38,11 @@ class NormalizationService:
     tests can mock enrich() without importing python-ldap.
 
     WHY a service class: the consumer loop constructs one instance at startup
-    and reuses it across all messages — stateless within a single normalize()
-    call but the adapters themselves may maintain connection pools (LdapAdapter).
+    and reuses it across all messages.  The service is stateless per normalize()
+    call except for `_ldap_connection_degraded`, which tracks whether an LDAP
+    connection error has already been logged at ERROR level so that repeated
+    connection failures after the first are demoted to DEBUG (state-change
+    logging — single-threaded asyncio, no locking required).
     """
 
     def __init__(
@@ -53,6 +56,7 @@ class NormalizationService:
         self._oidc_adapter = oidc_adapter
         self._saml_adapter = saml_adapter
         self._ldap_adapter = ldap_adapter
+        self._ldap_connection_degraded: bool = False
 
     async def normalize(self, record: LoginEventRecord) -> NormalizedAttributes:
         """Extract, enrich, and resolve attributes for a single login event.
@@ -151,7 +155,11 @@ class NormalizationService:
         # Call enrich — graceful degradation on ANY exception
         try:
             attrs, outcome = await self._ldap_adapter.enrich(
-                correlation_key, lookup_value
+                correlation_key,
+                lookup_value,
+                cache_ttl_seconds=ldap_cfg.cache_ttl_seconds,
+                timeout_ms=ldap_cfg.timeout_ms,
+                enrich_attributes=ldap_cfg.enrich_attributes,
             )
         except Exception as exc:
             log.error(
@@ -173,20 +181,29 @@ class NormalizationService:
 
         On a match, merges ldap attrs into attribute_sources as the "ldap" source.
         Log levels follow §5.4: no_ldap_match→INFO, timeout/invalid→WARNING,
-        connection/search errors→ERROR.
+        connection errors→ERROR on first occurrence then DEBUG (state-change logging),
+        search errors→ERROR.
+
+        On any successful LDAP outcome (match or no-match, i.e. evidence LDAP is
+        reachable), clears the _ldap_connection_degraded flag and logs INFO recovery
+        if it was previously set.
         """
         if outcome == "ldap_match":
             if attrs:
                 _merge_ldap_attrs(attrs, attribute_sources)
+            self._clear_ldap_degraded(log)
             return EnrichmentApplied(applied=True, source="ldap", cache_hit=False)
 
         if outcome == "cache_hit_positive":
             if attrs:
                 _merge_ldap_attrs(attrs, attribute_sources)
+            # Cache hits don't prove LDAP is reachable; don't clear degraded flag.
             return EnrichmentApplied(applied=True, source="ldap", cache_hit=True)
 
         if outcome in ("ldap_no_match", "cache_hit_negative"):
             log.info("ldap_enrichment_no_match", outcome=outcome)
+            if outcome == "ldap_no_match":
+                self._clear_ldap_degraded(log)
             return EnrichmentSkipped(applied=False, skip_reason="no_ldap_match")
 
         if outcome == "ldap_timeout":
@@ -194,12 +211,22 @@ class NormalizationService:
             return EnrichmentSkipped(applied=False, skip_reason="ldap_timeout")
 
         if outcome == "ldap_connection_error":
-            log.error("ldap_enrichment_connection_error")
+            if not self._ldap_connection_degraded:
+                log.error("ldap_enrichment_connection_error")
+                self._ldap_connection_degraded = True
+            else:
+                log.debug("ldap_enrichment_connection_error")
             return EnrichmentSkipped(applied=False, skip_reason="ldap_connection_error")
 
         # ldap_search_error, ldap_unexpected_error, unmappable_field → catch-all
         log.error("ldap_enrichment_error", outcome=outcome)
         return EnrichmentSkipped(applied=False, skip_reason="ldap_search_error")
+
+    def _clear_ldap_degraded(self, log: Any) -> None:
+        """Log recovery and clear the degraded flag if LDAP was previously down."""
+        if self._ldap_connection_degraded:
+            log.info("ldap_enrichment_recovered")
+            self._ldap_connection_degraded = False
 
 
 class NormalizationPublisher:

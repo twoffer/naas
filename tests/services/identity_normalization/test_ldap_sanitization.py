@@ -1,75 +1,14 @@
 """LDAP injection sanitization in LdapAdapter.enrich(): escape_filter_chars contract."""
 
-import sys
 from unittest.mock import MagicMock
 
 # third-party
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Shared helpers (duplicated for module isolation)
-# ---------------------------------------------------------------------------
-
-
-def _make_fake_ldap_module() -> MagicMock:
-    """Build a fake 'ldap' MagicMock with exception classes and sub-modules."""
-    fake_ldap = MagicMock(name="ldap")
-    fake_ldap.SCOPE_SUBTREE = 2
-
-    class LDAPError(Exception):
-        pass
-
-    class SERVER_DOWN(LDAPError):
-        pass
-
-    class TIMEOUT_EXCEEDED(LDAPError):
-        pass
-
-    class OPERATIONS_ERROR(LDAPError):
-        pass
-
-    fake_ldap.LDAPError = LDAPError
-    fake_ldap.SERVER_DOWN = SERVER_DOWN
-    fake_ldap.TIMEOUT_EXCEEDED = TIMEOUT_EXCEEDED
-    fake_ldap.OPERATIONS_ERROR = OPERATIONS_ERROR
-
-    fake_filter = MagicMock(name="ldap.filter")
-    # Default: pass-through (identity function) — overridden per test
-    fake_filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
-    fake_ldap.filter = fake_filter
-
-    fake_dn = MagicMock(name="ldap.dn")
-    fake_ldap.dn = fake_dn
-
-    return fake_ldap
-
-
-def _inject_fake_ldap(monkeypatch) -> MagicMock:
-    fake_ldap = _make_fake_ldap_module()
-    monkeypatch.setitem(sys.modules, "ldap", fake_ldap)
-    monkeypatch.setitem(sys.modules, "ldap.filter", fake_ldap.filter)
-    monkeypatch.setitem(sys.modules, "ldap.dn", fake_ldap.dn)
-    for key in list(sys.modules.keys()):
-        if key == "app.adapters.ldap" or key == "app.adapters":
-            monkeypatch.delitem(sys.modules, key, raising=False)
-    return fake_ldap
-
-
-class _FakeRedis:
-    """Minimal fake async Redis — always returns cache miss, records set calls."""
-
-    def __init__(self):
-        self.set_calls: list = []
-
-    async def get(self, key: str):
-        return None  # always miss → forces LDAP query path
-
-    async def setex(self, key: str, ttl: int, value):
-        self.set_calls.append({"key": key, "ttl": ttl, "value": value})
-
-    async def set(self, key: str, value, ex=None):
-        self.set_calls.append({"key": key, "ttl": ex, "value": value})
+from tests.services.identity_normalization.conftest import (
+    FakeRedis as _FakeRedis,
+    inject_fake_ldap as _inject_fake_ldap,
+)
 
 
 # ===========================================================================
@@ -258,23 +197,24 @@ class TestFilterUsesEscapedValue:
     async def test_ldap_metacharacters_are_not_interpolated_raw(
         self, monkeypatch, dangerous_char: str
     ) -> None:
-        """LDAP metacharacters in lookup_value must not appear raw in the filter.
+        """LDAP metacharacters in lookup_value must be escaped in the value slot.
 
         WHY: LDAP filter injection (analogous to SQL injection) occurs when
         metacharacters change the filter's logical structure. The RFC 4515
         metacharacters are: * ( ) \\ NUL. An unescaped '*' in the value changes
         a presence assertion to a wildcard; '(' and ')' can close/open filter
-        terms. This test confirms no raw metacharacter survives to the filter.
+        terms. This test confirms the value slot uses the escaped output.
 
-        NOTE: We assert the CONTRACT (escape_filter_chars was called, raw char
-        not present) not the exact RFC escaping (that's the real library's job).
+        Assertion strategy: the escape function replaces each metachar with
+        ESCxxx in the value slot, so we assert:
+          1. The full filter matches the expected RFC 4515 form
+             f"({ldap_attr}={escaped_value})".
+          2. The raw dangerous char does not appear in the value slot
+             (the part after '=' and before the closing ')').
         """
         fake_ldap = _inject_fake_ldap(monkeypatch)
 
-        # Use a transformation that removes the dangerous char from output
-        # to simulate what a real escape function would do
         def neutralizing_escape(value: str) -> str:
-            # Replace each metachar with its placeholder for test purposes
             return value.replace(dangerous_char, f"ESC{ord(dangerous_char)}")
 
         fake_ldap.filter.escape_filter_chars = MagicMock(
@@ -301,8 +241,10 @@ class TestFilterUsesEscapedValue:
 
         from app.adapters.ldap import LdapAdapter
 
-        # Craft a lookup value containing the metacharacter
         raw_lookup = f"user{dangerous_char}inject"
+        escaped_lookup = neutralizing_escape(raw_lookup)
+        ldap_attr = "mail"  # primary_email → mail
+
         adapter = LdapAdapter()
         await adapter.enrich("primary_email", raw_lookup)
 
@@ -310,14 +252,21 @@ class TestFilterUsesEscapedValue:
             "search_s must be called for a valid correlation_field"
         )
         filter_str = search_calls[0]
+        expected_filter = f"({ldap_attr}={escaped_lookup})"
 
-        # The raw dangerous char must not appear in the filter
-        # (the neutralizing_escape replaced it with ESCxxx)
-        assert dangerous_char not in filter_str, (
-            f"LDAP metacharacter {dangerous_char!r} must not appear raw in the filter. "
+        assert filter_str == expected_filter, (
+            f"Filter must be {expected_filter!r} (RFC 4515 form with escaped value). "
             f"Got filter: {filter_str!r}. "
-            f"The escape_filter_chars output must be used, not the raw lookup_value. "
             f"This is a security requirement — raw interpolation allows LDAP injection."
+        )
+
+        # Extra safety: the raw dangerous payload must not appear in the value slot
+        # (the part between '=' and the trailing ')').
+        value_slot = filter_str[len(f"({ldap_attr}=") : -1]
+        assert dangerous_char not in value_slot, (
+            f"Raw metacharacter {dangerous_char!r} must not appear in the value slot. "
+            f"Value slot: {value_slot!r}. "
+            f"escape_filter_chars output must be used, not the raw lookup_value."
         )
 
     async def test_injection_attempt_does_not_bypass_correlation(

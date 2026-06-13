@@ -25,8 +25,10 @@ import json
 import socket
 
 import pydantic
+import structlog
 
 import naas_shared.redis_client as _redis_mod
+from app.ports import EventPublisher, Normalizer, NormalizationRepository
 from naas_shared.constants import GROUP_NORMALIZATION, STREAM_LOGIN_EVENTS
 from naas_shared.logging import get_logger
 from naas_shared.models import LoginEventRecord
@@ -42,9 +44,9 @@ _logger = get_logger(__name__)
 
 
 async def run_consumer_loop(
-    service: object,
-    repository: object,
-    publisher: object,
+    service: Normalizer,
+    repository: NormalizationRepository,
+    publisher: EventPublisher,
     redis: object | None = None,
 ) -> None:
     """Process login events from the Redis Stream indefinitely.
@@ -124,11 +126,11 @@ async def _process_message(
     *,
     msg_id: str,
     fields: dict,
-    service: object,
-    repository: object,
-    publisher: object,
+    service: Normalizer,
+    repository: NormalizationRepository,
+    publisher: EventPublisher,
     redis: object,
-    log: object,
+    log: structlog.stdlib.BoundLogger,
 ) -> None:
     """Handle one stream message end-to-end.
 

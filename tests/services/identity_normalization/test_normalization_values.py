@@ -1133,3 +1133,174 @@ class TestNormalizeDepartmentValue:
         assert result == expected, (
             f"normalize_department_value({raw!r}) expected {expected!r}, got {result!r}."
         )
+
+
+# ===========================================================================
+# CLASS 9 — Exact-equality guards for DEPARTMENT_CANONICAL and EMPLOYEE_TYPE_CANONICAL
+# ===========================================================================
+
+
+class TestDepartmentCanonicalExactEquality:
+    """DEPARTMENT_CANONICAL must equal EXACTLY the dict transcribed from spec §5.2.
+
+    WHY: The spec marks these dicts [TRANSCRIBE EXACTLY].  Any rogue added alias,
+    removed alias, or changed canonical value is a security-relevant deviation —
+    it could cause two protocols that should agree ('eng' vs 'r&d') to disagree,
+    or a canonical value that should match one department to match a different one.
+
+    A rogue alias fails this test immediately, prompting review of whether it was
+    intentional and spec-compliant.
+    """
+
+    _EXPECTED_DEPARTMENT_CANONICAL: dict[str, str] = {
+        "eng": "Engineering",
+        "engineering": "Engineering",
+        "software engineering": "Engineering",
+        "r&d": "Engineering",
+        "product development": "Engineering",
+        "fin": "Finance",
+        "finance": "Finance",
+        "accounting": "Finance",
+        "hr": "Human Resources",
+        "human resources": "Human Resources",
+        "people ops": "Human Resources",
+        "it": "Information Technology",
+        "information technology": "Information Technology",
+        "infra": "Information Technology",
+        "sales": "Sales",
+        "revenue": "Sales",
+        "mktg": "Marketing",
+        "marketing": "Marketing",
+    }
+
+    def test_department_canonical_exact_equality(self) -> None:
+        """DEPARTMENT_CANONICAL must equal the exact spec §5.2 dict.
+
+        WHY: Any extra or missing alias would cause cross-protocol canonical-value
+        mismatches, silently flipping unanimous resolutions to priority-conflict
+        resolutions with a confidence penalty.  The exact set is the spec contract.
+        """
+        from app.normalization_values import DEPARTMENT_CANONICAL
+
+        assert DEPARTMENT_CANONICAL == self._EXPECTED_DEPARTMENT_CANONICAL, (
+            "DEPARTMENT_CANONICAL does not match spec §5.2 [TRANSCRIBE EXACTLY]. "
+            f"Extra keys: {set(DEPARTMENT_CANONICAL) - set(self._EXPECTED_DEPARTMENT_CANONICAL)}. "
+            f"Missing keys: {set(self._EXPECTED_DEPARTMENT_CANONICAL) - set(DEPARTMENT_CANONICAL)}. "
+            "Changed values: "
+            + repr(
+                {
+                    k: (DEPARTMENT_CANONICAL[k], self._EXPECTED_DEPARTMENT_CANONICAL[k])
+                    for k in self._EXPECTED_DEPARTMENT_CANONICAL
+                    if k in DEPARTMENT_CANONICAL
+                    and DEPARTMENT_CANONICAL[k] != self._EXPECTED_DEPARTMENT_CANONICAL[k]
+                }
+            )
+        )
+
+
+class TestEmployeeTypeCanonicalExactEquality:
+    """EMPLOYEE_TYPE_CANONICAL must equal EXACTLY the dict transcribed from spec §5.2.
+
+    WHY: The canonical targets are 'FTE', 'contractor', 'vendor' — these are the
+    Literal values in NormalizedAttributes.employee_type.  Any rogue added alias
+    mapping to an unexpected string would produce a non-Literal value that fails
+    Pydantic model construction.  Any removed alias would cause a known employee type
+    to be discarded to None, potentially bypassing access controls that check the field.
+    """
+
+    _EXPECTED_EMPLOYEE_TYPE_CANONICAL: dict[str, str] = {
+        "fte": "FTE",
+        "e": "FTE",
+        "employee": "FTE",
+        "full-time": "FTE",
+        "full time": "FTE",
+        "regular": "FTE",
+        "contractor": "contractor",
+        "c": "contractor",
+        "contract": "contractor",
+        "contingent": "contractor",
+        "temp": "contractor",
+        "vendor": "vendor",
+        "v": "vendor",
+        "external": "vendor",
+        "partner": "vendor",
+        "third-party": "vendor",
+    }
+
+    def test_employee_type_canonical_exact_equality(self) -> None:
+        """EMPLOYEE_TYPE_CANONICAL must equal the exact spec §5.2 dict.
+
+        WHY: Any deviation (rogue alias, missing alias, wrong canonical target) is
+        a security-relevant change — an employee type that should map to 'contractor'
+        might map to 'FTE' (privilege escalation) or be discarded (access denial).
+        The exact dict is the spec contract; any change requires a spec review.
+        """
+        from app.normalization_values import EMPLOYEE_TYPE_CANONICAL
+
+        assert EMPLOYEE_TYPE_CANONICAL == self._EXPECTED_EMPLOYEE_TYPE_CANONICAL, (
+            "EMPLOYEE_TYPE_CANONICAL does not match spec §5.2 [TRANSCRIBE EXACTLY]. "
+            f"Extra keys: {set(EMPLOYEE_TYPE_CANONICAL) - set(self._EXPECTED_EMPLOYEE_TYPE_CANONICAL)}. "
+            f"Missing keys: {set(self._EXPECTED_EMPLOYEE_TYPE_CANONICAL) - set(EMPLOYEE_TYPE_CANONICAL)}. "
+            "Changed values: "
+            + repr(
+                {
+                    k: (
+                        EMPLOYEE_TYPE_CANONICAL[k],
+                        self._EXPECTED_EMPLOYEE_TYPE_CANONICAL[k],
+                    )
+                    for k in self._EXPECTED_EMPLOYEE_TYPE_CANONICAL
+                    if k in EMPLOYEE_TYPE_CANONICAL
+                    and EMPLOYEE_TYPE_CANONICAL[k]
+                    != self._EXPECTED_EMPLOYEE_TYPE_CANONICAL[k]
+                }
+            )
+        )
+
+
+# ===========================================================================
+# CLASS 10 — _was_department_mapped round-trip invariant
+# ===========================================================================
+
+
+class TestWasDepartmentMappedRoundTrip:
+    """DEPARTMENT_CANONICAL values satisfy the round-trip invariant that _was_department_mapped depends on.
+
+    service.py:_was_department_mapped(normalized_value) works by running
+    DEPARTMENT_CANONICAL.get(normalized_value.strip().lower()) and checking if the
+    result equals normalized_value.  This requires every canonical VALUE in
+    DEPARTMENT_CANONICAL to be present as a KEY when lowercased.
+
+    Example: 'Engineering' is a value; 'engineering' is a key → round-trip works.
+    Violation example: adding a value 'ENG' with no 'eng' key would cause
+    _was_department_mapped('ENG') to return False even for a mapped canonical value.
+
+    WHY: If this invariant is violated, the _was_department_mapped derivation in
+    _build_attribute_sources silently returns was_mapped=False for a value that WAS
+    a recognized canonical, incorrectly applying the -0.2 confidence penalty to
+    correctly normalized department values.  This degrades confidence scoring without
+    any visible error and would be very hard to diagnose.
+    """
+
+    def test_every_canonical_department_value_round_trips(self) -> None:
+        """Every VALUE in DEPARTMENT_CANONICAL satisfies CANONICAL.get(value.lower()) == value.
+
+        This asserts the property that _was_department_mapped silently depends on.
+        Adding a new canonical value that violates it would corrupt confidence scoring
+        for any event whose department normalizes to that value.
+        """
+        from app.normalization_values import DEPARTMENT_CANONICAL
+
+        for alias_key, canonical_value in DEPARTMENT_CANONICAL.items():
+            lookup_key = canonical_value.strip().lower()
+            round_trip = DEPARTMENT_CANONICAL.get(lookup_key)
+            assert round_trip == canonical_value, (
+                f"Round-trip invariant violated: DEPARTMENT_CANONICAL[{alias_key!r}] = "
+                f"{canonical_value!r}, but DEPARTMENT_CANONICAL.get({lookup_key!r}) = "
+                f"{round_trip!r} != {canonical_value!r}. "
+                f"The canonical value {canonical_value!r} must have its own lowercase key "
+                f"({lookup_key!r}) in DEPARTMENT_CANONICAL so that "
+                f"_was_department_mapped({canonical_value!r}) correctly returns True. "
+                "Adding a canonical value that violates this would silently apply the "
+                "-0.2 confidence penalty to correctly normalized department values, "
+                "corrupting normalization_confidence scores without any visible error."
+            )

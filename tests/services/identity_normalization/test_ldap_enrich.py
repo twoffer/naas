@@ -1,92 +1,17 @@
 """LdapAdapter.enrich(): LDAP search, attribute extraction, and cache write mechanics."""
 
-import sys
 from unittest.mock import AsyncMock, MagicMock
 
 # third-party
 import pytest
 
-
-# ---------------------------------------------------------------------------
-# Shared fake-ldap injection helpers
-# ---------------------------------------------------------------------------
-
-
-def _make_fake_ldap_module() -> MagicMock:
-    """Build a fake 'ldap' MagicMock that mimics the minimal ldap API used by enrich().
-
-    The fake provides:
-    - ldap.SCOPE_SUBTREE = 2
-    - ldap.filter.escape_filter_chars (a real callable — controlled in per-test setup)
-    - ldap.dn.dn2str (unused directly but present so no AttributeError)
-    - ldap.initialize(uri) → a connection mock
-    - ldap.LDAPError base exception class
-    - ldap.TIMEOUT_EXCEEDED (int sentinel, per python-ldap convention)
-    - ldap.SERVER_DOWN (int sentinel)
-    - ldap.NO_SUCH_OBJECT (int sentinel)
-    """
-    fake_ldap = MagicMock(name="ldap")
-    fake_ldap.SCOPE_SUBTREE = 2
-
-    # Exception classes — must be real classes so except clauses work
-    class LDAPError(Exception):
-        pass
-
-    class TIMEOUT_EXCEEDED(LDAPError):
-        pass
-
-    class SERVER_DOWN(LDAPError):
-        pass
-
-    class NO_SUCH_OBJECT(LDAPError):
-        pass
-
-    class OPERATIONS_ERROR(LDAPError):
-        pass
-
-    fake_ldap.LDAPError = LDAPError
-    fake_ldap.TIMEOUT_EXCEEDED = TIMEOUT_EXCEEDED
-    fake_ldap.SERVER_DOWN = SERVER_DOWN
-    fake_ldap.NO_SUCH_OBJECT = NO_SUCH_OBJECT
-    fake_ldap.OPERATIONS_ERROR = OPERATIONS_ERROR
-
-    # ldap.filter sub-module
-    fake_filter = MagicMock(name="ldap.filter")
-    # Default pass-through: escape_filter_chars returns the input unchanged
-    fake_filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
-    fake_ldap.filter = fake_filter
-
-    # ldap.dn sub-module
-    fake_dn = MagicMock(name="ldap.dn")
-    fake_ldap.dn = fake_dn
-
-    return fake_ldap
-
-
-def _inject_fake_ldap(monkeypatch) -> MagicMock:
-    """Inject fake ldap modules into sys.modules and return the top-level mock.
-
-    The injection must happen before importing app.adapters.ldap (or the cached
-    import must be cleared so it re-imports with the fake in place).
-    """
-    fake_ldap = _make_fake_ldap_module()
-    monkeypatch.setitem(sys.modules, "ldap", fake_ldap)
-    monkeypatch.setitem(sys.modules, "ldap.filter", fake_ldap.filter)
-    monkeypatch.setitem(sys.modules, "ldap.dn", fake_ldap.dn)
-    # Clear any cached app.adapters.ldap import so the next import re-evaluates
-    for key in list(sys.modules.keys()):
-        if key == "app.adapters.ldap" or key == "app.adapters":
-            monkeypatch.delitem(sys.modules, key, raising=False)
-    return fake_ldap
+from tests.services.identity_normalization.conftest import inject_fake_ldap
 
 
 def _make_fake_redis(get_return=None, set_calls=None) -> MagicMock:
-    """Build a fake async Redis client.
+    """Build a fake async Redis client (legacy helper — new tests use FakeRedis).
 
-    Args:
-        get_return: What redis.get() returns (None = miss, b'"null"' = negative hit,
-                    JSON bytes = positive hit).
-        set_calls: A list to record (key, value, ex=ttl) calls for assertion.
+    Kept for tests that assert on a shared list passed in via set_calls.
     """
     fake_redis = AsyncMock(name="redis")
 
@@ -106,6 +31,10 @@ def _make_fake_redis(get_return=None, set_calls=None) -> MagicMock:
     fake_redis.set = AsyncMock(side_effect=fake_set)
 
     return fake_redis
+
+
+# Alias so test bodies that call _inject_fake_ldap continue to work unchanged.
+_inject_fake_ldap = inject_fake_ldap
 
 
 # ---------------------------------------------------------------------------
@@ -667,7 +596,7 @@ class TestEnrichNoMatchAndErrors:
         )
 
     async def test_enrich_ldap_timeout_returns_none(self, monkeypatch) -> None:
-        """An LDAP timeout (TIMEOUT_EXCEEDED) must not propagate out of enrich().
+        """An LDAP client timeout (ldap.TIMEOUT) must not propagate out of enrich().
 
         WHY: The config specifies timeout_ms (§5.6). A timeout is a transient
         condition. The event must still be published downstream with primary-
@@ -678,9 +607,7 @@ class TestEnrichNoMatchAndErrors:
 
         conn_mock = MagicMock()
         conn_mock.simple_bind_s = MagicMock(return_value=None)
-        conn_mock.search_s = MagicMock(
-            side_effect=fake_ldap.TIMEOUT_EXCEEDED("query timed out")
-        )
+        conn_mock.search_s = MagicMock(side_effect=fake_ldap.TIMEOUT("query timed out"))
         fake_ldap.initialize = MagicMock(return_value=conn_mock)
 
         fake_redis = _make_fake_redis(get_return=None)
@@ -696,11 +623,10 @@ class TestEnrichNoMatchAndErrors:
 
         assert attrs is None, (
             f"enrich() must return attrs=None on LDAP timeout, "
-            f"not propagate TIMEOUT_EXCEEDED. Got: {attrs!r}"
+            f"not propagate ldap.TIMEOUT. Got: {attrs!r}"
         )
         assert outcome == "ldap_timeout", (
-            f"enrich() outcome must be 'ldap_timeout' on TIMEOUT_EXCEEDED, "
-            f"got {outcome!r}"
+            f"enrich() outcome must be 'ldap_timeout' on ldap.TIMEOUT, got {outcome!r}"
         )
 
     async def test_enrich_unexpected_exception_returns_none(self, monkeypatch) -> None:
@@ -737,4 +663,245 @@ class TestEnrichNoMatchAndErrors:
         assert outcome == "ldap_unexpected_error", (
             f"enrich() outcome must be 'ldap_unexpected_error' on unexpected exception, "
             f"got {outcome!r}"
+        )
+
+
+# ===========================================================================
+# CLASS 5 — timeout_ms is applied to new connections
+# ===========================================================================
+
+
+class TestTimeoutOption:
+    """When a new connection is created, set_option must be called with the timeout.
+
+    WHY (Change 1): timeout_ms is a config knob that was always validated but never
+    applied. The connection must call conn.set_option(OPT_NETWORK_TIMEOUT, ...) and
+    conn.set_option(OPT_TIMEOUT, ...) derived from timeout_ms before simple_bind_s.
+    """
+
+    async def test_set_option_called_with_opt_network_timeout(
+        self, monkeypatch
+    ) -> None:
+        """OPT_NETWORK_TIMEOUT must be set on the connection using timeout_ms."""
+        fake_ldap = _inject_fake_ldap(monkeypatch)
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
+        fake_ldap.OPT_NETWORK_TIMEOUT = 20  # fake constant value
+        fake_ldap.OPT_TIMEOUT = 30
+
+        set_option_calls: list = []
+
+        conn_mock = MagicMock()
+        conn_mock.simple_bind_s = MagicMock(return_value=None)
+        conn_mock.search_s = MagicMock(return_value=[])
+        conn_mock.set_option = MagicMock(
+            side_effect=lambda opt, val: set_option_calls.append((opt, val))
+        )
+        fake_ldap.initialize = MagicMock(return_value=conn_mock)
+
+        fake_redis = _make_fake_redis(get_return=None)
+        monkeypatch.setattr(
+            "naas_shared.redis_client.get_redis",
+            MagicMock(return_value=fake_redis),
+        )
+
+        from app.adapters.ldap import LdapAdapter
+
+        adapter = LdapAdapter()
+        await adapter.enrich("primary_email", "alice@corp.com", timeout_ms=3000)
+
+        opt_keys = [opt for opt, _ in set_option_calls]
+        assert fake_ldap.OPT_NETWORK_TIMEOUT in opt_keys, (
+            "set_option must be called with OPT_NETWORK_TIMEOUT when creating a connection"
+        )
+        assert fake_ldap.OPT_TIMEOUT in opt_keys, (
+            "set_option must be called with OPT_TIMEOUT when creating a connection"
+        )
+
+        # Verify the timeout value is timeout_ms / 1000.0
+        net_timeout_val = next(
+            val for opt, val in set_option_calls if opt == fake_ldap.OPT_NETWORK_TIMEOUT
+        )
+        assert net_timeout_val == pytest.approx(3.0), (
+            f"OPT_NETWORK_TIMEOUT must be timeout_ms/1000.0 = 3.0, got {net_timeout_val!r}"
+        )
+
+
+# ===========================================================================
+# CLASS 6 — enrich_attributes restricts the attrlist
+# ===========================================================================
+
+
+class TestEnrichAttributes:
+    """enrich_attributes restricts the LDAP attrlist to the specified unified fields.
+
+    WHY (Change 1): enrich_attributes is a config knob that was validated but never
+    applied. When set, only the specified unified fields (reverse-mapped to LDAP
+    attrs) should be fetched. When None, all five LDAP attrs are fetched (sorted).
+    """
+
+    async def test_enrich_attributes_none_fetches_all_five_sorted(
+        self, monkeypatch
+    ) -> None:
+        """When enrich_attributes is None, all five LDAP attrs are fetched, sorted."""
+        fake_ldap = _inject_fake_ldap(monkeypatch)
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
+
+        search_calls: list = []
+
+        conn_mock = MagicMock()
+        conn_mock.simple_bind_s = MagicMock(return_value=None)
+
+        def recording_search(base_dn, scope, filter_str, attrlist=None):
+            search_calls.append({"attrlist": attrlist})
+            return []
+
+        conn_mock.search_s = MagicMock(side_effect=recording_search)
+        fake_ldap.initialize = MagicMock(return_value=conn_mock)
+
+        fake_redis = _make_fake_redis(get_return=None)
+        monkeypatch.setattr(
+            "naas_shared.redis_client.get_redis",
+            MagicMock(return_value=fake_redis),
+        )
+
+        from app.adapters.ldap import LdapAdapter
+        from app.normalization_values import UNIFIED_TO_LDAP
+
+        adapter = LdapAdapter()
+        await adapter.enrich("primary_email", "alice@corp.com", enrich_attributes=None)
+
+        assert len(search_calls) == 1, "search_s must be called once"
+        attrlist = search_calls[0]["attrlist"]
+        expected = sorted(UNIFIED_TO_LDAP.values())
+        assert attrlist == expected, (
+            f"enrich_attributes=None must fetch all five attrs sorted: {expected!r}. "
+            f"Got: {attrlist!r}"
+        )
+
+    async def test_enrich_attributes_subset_restricts_attrlist(
+        self, monkeypatch
+    ) -> None:
+        """enrich_attributes=['primary_email','department'] → attrlist=['departmentNumber','mail']."""
+        fake_ldap = _inject_fake_ldap(monkeypatch)
+        fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=lambda v: v)
+
+        search_calls: list = []
+
+        conn_mock = MagicMock()
+        conn_mock.simple_bind_s = MagicMock(return_value=None)
+
+        def recording_search(base_dn, scope, filter_str, attrlist=None):
+            search_calls.append({"attrlist": attrlist})
+            return []
+
+        conn_mock.search_s = MagicMock(side_effect=recording_search)
+        fake_ldap.initialize = MagicMock(return_value=conn_mock)
+
+        fake_redis = _make_fake_redis(get_return=None)
+        monkeypatch.setattr(
+            "naas_shared.redis_client.get_redis",
+            MagicMock(return_value=fake_redis),
+        )
+
+        from app.adapters.ldap import LdapAdapter
+
+        adapter = LdapAdapter()
+        await adapter.enrich(
+            "primary_email",
+            "alice@corp.com",
+            enrich_attributes=["primary_email", "department"],
+        )
+
+        assert len(search_calls) == 1
+        attrlist = search_calls[0]["attrlist"]
+        # primary_email → mail, department → departmentNumber; sorted alphabetically
+        expected = sorted(["mail", "departmentNumber"])
+        assert attrlist == expected, (
+            f"enrich_attributes=['primary_email','department'] must produce "
+            f"attrlist={expected!r}. Got: {attrlist!r}"
+        )
+
+
+# ===========================================================================
+# CLASS 7 — _decode_first and _decode_list helpers
+# ===========================================================================
+
+
+class TestDecodeHelpers:
+    """Unit tests for _decode_first and _decode_list byte-decoding helpers.
+
+    WHY (Change 4b): These helpers must gracefully handle invalid UTF-8 bytes
+    rather than raising UnicodeDecodeError.
+    """
+
+    def test_decode_first_bytes(self) -> None:
+        """_decode_first with plain bytes returns decoded str."""
+        from app.adapters.ldap import _decode_first
+
+        assert _decode_first(b"Alice Smith") == "Alice Smith"
+
+    def test_decode_first_list_of_bytes(self) -> None:
+        """_decode_first with [bytes, ...] returns first element decoded."""
+        from app.adapters.ldap import _decode_first
+
+        assert _decode_first([b"alice@corp.com", b"other"]) == "alice@corp.com"
+
+    def test_decode_first_empty_list(self) -> None:
+        """_decode_first with empty list returns None."""
+        from app.adapters.ldap import _decode_first
+
+        assert _decode_first([]) is None
+
+    def test_decode_first_none(self) -> None:
+        """_decode_first with None returns None."""
+        from app.adapters.ldap import _decode_first
+
+        assert _decode_first(None) is None
+
+    def test_decode_first_non_bytes_non_list(self) -> None:
+        """_decode_first with a plain string returns str(value)."""
+        from app.adapters.ldap import _decode_first
+
+        assert _decode_first("Alice") == "Alice"
+
+    def test_decode_first_invalid_utf8(self) -> None:
+        """_decode_first with invalid UTF-8 bytes returns None (not UnicodeDecodeError)."""
+        from app.adapters.ldap import _decode_first
+
+        result = _decode_first(b"\xff\xfe")
+        assert result is None, (
+            f"_decode_first must return None for invalid UTF-8, got {result!r}"
+        )
+
+    def test_decode_list_bytes_items(self) -> None:
+        """_decode_list with list of bytes returns decoded strings."""
+        from app.adapters.ldap import _decode_list
+
+        assert _decode_list([b"engineering", b"admin"]) == ["engineering", "admin"]
+
+    def test_decode_list_empty(self) -> None:
+        """_decode_list with empty list returns []."""
+        from app.adapters.ldap import _decode_list
+
+        assert _decode_list([]) == []
+
+    def test_decode_list_none(self) -> None:
+        """_decode_list with None returns []."""
+        from app.adapters.ldap import _decode_list
+
+        assert _decode_list(None) == []
+
+    def test_decode_list_non_bytes_items(self) -> None:
+        """_decode_list with non-bytes items converts via str()."""
+        from app.adapters.ldap import _decode_list
+
+        assert _decode_list(["admin", "eng"]) == ["admin", "eng"]
+
+    def test_decode_list_invalid_utf8_skipped(self) -> None:
+        """_decode_list skips items with invalid UTF-8 bytes."""
+        from app.adapters.ldap import _decode_list
+
+        result = _decode_list([b"valid", b"\xff\xfe", b"also_valid"])
+        assert result == ["valid", "also_valid"], (
+            f"_decode_list must skip invalid UTF-8 items, got {result!r}"
         )

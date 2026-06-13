@@ -1,9 +1,10 @@
 """Port Protocol definitions for the Identity Normalization Service.
 
-Defines the four abstract boundaries the domain depends on — ProtocolAdapter
+Defines the five abstract boundaries the domain depends on — ProtocolAdapter
 (per-protocol attribute extraction), LdapEnricher (cross-protocol directory
-enrichment), NormalizationRepository (persistence), and EventPublisher (stream
-transport).
+enrichment), NormalizationRepository (persistence), EventPublisher (stream
+transport), and Normalizer (the service entry point consumed by the consumer
+layer).
 
 Using typing.Protocol with @runtime_checkable enables structural subtyping so
 concrete adapters and test doubles satisfy the ports without explicit inheritance.
@@ -58,6 +59,10 @@ class LdapEnricher(Protocol):
         self,
         correlation_field: str,
         lookup_value: str,
+        *,
+        cache_ttl_seconds: int = 60,
+        timeout_ms: int = 2000,
+        enrich_attributes: list[str] | None = None,
     ) -> tuple[dict | None, str]:
         """Perform an active LDAP directory query and return normalized attributes.
 
@@ -67,10 +72,14 @@ class LdapEnricher(Protocol):
         without blocking the event loop.
 
         Args:
-            correlation_field: The unified schema field used to build the LDAP
+            correlation_field:  The unified schema field used to build the LDAP
                 filter (e.g., "primary_email"). The adapter reverse-maps this to
                 the LDAP attribute name (e.g., "mail").
-            lookup_value: The value to search for (e.g., "alice@corp.com").
+            lookup_value:       The value to search for (e.g., "alice@corp.com").
+            cache_ttl_seconds:  TTL for positive and negative cache entries.
+            timeout_ms:         Network and operation timeout in milliseconds.
+            enrich_attributes:  When not None, restricts the LDAP fetch to
+                the specified unified field names; None fetches all five.
 
         Returns:
             A 2-tuple ``(attrs, outcome)`` where:
@@ -82,6 +91,31 @@ class LdapEnricher(Protocol):
                         "ldap_unexpected_error", "unmappable_field").
                         Callers use the outcome code to build the correct
                         EnrichmentSkipped skip_reason without inspecting attrs.
+        """
+        ...
+
+
+@runtime_checkable
+class Normalizer(Protocol):
+    """Port for the normalization service entry point consumed by the consumer layer.
+
+    Spec §5.1 — the consumer loop calls normalize(record) as step 1 of the
+    four-step pipeline (extract + enrich + resolve). Declared as a Protocol so
+    the consumer layer is typed without a hard import of NormalizationService.
+    """
+
+    async def normalize(self, record: "LoginEventRecord") -> "NormalizedAttributes":
+        """Extract, enrich, and resolve attributes for a single login event.
+
+        WHY: Declared async because every internal stage (LDAP enrichment via
+        asyncio.to_thread, Redis cache reads) is async. The consumer loop awaits
+        this call per message; a sync implementation would block the event loop.
+
+        Args:
+            record: The deserialized login event from the Redis Stream.
+
+        Returns:
+            NormalizedAttributes with all unified fields populated.
         """
         ...
 

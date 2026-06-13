@@ -1,16 +1,6 @@
 """naas_shared Spec 2 additions: LDAP_ENRICHMENT_CACHE_PREFIX constant and ldap_pool_size config field."""
 
-import sys
-
-# third-party
 import pytest
-
-from tests.helpers import REPO_ROOT
-
-SHARED_DIR = REPO_ROOT / "shared"
-
-if str(SHARED_DIR) not in sys.path:
-    sys.path.insert(0, str(SHARED_DIR))
 
 
 # ===========================================================================
