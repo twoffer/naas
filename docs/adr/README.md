@@ -50,6 +50,8 @@ Do not write an ADR for:
 | 0008 | [Enrich OIDC and SAML Events via Live OpenLDAP Lookup, Correlated by a Unified-Schema Key](0008-cross-protocol-ldap-enrichment.md)     | accepted | 2026-05-01 |
 | 0009 | [Use Hexagonal Architecture for Service Internals](0009-hexagonal-service-architecture.md)                                             | accepted | 2026-05-01 |
 | 0010 | [Accept Only IPv4 Addresses for Login-Event `client_ip` in the Initial Release](0010-ipv4-only-client-ip.md)                           | accepted | 2026-06-03 |
+| 0011 | [Carry the Full Event Record as the Payload on Every Pipeline Stream](0011-full-event-record-on-pipeline-streams.md)                   | accepted | 2026-06-04 |
+| 0012 | [Pin Python Dependencies via Compiled Lockfiles for Reproducible Builds](0012-dependency-pinning-reproducible-builds.md)               | accepted | 2026-06-15 |
 
 ## Template
 
