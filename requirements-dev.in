@@ -4,8 +4,13 @@
 # This is a pip-compile INPUT — declared minimum-version floors, not exact pins.
 # The fully-pinned lockfile it generates is requirements-dev.txt; regenerate that
 # after editing this file (see DEPENDENCIES.md).
-# shared/pyproject.toml is compiled in alongside this file so the lock also pins
-# the runtime closure the unit tests import.
+# naas-shared (./shared) is referenced as a local path dependency below so the
+# lock also pins the runtime closure the unit tests import. It is the SOLE
+# compile input — Dependabot reproduces a single-input pip-compile command from
+# the lockfile header; a second positional input (e.g. shared/pyproject.toml) is
+# silently dropped on regeneration, deleting the whole shared closure. The
+# package itself is suppressed from the lock via --unsafe-package=naas-shared
+# (an editable local path is not a portable pin); only its dependencies pin.
 pytest>=8.3.4
 pytest-asyncio>=0.25.0
 pytest-cov>=6.0.0
@@ -21,8 +26,11 @@ httpx>=0.28.1
 psycopg[binary]>=3.3.4
 rich>=13.9.4
 # Unit tests import services/*/app code. Almost all of its deps are declared by
-# naas-shared and reach this lock via shared/pyproject.toml (compiled in above);
-# pyyaml is the one exception — identity-normalization's config loader imports
-# yaml at module level but it is a service-only dep, not a shared one. Service
+# naas-shared and reach this lock via the ./shared path dependency below; pyyaml
+# is the one exception — identity-normalization's config loader imports yaml at
+# module level but it is a service-only dep, not a shared one. Service
 # requirements.in files remain container-runtime-only.
 pyyaml>=6.0.3
+# Local path dependency: pins naas-shared's runtime closure (fastapi, pydantic,
+# sqlalchemy, asyncpg, redis, structlog, …) into this lock. See header comment.
+./shared

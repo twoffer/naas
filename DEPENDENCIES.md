@@ -20,18 +20,42 @@ service image.
 
   | Lockfile | Compiled from | Installed by |
   |----------|---------------|--------------|
-  | `requirements-dev.txt` | `requirements-dev.in` + `shared/pyproject.toml` | CI unit + integration jobs |
-  | `services/event-ingestion/requirements.txt` | that service's `requirements.in` + `shared/pyproject.toml` | `services/event-ingestion/Dockerfile` |
-  | `services/identity-normalization/requirements.txt` | that service's `requirements.in` + `shared/pyproject.toml` | `services/identity-normalization/Dockerfile` |
+  | `requirements-dev.txt` | `requirements-dev.in` (pins shared via `./shared`) | CI unit + integration jobs |
+  | `services/event-ingestion/requirements.txt` | that service's `requirements.in` (pins shared via `./shared`) | `services/event-ingestion/Dockerfile` |
+  | `services/identity-normalization/requirements.txt` | that service's `requirements.in` (pins shared via `./shared`) | `services/identity-normalization/Dockerfile` |
   | `demo/requirements.txt` | `demo/requirements.in` | `demo/README.md` |
 
-Each service lock is compiled with `shared/pyproject.toml` as a second input so
-it pins **shared's entire transitive closure**, not just the service's own two or
-three lines. The service images therefore install the lock first, then the shared
-package editable with `pip install -e shared/ --no-deps` — the lock already pins
-shared's dependencies, so `--no-deps` keeps the locked versions authoritative and
-prevents any re-resolution. The dev lock works the same way for the unit tests,
-which import the shared package and the service `app/` code.
+Each lock that needs shared lists it as the local path dependency `./shared` in
+its `.in`, so the lock pins **shared's entire transitive closure**, not just the
+service's own two or three lines. `./shared` is the *only* compile input — shared
+itself is suppressed from the lock with `--unsafe-package=naas-shared` (a local
+path is not a portable pin; `pip` and `setuptools` are suppressed the same way as
+build backends). A single input is deliberate (see the callout below). Folding
+shared in as `./shared` keeps the closure inside a `.in` input Dependabot does
+compile, while the suppression flags survive in the header. The service images
+install the lock first, then the shared package editable
+with `pip install -e shared/ --no-deps` — the lock already pins shared's
+dependencies, so `--no-deps` keeps the locked versions authoritative and prevents
+any re-resolution. The dev lock works the same way for the unit tests, which
+import the shared package and the service `app/` code.
+
+> **⚠️ Do not "simplify" this back to the two-input form**
+> (`pip-compile … <service>/requirements.in shared/pyproject.toml`). It looks
+> tidier and compiles to the same lock by hand, but it silently breaks Dependabot.
+> When Dependabot regenerates a lock it does **not** replay the header's command.
+> It splits the two concerns:
+> - **Inputs** come only from the dependency's `*.in` files (it filters
+>   `filenames_to_compile` to `*.in`) — *never* from the header's positional args.
+>   A `shared/pyproject.toml` passed positionally is invisible to it, so the whole
+>   shared closure (fastapi, pydantic, sqlalchemy, …) is dropped from the
+>   regenerated lock. This actually happened — see the history of this file.
+> - **Options** (`--unsafe-package`, `--strip-extras`, `--generate-hashes`, …) are
+>   re-derived by regex-scanning the committed lock's header comment lines. The
+>   `--unsafe-package` scan is a `.scan().uniq`, so all three of ours survive.
+>
+> The `./shared` path dependency lives in a `.in` (an input Dependabot compiles)
+> and the `--unsafe-package` flags live in the header (which it scans), so both
+> halves of the lock regenerate correctly. The two-input form satisfies neither.
 
 The dev lock is a superset of `demo/requirements.txt` (the demo harness deps are
 floored in `requirements-dev.in` as well), so CI installs the dev lock alone and
@@ -61,12 +85,13 @@ an otherwise-correct lock.
 Then run the compile(s) for whatever you changed (from the repo root):
 
 ```bash
-pip-compile --strip-extras --output-file=requirements-dev.txt \
-    requirements-dev.in shared/pyproject.toml
-pip-compile --strip-extras --output-file=services/event-ingestion/requirements.txt \
-    services/event-ingestion/requirements.in shared/pyproject.toml
-pip-compile --strip-extras --output-file=services/identity-normalization/requirements.txt \
-    services/identity-normalization/requirements.in shared/pyproject.toml
+UNSAFE="--unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools"
+pip-compile --strip-extras $UNSAFE \
+    --output-file=requirements-dev.txt requirements-dev.in
+pip-compile --strip-extras $UNSAFE \
+    --output-file=services/event-ingestion/requirements.txt services/event-ingestion/requirements.in
+pip-compile --strip-extras $UNSAFE \
+    --output-file=services/identity-normalization/requirements.txt services/identity-normalization/requirements.in
 pip-compile --strip-extras --output-file=demo/requirements.txt \
     demo/requirements.in
 ```
