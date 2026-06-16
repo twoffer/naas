@@ -5,7 +5,7 @@
 - **Keycloak DB strategy:** Use built-in H2 dev database (no KC_DB* vars). Realm imported on every start via `--import-realm`.
 - **Keycloak healthcheck:** TCP-based approach is fragile. Fallback: `test: ["CMD-SHELL", "true"]` with `start_period: 90s`. Do not spend >20min debugging.
 - **OpenLDAP LDIF:** Do NOT include base DN (`dc=corp,dc=com`) -- image creates it from `LDAP_DOMAIN`. OUs before users (order-sensitive).
-- **Shared library copy-at-build pattern:** `COPY shared/ /app/shared/` + `pip install -e /app/shared/` in each service Dockerfile, with the compose `build.context` set to the repo root (`.`) so `shared/` is in the build context. The image is self-contained — NO runtime `./shared:/app/shared` volume mount.
+- **Shared library copy-at-build pattern:** install the service lockfile (`pip install -r requirements.txt`), then `COPY shared/ /app/shared/` + `pip install -e /app/shared/ --no-deps` in each service Dockerfile (the lock pins shared's closure; `--no-deps` keeps it authoritative — ADR-0012), with the compose `build.context` set to the repo root (`.`) so `shared/` is in the build context. The image is self-contained — NO runtime `./shared:/app/shared` volume mount.
 - **schemas.py:** Placeholder only in Spec 0. ORM models deferred to Spec 1.
 - **ml_features.py / simulation_tools.py:** In §1 file tree but §3 defines no content and §6.6 doesn't import them. Decision: create as importable placeholder modules (deferral comment only), like schemas.py. Real content owned by Spec 3 (ml_features) and persona-simulator track (simulation_tools P0 defs). Surface as a flagged decision, not a silent guess.
 - **config.py transcription bug:** Spec §3.8 snippet uses `Field`/`Optional` (LLM fields) but its import block omits them. Implementer MUST add `from pydantic import Field` and `from typing import Optional` or §6.6 import test fails.
@@ -54,4 +54,4 @@
 ## Cross-Service Import Contract (from Spec 0 Section 4)
 
 Every service imports from `naas_shared`: config, constants, models, database, redis_client, logging.
-Copy-at-build: `COPY shared/ /app/shared/` + `pip install -e /app/shared/` in every Dockerfile, compose `build.context: .` (repo root) so `shared/` is in the build context. Self-contained image; no `./shared:/app/shared` runtime volume mount.
+Copy-at-build: install the service lockfile (`pip install -r requirements.txt`), then `COPY shared/ /app/shared/` + `pip install -e /app/shared/ --no-deps` in every Dockerfile (the lock pins shared's closure; `--no-deps` keeps it authoritative — ADR-0012), compose `build.context: .` (repo root) so `shared/` is in the build context. Self-contained image; no `./shared:/app/shared` runtime volume mount.

@@ -1,0 +1,6 @@
+# demo harness floors (compile input) — declared minimum versions, not exact
+# pins. pip-compile generates the pinned requirements.txt lockfile from this
+# file. Regenerate after editing — see DEPENDENCIES.md.
+rich>=13.9.4
+httpx>=0.28.1
+psycopg[binary]>=3.3.4

@@ -15,7 +15,8 @@ This spec **creates** the following:
 ```
 services/event-ingestion/
 ├── Dockerfile                  # Option A build (repo-root context); establishes the service-image pattern
-├── requirements.txt            # service-direct deps (fastapi, uvicorn); data-layer deps come via naas_shared
+├── requirements.in             # service-direct dependency floors (fastapi, uvicorn); data-layer deps owned by naas_shared
+├── requirements.txt            # pip-compiled lock (requirements.in + shared/pyproject.toml); full pinned closure (ADR-0012)
 └── app/
     ├── __init__.py
     ├── main.py                 # composition root: app factory, lifespan, dependency wiring, router mount
@@ -328,13 +329,18 @@ The shared library is **copied into the image at build time** and installed; the
 FROM python:3.12-slim
 WORKDIR /app
 
-# Shared library first — changes least often, best layer caching.
-COPY shared/ /app/shared/
-RUN pip install --no-cache-dir -e /app/shared/
-
-# Service deps, then service code.
+# Pinned dependency closure first — the compiled lockfile (service deps +
+# shared's full transitive closure). This is the heavy, slowest-changing layer.
 COPY services/event-ingestion/requirements.txt /app/svc/requirements.txt
 RUN pip install --no-cache-dir -r /app/svc/requirements.txt
+
+# Shared library installed editable WITHOUT deps — the lockfile above already
+# pins shared's third-party closure, so --no-deps keeps the locked versions
+# authoritative and prevents re-resolution (ADR-0012).
+COPY shared/ /app/shared/
+RUN pip install --no-cache-dir -e /app/shared/ --no-deps
+
+# Service code last — changes most often.
 COPY services/event-ingestion/app/ /app/svc/app/
 
 # The service needs no root privileges at runtime; switch to a dedicated user.
@@ -347,7 +353,7 @@ EXPOSE 8001
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
 ```
 
-`services/event-ingestion/requirements.txt` lists the service-direct dependencies only — `fastapi` and `uvicorn[standard]` (pinned per the project tech stack). The data-layer dependencies (SQLAlchemy, asyncpg, redis, pydantic, pydantic-settings, structlog) are pulled in transitively by installing `naas_shared`; add one here only if the shared install does not already provide it.
+Dependencies follow the repo-wide lockfile posture (ADR-0012). `services/event-ingestion/requirements.in` declares the service-direct **floors** only — `fastapi` and `uvicorn[standard]`; the data-layer dependencies (SQLAlchemy, asyncpg, redis, pydantic, pydantic-settings, structlog) are owned by `naas_shared` and are not redeclared here. `services/event-ingestion/requirements.txt` is the pip-compiled **lock** (from that `.in` plus `shared/pyproject.toml`); it pins the full transitive closure, which is why the image installs it first and then adds `naas_shared` editable with `--no-deps`. See `DEPENDENCIES.md` for the regenerate workflow.
 
 `.dockerignore` at the repo root (keeps the build context lean — all service builds share it):
 

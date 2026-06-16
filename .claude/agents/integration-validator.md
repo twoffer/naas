@@ -35,7 +35,7 @@ Never skip levels. Stop if Level N has blocking failures.
    ```
    docker exec [container] python -c "from naas_shared.config import get_settings; print(get_settings().database_url)"
    ```
-   If this fails, the shared package was not copied into the image at build time (`COPY shared/` + `pip install -e`) and NO service will function.
+   If this fails, the shared package was not copied into the image at build time (`COPY shared/` + `pip install -e ... --no-deps`) and NO service will function.
 
 ### LEVEL 2 — Pipeline Flow
 

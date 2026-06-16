@@ -1,0 +1,7 @@
+# event-ingestion service runtime floors (compile input).
+# pip-compile generates the pinned requirements.txt lockfile from this file plus
+# shared/pyproject.toml (the shared package's runtime closure). Install path:
+# `pip install -r requirements.txt` then `pip install -e shared/ --no-deps`.
+# Regenerate the lock after editing — see DEPENDENCIES.md.
+fastapi>=0.115
+uvicorn[standard]>=0.30

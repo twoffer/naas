@@ -48,7 +48,7 @@ For every integration point, specify:
 For new services, include:
 - `Dockerfile` contents (base image, deps, CMD)
 - `docker-compose.yml` entry (ports, volumes, depends_on, healthcheck, env vars)
-- Shared package copied in at build time for `naas_shared/` if applicable (`COPY shared/ /app/shared/` + `pip install -e /app/shared/`, compose `build.context: .`), not a runtime volume mount
+- Shared package copied in at build time for `naas_shared/` if applicable: install the service lockfile first, then `COPY shared/ /app/shared/` + `pip install -e /app/shared/ --no-deps` (the lock already pins shared's closure, so `--no-deps` keeps the locked versions authoritative — ADR-0012); compose `build.context: .`, not a runtime volume mount
 
 ### 5. Dependency Sequencing
 - Sequence steps for individual testability — no big-bang assembly

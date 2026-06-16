@@ -1,0 +1,54 @@
+# Dependabot keeps the pinned dependency set current under review (ADR-0012):
+# it opens CI-gated pull requests proposing newer versions instead of letting a
+# fresh install silently re-resolve. For the pip ecosystem it reads the
+# pip-compile header in each generated lockfile (*.txt) and regenerates the lock
+# with the newer version.
+#
+# `versioning-strategy: lockfile-only` keeps each PR to the lock alone — it does
+# NOT ratchet up the `>=` floors in the *.in / shared/pyproject.toml inputs. The
+# floors stay as declared minimums (their whole point), and a routine update is a
+# clean lock-only diff. Raising a floor — declaring that we now *require* a newer
+# version — stays a deliberate human edit (regenerate-and-commit per ADR-0012).
+#
+# Cadence: monthly + grouped, to keep routine freshness churn low. This handles
+# NON-security freshness only. Time-critical CVE fixes come from a SEPARATE
+# channel — Dependabot *security* updates — which is enabled in the repo UI
+# (Settings → Code security → Dependabot security updates; needs Dependabot
+# alerts on), not here, and opens PRs immediately regardless of this schedule.
+# See DEPENDENCIES.md "Update policy".
+version: 2
+updates:
+  # Python dependencies. One entry covering every directory that holds a
+  # compile input or generated lockfile.
+  - package-ecosystem: "pip"
+    directories:
+      - "/"                                  # requirements-dev.{in,txt}
+      - "/shared"                            # pyproject.toml (shared runtime floors)
+      - "/demo"                              # demo harness lock
+      - "/services/event-ingestion"          # service lock
+      - "/services/identity-normalization"   # service lock
+    schedule:
+      interval: "monthly"
+    # Only move the lockfile; leave the *.in / pyproject.toml floors untouched
+    # (they are declared minimums, not current pins). See the header comment.
+    versioning-strategy: lockfile-only
+    open-pull-requests-limit: 10
+    groups:
+      # Collapse the routine churn (minor + patch across all packages) into a
+      # single PR per directory; majors stay separate for individual review.
+      python-minor-and-patch:
+        update-types:
+          - "minor"
+          - "patch"
+
+  # GitHub Actions used by .github/workflows/ci.yml. The workflow SHA-pins its
+  # actions for supply-chain hardening; Dependabot keeps those SHAs current and
+  # annotates the human-readable version alongside each bump.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    groups:
+      github-actions:
+        patterns:
+          - "*"

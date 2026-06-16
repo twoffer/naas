@@ -9,14 +9,18 @@ metadata:
 
 Use `sys.path.insert(0, str(REPO_ROOT / "shared"))` at module level. This allows tests
 to resolve `naas_shared` imports once `shared/naas_shared/` source exists, without
-requiring `pip install -e shared/` to be run first. Mirrors the §6.6 shell smoke test
+requiring the editable install to be run first. Mirrors the §6.6 shell smoke test
 (`cd shared && python3 -c "..."`).
 
-**Why:** The test venv (requirements-dev.txt) contains only pytest tools — pydantic,
-structlog, sqlalchemy, etc. are NOT pre-installed. Tests fail with two layered errors
-in TDD state: first `ModuleNotFoundError: No module named 'naas_shared'` (no source),
-then `ModuleNotFoundError: No module named 'pydantic'` (no runtime deps). Both resolve
-when the implementer runs `pip install -e shared/`.
+**Why:** It decouples the tests from install state — in the pure TDD moment, the
+`naas_shared` source exists but nothing is installed, and the sys.path insert resolves
+it from source. Note the dependency posture has since changed (ADR-0012): the dev
+lockfile `requirements-dev.txt` (compiled from `requirements-dev.in` + `shared/pyproject.toml`)
+now pins shared's full runtime closure (pydantic, sqlalchemy, structlog, ...), so a venv
+built from it already has those deps, and the package itself is installed with
+`pip install -e shared/ --no-deps`. The old two-layered failure (first no `naas_shared`,
+then no `pydantic`) no longer occurs once the dev lock is installed; only the source
+resolution the sys.path insert provides is still relevant in the pre-install TDD state.
 
 ## lru_cache fixture pattern for Settings
 

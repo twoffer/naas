@@ -125,9 +125,11 @@ class TestEndpointSurface:
         """Return non-OpenAPI APIRoute instances from the app."""
         from fastapi.routing import APIRoute
 
+        from tests.helpers import iter_routes
+
         return [
             r
-            for r in app.routes
+            for r in iter_routes(app.routes)
             if isinstance(r, APIRoute) and r.path not in self._OPENAPI_PATHS
         ]
 
