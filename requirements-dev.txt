@@ -99,7 +99,7 @@ pyyaml==6.0.3
     # via -r requirements-dev.in
 redis==8.0.0
     # via naas-shared
-rich==13.9.4
+rich==15.0.0
     # via -r requirements-dev.in
 ruff==0.15.17
     # via -r requirements-dev.in
