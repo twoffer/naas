@@ -1,9 +1,16 @@
 # identity-normalization service runtime floors (compile input).
-# pip-compile generates the pinned requirements.txt lockfile from this file plus
-# shared/pyproject.toml (the shared package's runtime closure). Install path:
-# `pip install -r requirements.txt` then `pip install -e shared/ --no-deps`.
+# pip-compile generates the pinned requirements.txt lockfile from this file. The
+# ./shared local path dependency below pins the shared package's runtime closure
+# and is the SOLE compile input, so Dependabot reproduces a single-input
+# pip-compile from the lock header (a second positional input is silently dropped
+# on regeneration, deleting the whole closure). shared itself is suppressed via
+# --unsafe-package=naas-shared (a local path is not a portable pin); only its
+# dependencies pin. Install path: `pip install -r requirements.txt` then
+# `pip install -e shared/ --no-deps`.
 # Regenerate the lock after editing — see DEPENDENCIES.md.
 fastapi>=0.115
 uvicorn[standard]>=0.30
 python-ldap>=3.4
 pyyaml>=6.0
+# Pins naas-shared's runtime closure into this lock. See header comment.
+./shared

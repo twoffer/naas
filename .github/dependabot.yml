@@ -16,11 +16,18 @@
 # (Settings → Code security → Dependabot security updates; needs Dependabot
 # alerts on), not here, and opens PRs immediately regardless of this schedule.
 # See DEPENDENCIES.md "Update policy".
+#
+# `target-branch: main` on every entry pins version-update PRs to `main`
+# explicitly instead of inferring the repository default branch, so the target
+# is unambiguous and stable regardless of repo settings. NOTE: this governs the
+# scheduled VERSION updates configured here only — Dependabot *security* updates
+# always open against the repository default branch and ignore target-branch.
 version: 2
 updates:
   # Python dependencies. One entry covering every directory that holds a
   # compile input or generated lockfile.
   - package-ecosystem: "pip"
+    target-branch: "main"
     directories:
       - "/"                                  # requirements-dev.{in,txt}
       - "/shared"                            # pyproject.toml (shared runtime floors)
@@ -45,6 +52,7 @@ updates:
   # actions for supply-chain hardening; Dependabot keeps those SHAs current and
   # annotates the human-readable version alongside each bump.
   - package-ecosystem: "github-actions"
+    target-branch: "main"
     directory: "/"
     schedule:
       interval: "monthly"

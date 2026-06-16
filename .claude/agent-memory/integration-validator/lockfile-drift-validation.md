@@ -21,9 +21,10 @@ false positives.
 - Correct: recompile IN PLACE (output = the committed lock), then `git diff`. This is
   exactly the CI sequence. On PR #22 this produced ZERO drift (clean working tree).
 - The four compile commands (run from repo root, `.venv` active; pin all 3 resolver tools to match CI: `pip==26.1.2 setuptools==82.0.1 pip-tools==7.5.3`):
-  - `pip-compile --strip-extras -o requirements-dev.txt requirements-dev.in shared/pyproject.toml -q`
-  - `pip-compile --strip-extras -o services/event-ingestion/requirements.txt services/event-ingestion/requirements.in shared/pyproject.toml -q`
-  - `pip-compile --strip-extras -o services/identity-normalization/requirements.txt services/identity-normalization/requirements.in shared/pyproject.toml -q`
+  - shared is now folded into each `.in` as the `./shared` path dep (single input, so Dependabot can't drop it on regen); suppress it + build backends with `--unsafe-package`. Let `U="--unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools"`:
+  - `pip-compile --strip-extras $U -o requirements-dev.txt requirements-dev.in -q`
+  - `pip-compile --strip-extras $U -o services/event-ingestion/requirements.txt services/event-ingestion/requirements.in -q`
+  - `pip-compile --strip-extras $U -o services/identity-normalization/requirements.txt services/identity-normalization/requirements.in -q`
   - `pip-compile --strip-extras -o demo/requirements.txt demo/requirements.in -q`
   - identity-normalization needs python-ldap metadata; resolves fine in dev venv (no install).
 - Restore after: `git checkout -- <the four .txt files>` (in-place recompile may touch them).
