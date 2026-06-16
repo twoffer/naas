@@ -15,7 +15,7 @@ h11==0.16.0
 httpcore==1.0.9
     # via httpx
 httpx==0.28.1
-    # via -r demo/requirements.in
+    # via -r requirements.in
 idna==3.18
     # via
     #   anyio
@@ -25,13 +25,13 @@ markdown-it-py==4.2.0
 mdurl==0.1.2
     # via markdown-it-py
 psycopg==3.3.4
-    # via -r demo/requirements.in
+    # via -r requirements.in
 psycopg-binary==3.3.4
     # via psycopg
 pygments==2.20.0
     # via rich
-rich==13.9.4
-    # via -r demo/requirements.in
+rich==15.0.0
+    # via -r requirements.in
 typing-extensions==4.15.0
     # via
     #   anyio
