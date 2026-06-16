@@ -50,8 +50,13 @@ skew resolution):
 
 ```bash
 python3 -m venv /tmp/naas-lock && source /tmp/naas-lock/bin/activate
-pip install pip-tools==7.5.3
+pip install pip==26.1.2 setuptools==82.0.1 pip-tools==7.5.3
 ```
+
+Pin `pip` and `setuptools` alongside `pip-tools` (as above and in the CI
+`lockfiles` job): `pip-compile` resolves package metadata through them, so an
+unpinned upgrade can re-resolve the closure and produce a spurious diff against
+an otherwise-correct lock.
 
 Then run the compile(s) for whatever you changed (from the repo root):
 
@@ -76,6 +81,13 @@ lock.
 
 `pip-compile` keeps the existing pins unless you pass `--upgrade`, so re-running
 it without a floor change produces no diff — the lock is deterministic.
+
+> **Recompile in place.** This pin-preservation only happens when the
+> `--output-file` target already exists and is read first. Always compile onto
+> the committed lock (the commands above run from the repo root, so they do).
+> Compiling to a *fresh* or empty path re-resolves everything to latest and will
+> show large false drift — the CI `lockfiles` job recompiles in place for this
+> reason.
 
 ## Guardrails
 

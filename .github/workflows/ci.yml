@@ -71,7 +71,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libldap2-dev libsasl2-dev
 
       - name: Install pip-tools
-        run: pip install pip-tools==7.5.3
+        # Pin pip and setuptools too, not just pip-tools: pip-compile resolves
+        # package metadata through them, so an unpinned runner upgrade could
+        # re-resolve the closure and fail this job on an unchanged, correct lock.
+        run: pip install pip==26.1.2 setuptools==82.0.1 pip-tools==7.5.3
 
       - name: Recompile lockfiles
         run: |
