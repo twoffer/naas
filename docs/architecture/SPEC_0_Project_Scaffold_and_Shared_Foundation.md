@@ -897,8 +897,10 @@ def get_settings() -> Settings:
 This IS the shared imports spec. All subsequent specs import from `naas_shared`:
 
 ```python
-# The shared package is copied into each service image and installed at build time
-# (pip install -e on the copied shared/ dir); it is NOT listed in requirements.txt.
+# The shared package is copied into each service image and installed editable at
+# build time (`pip install -e shared/ --no-deps`); the package itself is not a line
+# in requirements.txt, but its third-party dependencies ARE pinned there by the
+# compiled lock (ADR-0012) — which is why the editable install uses --no-deps.
 
 # Standard imports available to all services:
 from naas_shared.database import get_db_session, get_engine
@@ -926,8 +928,13 @@ build:
 
 ```dockerfile
 # Each service's Dockerfile (paths relative to the repo-root build context):
+# Install the compiled lockfile first — it pins shared's full transitive closure —
+# then install shared editable WITHOUT deps so the locked versions stay
+# authoritative (ADR-0012; see DEPENDENCIES.md).
+COPY services/<service-name>/requirements.txt /app/svc/requirements.txt
+RUN pip install -r /app/svc/requirements.txt
 COPY shared/ /app/shared/
-RUN pip install -e /app/shared/
+RUN pip install -e /app/shared/ --no-deps
 ```
 
 A repo-root `.dockerignore` keeps the build context lean.
@@ -1466,7 +1473,7 @@ This section exists because AI agents love to be helpful, which sometimes means 
 - **Do NOT create CI/CD pipelines.** No `.github/workflows/`.
 - **Do NOT create test files.** No `tests/` directories, no `pytest.ini`, no `conftest.py`. Testing comes with each service spec. (Note: this constraint was superseded in execution by the agentic pipeline's TDD mandate — chunk-level tests were created during Spec 0 implementation and live under `tests/`.)
 - **Do NOT add Nginx or Traefik.** No reverse proxy. The API Gateway (Spec 5) handles routing.
-- **Do NOT install the shared library globally.** It's installed in editable mode inside each service's container. Local development can use `pip install -e shared/` from the repo root.
+- **Do NOT install the shared library globally.** It's installed in editable mode inside each service's container. Local development installs it editable from the repo root with `pip install -e shared/ --no-deps` after installing the dev lockfile (which pins its dependencies — see `DEPENDENCIES.md`).
 - **Do NOT create a Makefile.** Docker Compose commands are sufficient.
 - **Do NOT add docker-compose profiles or override files.** One `docker-compose.yml` is enough.
 - **Do NOT pre-create Redis Streams or consumer groups.** Streams are created lazily by XADD. Consumer groups are created by each service on startup via `ensure_consumer_group()`.
@@ -1487,7 +1494,7 @@ The SYSTEM_ARCHITECTURE.md lists `user_agent TEXT` in the events schema, but the
 SYSTEM_ARCHITECTURE.md defines `shadow_decision` and `shadow_score` columns, but the Implementation Guide's DDL omits them. **Resolution:** Included in this spec's DDL.
 
 **Gap 4: Shared library packaging.**
-The project documents mention a `shared/` library but never specify how it's packaged or installed. **Resolution:** This spec defines it as a pip-installable package with `pyproject.toml`, installed via `pip install -e /app/shared/` in each service's Dockerfile.
+The project documents mention a `shared/` library but never specify how it's packaged or installed. **Resolution:** This spec defines it as a pip-installable package with `pyproject.toml`, installed via `pip install -e /app/shared/ --no-deps` in each service's Dockerfile (after the service lockfile, which pins its dependencies — ADR-0012).
 
 **Gap 5: No SQLAlchemy ORM models defined.**
 The shared library needs ORM table definitions for services that do database writes/reads. **Resolution:** Added `schemas.py` to the file tree. However, implementation of the ORM models is deferred to Spec 1 (which first needs them), since defining ORM models without a consumer is premature. The `schemas.py` file should be created as an empty placeholder with a comment: `# ORM table definitions — populated by Spec 1 when first needed`.

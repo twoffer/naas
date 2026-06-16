@@ -30,11 +30,11 @@ This is the first phase of a fresh pipeline run. No state.json exists yet.
    ```bash
    [ -d .venv ] && source .venv/bin/activate
    pip install -r requirements-dev.txt
-   [ -f shared/pyproject.toml ] && pip install -e shared/
+   [ -f shared/pyproject.toml ] && pip install -e shared/ --no-deps
    ```
 
    - If `.venv/` exists it is activated first (matching the convention in `CLAUDE.md`); if it does not, the installs run against the active interpreter, so developers who do not use a virtualenv are still supported.
-   - The dev tools always install. The editable `shared/` install is guarded on `shared/pyproject.toml` existing: it no-ops before that file is created and installs the package plus its runtime dependencies once it exists.
+   - `requirements-dev.txt` is the compiled lockfile (it already pins the runtime closure the unit tests import). The editable `shared/` install is guarded on `shared/pyproject.toml` existing — it no-ops before that file is created — and uses `--no-deps` so it registers the `naas_shared` package without re-resolving its dependencies, leaving the locked versions authoritative (see `DEPENDENCIES.md`).
    - Idempotent on resume: the exact version pins make re-running a no-op.
 
 ## Success → Architecture Phase

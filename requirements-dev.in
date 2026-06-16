@@ -1,0 +1,28 @@
+# NAAS agentic pipeline dev/test toolchain — declared floors (compile input).
+# Separate from shared/pyproject.toml, which holds runtime/image deps only.
+#
+# This is a pip-compile INPUT — declared minimum-version floors, not exact pins.
+# The fully-pinned lockfile it generates is requirements-dev.txt; regenerate that
+# after editing this file (see DEPENDENCIES.md).
+# shared/pyproject.toml is compiled in alongside this file so the lock also pins
+# the runtime closure the unit tests import.
+pytest>=8.3.4
+pytest-asyncio>=0.25.0
+pytest-cov>=6.0.0
+pytest-mock>=3.14.0
+pytest-timeout>=2.3.1
+ruff>=0.9.3
+mypy>=1.14.1
+# pip-tools provides pip-compile, used to regenerate every lockfile in the repo.
+pip-tools>=7.5.3
+# Integration test harness deps — floored to match demo/requirements.in so the
+# invoking environment is self-contained without coupling to demo/ at runtime.
+httpx>=0.28.1
+psycopg[binary]>=3.3.4
+rich>=13.9.4
+# Unit tests import services/*/app code. Almost all of its deps are declared by
+# naas-shared and reach this lock via shared/pyproject.toml (compiled in above);
+# pyyaml is the one exception — identity-normalization's config loader imports
+# yaml at module level but it is a service-only dep, not a shared one. Service
+# requirements.in files remain container-runtime-only.
+pyyaml>=6.0.3

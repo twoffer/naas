@@ -1,13 +1,18 @@
 FROM python:3.12-slim
 WORKDIR /app
 
-# Shared library first — changes least often, best layer caching.
-COPY shared/ /app/shared/
-RUN pip install --no-cache-dir -e /app/shared/
-
-# Service deps, then service code.
+# Pinned dependency closure first — the compiled lockfile (service deps +
+# shared's full transitive closure). This is the heavy, slowest-changing layer.
 COPY services/event-ingestion/requirements.txt /app/svc/requirements.txt
 RUN pip install --no-cache-dir -r /app/svc/requirements.txt
+
+# Shared library installed editable WITHOUT deps — its third-party dependencies
+# are already pinned and installed by the lockfile above, so --no-deps keeps the
+# locked versions authoritative and prevents any re-resolution.
+COPY shared/ /app/shared/
+RUN pip install --no-cache-dir -e /app/shared/ --no-deps
+
+# Service code last — changes most often.
 COPY services/event-ingestion/app/ /app/svc/app/
 
 # The service needs no root privileges at runtime; switch to a dedicated user.

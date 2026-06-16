@@ -98,7 +98,9 @@ class TestOnlyHealthRouteExposed:
         """
         from app.main import app
 
-        route_paths = [route.path for route in app.routes]
+        from tests.helpers import iter_routes
+
+        route_paths = [route.path for route in iter_routes(app.routes)]
         assert "/health" in route_paths, (
             f"Expected /health in app routes. Found: {route_paths}. "
             "The spec §5.8 requires a GET /health endpoint."
@@ -115,12 +117,14 @@ class TestOnlyHealthRouteExposed:
         """
         from app.main import app
 
+        from tests.helpers import iter_routes
+
         # Acceptable paths: FastAPI built-ins + the single health endpoint
         acceptable_paths = {"/health", "/docs", "/redoc", "/openapi.json"}
 
         application_routes = [
             route.path
-            for route in app.routes
+            for route in iter_routes(app.routes)
             if hasattr(route, "path") and route.path not in acceptable_paths
         ]
         assert not application_routes, (

@@ -6,9 +6,11 @@
 # What it does:
 #   1. Activates .venv if present (so system Python is not used by mistake).
 #   2. Ensures .env exists — copies from .env.example if absent.
-#   3. Installs harness dependencies (requirements-dev.txt + demo/requirements.txt).
+#   3. Installs harness dependencies from the dev lockfile, then naas_shared
+#      editable (--no-deps; the lock already pins shared's closure).
 #      demo/demo_normalization.py is run via sys.executable inside the suite, so
-#      rich, httpx, and psycopg must be available in the invoking environment.
+#      rich, httpx, and psycopg must be available — the dev lock is a superset of
+#      demo/requirements.txt and pins all three.
 #   4. Runs the integration suite with pytest --integration.
 set -euo pipefail
 
@@ -32,11 +34,9 @@ if [ ! -f "${REPO_ROOT}/.env" ]; then
     fi
 fi
 
-# ── 3. Install harness dependencies ─────────────────────────────────────────
-pip install \
-    -r "${REPO_ROOT}/requirements-dev.txt" \
-    -r "${REPO_ROOT}/demo/requirements.txt" \
-    -e "${REPO_ROOT}/shared/"
+# ── 3. Install harness dependencies (from the dev lockfile) ──────────────────
+pip install -r "${REPO_ROOT}/requirements-dev.txt"
+pip install -e "${REPO_ROOT}/shared/" --no-deps
 
 # ── 4. Run integration suite ─────────────────────────────────────────────────
 python -m pytest "${REPO_ROOT}/tests/integration" --integration "$@"

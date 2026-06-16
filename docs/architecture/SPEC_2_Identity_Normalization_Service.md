@@ -15,7 +15,8 @@ This spec **creates** the following:
 ```
 services/identity-normalization/
 ├── Dockerfile                  # Option A build (repo-root context); adds python-ldap system deps
-├── requirements.txt            # service-direct deps (fastapi, uvicorn, python-ldap, pyyaml)
+├── requirements.in             # service-direct dependency floors (fastapi, uvicorn, python-ldap, pyyaml)
+├── requirements.txt            # pip-compiled lock (requirements.in + shared/pyproject.toml); full pinned closure (ADR-0012)
 └── app/
     ├── __init__.py
     ├── main.py                 # composition root: app factory, lifespan (starts consumer loop + group), /health
@@ -427,8 +428,8 @@ The `NormalizationService.normalize(record)` is the domain orchestration: select
 
 ### 5.8 Dockerfile, requirements, and compose entry
 
-- **`requirements.txt`:** `fastapi>=0.115`, `uvicorn[standard]>=0.30`, `python-ldap>=3.4`, `pyyaml>=6.0`. (Data-layer deps come transitively via `naas_shared`.)
-- **`Dockerfile`:** follow the Spec 1 Option A pattern (repo-root build context; `COPY shared/ /app/shared/` then `RUN pip install -e /app/shared/`; `python:3.12-slim`; `EXPOSE 8002`; `CMD uvicorn app.main:app --host 0.0.0.0 --port 8002`). **⚠️ `python-ldap` needs system build dependencies** the Spec 1 image does not carry — add an `apt-get install` for `libldap2-dev`, `libsasl2-dev`, and `gcc` (plus `build-essential` if needed) **before** `pip install`, or the build fails compiling `python-ldap`.
+- **`requirements.in` (floors) / `requirements.txt` (lock):** the `.in` declares the service-direct floors `fastapi>=0.115`, `uvicorn[standard]>=0.30`, `python-ldap>=3.4`, `pyyaml>=6.0` (data-layer deps are owned by `naas_shared`, not redeclared); the `.txt` is the pip-compiled lock of that `.in` plus `shared/pyproject.toml`, pinning the full transitive closure (ADR-0012; see `DEPENDENCIES.md`).
+- **`Dockerfile`:** follow the Spec 1 Option A pattern (repo-root build context; `python:3.12-slim`; install the lockfile `RUN pip install -r requirements.txt` first, then `COPY shared/ /app/shared/` and `RUN pip install -e /app/shared/ --no-deps` so the locked versions stay authoritative; `EXPOSE 8002`; `CMD uvicorn app.main:app --host 0.0.0.0 --port 8002`). **⚠️ `python-ldap` needs system build dependencies** the Spec 1 image does not carry — add an `apt-get install` for `libldap2-dev`, `libsasl2-dev`, and `gcc` (plus `build-essential` if needed) **before** `pip install`, or the build fails compiling `python-ldap`.
 - **`docker-compose.yml`:** add an `identity-normalization` entry — repo-root build context, `env_file: .env`, `${IDENTITY_NORMALIZATION_PORT:-8002}:8002`, a `/health` healthcheck on port 8002, and `depends_on` the `postgres`, `redis`, and `openldap` services with `condition: service_healthy`. Mount `./config:/app/config` (read-only) so the service can read `config/normalization.yaml`. Do not modify the infrastructure or `event-ingestion` services.
 - **`/health`:** a `GET /health` returning the shared `HealthResponse` (`service="identity-normalization"`), using the request-scoped `get_db_session` for a PG `SELECT 1` and `get_redis().ping()`. Both OK → `healthy`; Redis down but PG OK → `degraded`; PG down → `unhealthy`. Return HTTP 200 with the status in the body (do not 500 on a dependency outage).
 

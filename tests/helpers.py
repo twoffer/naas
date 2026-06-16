@@ -13,10 +13,14 @@ Usage::
 
     # or when a callable is needed (e.g., in module-level conditional logic):
     from tests.helpers import find_repo_root
+
+    # flatten a FastAPI app's route tree for introspection:
+    from tests.helpers import iter_routes
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 
 
@@ -38,3 +42,26 @@ def find_repo_root() -> Path:
 
 
 REPO_ROOT: Path = find_repo_root()
+
+
+def iter_routes(routes: Iterable) -> Iterator:
+    """Yield leaf routes from a FastAPI app's route list, flattening include wrappers.
+
+    WHY: FastAPI (pinned to 0.137.x via the lockfiles — see
+    DEPENDENCIES.md) has ``app.include_router()`` insert a
+    single ``_IncludedRouter`` wrapper into ``app.routes`` whose child routes
+    live on ``.original_router.routes``, rather than flattening the child
+    ``APIRoute`` instances directly into ``app.routes``. Route introspection
+    that iterates ``app.routes`` would otherwise see the opaque wrapper (which
+    has no ``.path``) instead of the real endpoints.
+
+    Wrappers are detected via the ``original_router`` attribute and recursed
+    into (handling nested includes); every other route type (plain
+    ``APIRoute``, ``Mount``, etc.) is yielded as-is.
+    """
+    for route in routes:
+        included = getattr(route, "original_router", None)
+        if included is not None and hasattr(included, "routes"):
+            yield from iter_routes(included.routes)
+        else:
+            yield route

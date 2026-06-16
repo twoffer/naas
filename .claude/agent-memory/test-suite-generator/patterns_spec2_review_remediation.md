@@ -24,7 +24,7 @@ from tests.services.identity_normalization.conftest import inject_fake_ldap as _
 
 **Watch for retained references:** After removing the sys.path block, check for `_REPO`, `SHARED_DIR`, `REPO_ROOT` variables that were defined in the same block and are still used elsewhere in the file. Add `from tests.helpers import REPO_ROOT as _REPO` to imports if needed.
 
-**`naas_shared` in venv:** `shared/` is installed in dev mode via `-e shared/`. No test file ever needs `sys.path.insert` for `naas_shared` imports — they are available everywhere in the venv.
+**`naas_shared` in venv:** `shared/` is installed in dev mode via `pip install -e shared/ --no-deps` (its runtime deps come from the dev lockfile — ADR-0012). No test file ever needs `sys.path.insert` for `naas_shared` imports — they are available everywhere in the venv.
 
 **demo tests:** `tests/demo/test_demo_flow.py` needed `SHARED_DIR` for naas_shared imports (removable) but still needs `REPO_ROOT` for `DEMO_SCRIPT` path. Move `DEMO_SCRIPT = REPO_ROOT / "demo" / "demo_normalization.py"` to module scope after the imports so it is not between import statements (avoids E402).
 
