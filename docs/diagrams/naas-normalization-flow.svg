@@ -1,0 +1,189 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 1812" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-labelledby="d2title d2desc">
+  <title id="d2title">Identity normalization: the general flow and the Scene 6 worked example</title>
+  <desc id="d2desc">Panel 1, the general normalization flow: a login event (OIDC, SAML, or LDAP) passes through the protocol adapter into the unified schema, then branches on protocol. OIDC and SAML events perform a live OpenLDAP lookup with results cached in Redis; on a match the directory entry is normalized through the LDAP protocol adapter and enters per-attribute authority resolution as a multi-source entity; on no match or directory outage, enrichment is skipped gracefully and resolution proceeds single-source. Native LDAP events skip the self-lookup and resolve single-source. All paths converge on per-attribute authority resolution, producing a unified identity with a confidence score. Panel 2, the worked example from demo Scene 6 for user diana: the OIDC token claims name Di Prince and department Marketing; the directory entry holds cn Diana Prince and department Engineering. Each is normalized by its own protocol adapter into the unified schema and both flow into resolution: OIDC wins display_name (Di Prince), LDAP wins department (Engineering), all other attributes are unanimous. The conflict penalty multiplies each contested attribute's confidence by 0.8 (0.70 to 0.56 for display_name, 0.90 to 0.72 for department), overall confidence about 0.82, yielding the final unified identity.</desc>
+  <defs>
+    <marker id="arr2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#AEB9C5"/>
+    </marker>
+    <style>
+      .t   { font-size: 14px; font-weight: 700; fill: #F0F6FC; text-anchor: middle; }
+      .s   { font-size: 11.5px; font-weight: 600; fill: #C3CDD8; text-anchor: middle; }
+      .m   { font-size: 11.5px; font-weight: 700; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; fill: #8CC8FF; text-anchor: middle; }
+      .lab { font-size: 11px; font-weight: 600; fill: #D7DEE5; text-anchor: middle; }
+      .band { font-size: 12px; font-weight: 700; letter-spacing: 1.4px; fill: #AEB9C5; text-anchor: start; }
+      .cap { font-size: 12px; font-weight: 600; fill: #C3CDD8; }
+      .edge { fill: none; stroke: #AEB9C5; stroke-width: 2.2; marker-end: url(#arr2); }
+      .node { fill: #161B22; stroke: #C9D1D9; stroke-width: 2; }
+      .io   { fill: #1C2128; stroke: #F0F6FC; stroke-width: 2; }
+      .key  { fill: #161B22; stroke: #3FB950; stroke-width: 3; }
+      .out  { fill: #11261A; stroke: #3FB950; stroke-width: 3; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="920" height="1812" fill="#0D1117"/>
+
+  <!-- ==================== PANEL 1: THE GENERAL NORMALIZATION FLOW ==================== -->
+  <text x="55" y="48" class="band">1 &#183; THE GENERAL NORMALIZATION FLOW &#8212; EVERY PATH CONVERGES ON PER-ATTRIBUTE RESOLUTION</text>
+
+  <rect x="330" y="84" width="260" height="52" rx="8" class="io"/>
+  <text x="460" y="106" class="t">Login event</text>
+  <text x="460" y="124" class="s">OIDC &#183; SAML &#183; LDAP</text>
+
+  <path d="M460,136 V164" class="edge"/>
+
+  <rect x="310" y="166" width="300" height="52" rx="8" class="node"/>
+  <text x="460" y="188" class="t">Protocol adapter</text>
+  <text x="460" y="206" class="s">raw attributes &#8594; unified schema</text>
+
+  <path d="M460,218 V238" class="edge"/>
+
+  <polygon points="460,240 580,272 460,304 340,272" class="node"/>
+  <text x="460" y="277" class="t">protocol?</text>
+
+  <!-- LDAP branch (right) -->
+  <path d="M580,272 H785 V356" class="edge"/>
+  <rect x="618" y="257" width="44" height="15" fill="#0D1117"/>
+  <text x="640" y="268" class="lab">LDAP</text>
+
+  <rect x="680" y="358" width="210" height="52" rx="8" class="node"/>
+  <text x="785" y="380" class="t">No self-lookup</text>
+  <text x="785" y="398" class="s">directory data already present</text>
+
+  <!-- OIDC/SAML branch (left) -->
+  <path d="M460,304 V328 H270 V356" class="edge"/>
+  <rect x="305" y="321" width="90" height="15" fill="#0D1117"/>
+  <text x="350" y="332" class="lab">OIDC / SAML</text>
+
+  <rect x="130" y="358" width="280" height="72" rx="8" class="node"/>
+  <text x="270" y="382" class="t">Live OpenLDAP lookup</text>
+  <text x="270" y="402" class="s">by unified-schema key</text>
+  <text x="270" y="420" class="s">results cached in Redis (TTL)</text>
+
+  <path d="M270,430 V452" class="edge"/>
+
+  <polygon points="270,454 380,482 270,510 160,482" class="node"/>
+  <text x="270" y="487" class="t">match?</text>
+
+  <!-- match path -->
+  <path d="M270,510 V552" class="edge"/>
+  <rect x="248" y="520" width="44" height="15" fill="#0D1117"/>
+  <text x="270" y="531" class="lab">match</text>
+
+  <rect x="130" y="554" width="280" height="56" rx="8" class="node"/>
+  <text x="270" y="576" class="t">Normalize directory entry</text>
+  <text x="270" y="596" class="s">through the LDAP protocol adapter</text>
+
+  <!-- no-match path -->
+  <path d="M380,482 H550 V552" class="edge"/>
+  <rect x="388" y="467" width="160" height="15" fill="#0D1117"/>
+  <text x="468" y="478" class="lab">no match / directory down</text>
+
+  <rect x="440" y="554" width="220" height="56" rx="8" class="node"/>
+  <text x="550" y="576" class="t">Skip enrichment</text>
+  <text x="550" y="596" class="s">graceful degradation</text>
+
+  <!-- convergence -->
+  <path d="M270,610 V640 H380 V668" class="edge"/>
+  <rect x="286" y="625" width="80" height="15" fill="#0D1117"/>
+  <text x="326" y="636" class="lab">multi-source</text>
+
+  <path d="M550,610 V668" class="edge"/>
+  <rect x="507" y="628" width="86" height="15" fill="#0D1117"/>
+  <text x="550" y="639" class="lab">single source</text>
+
+  <path d="M785,410 V650 H600 V668" class="edge"/>
+  <rect x="649" y="635" width="86" height="15" fill="#0D1117"/>
+  <text x="692" y="646" class="lab">single source</text>
+
+  <rect x="270" y="670" width="380" height="60" rx="8" class="key"/>
+  <text x="460" y="694" class="t">Per-attribute authority resolution</text>
+  <text x="460" y="714" class="s">each attribute has its own priority source list</text>
+
+  <path d="M460,730 V756" class="edge"/>
+
+  <rect x="290" y="758" width="340" height="60" rx="8" class="out"/>
+  <text x="460" y="782" class="t">Unified identity + confidence score</text>
+  <text x="460" y="802" class="s">full provenance &#183; per-attribute detail</text>
+
+  <!-- ==================== divider ==================== -->
+  <line x1="40" y1="858" x2="880" y2="858" stroke="#30363D" stroke-width="1.5"/>
+
+  <!-- ==================== PANEL 2: SCENE 6 WORKED EXAMPLE ==================== -->
+  <text x="55" y="902" class="band">2 &#183; WORKED EXAMPLE &#8212; DEMO SCENE 6 (USER diana), THE MULTI-SOURCE PATH</text>
+
+  <!-- left column: the token -->
+  <rect x="55" y="930" width="360" height="104" rx="8" class="io"/>
+  <text x="235" y="956" class="t">OIDC login event</text>
+  <text x="235" y="980" class="m">name = "Di Prince"</text>
+  <text x="235" y="1002" class="m">department = "Marketing"</text>
+  <text x="235" y="1022" class="s">&#8230;plus email, type, groups</text>
+
+  <path d="M235,1034 V1058" class="edge"/>
+
+  <rect x="80" y="1060" width="310" height="50" rx="8" class="node"/>
+  <text x="235" y="1081" class="t">OIDC protocol adapter</text>
+  <text x="235" y="1100" class="s">claims &#8594; unified schema</text>
+
+  <path d="M235,1110 V1134" class="edge"/>
+
+  <rect x="55" y="1136" width="360" height="88" rx="8" class="node"/>
+  <text x="235" y="1160" class="t">Unified &#8212; from the token</text>
+  <text x="235" y="1184" class="m">display_name = "Di Prince"</text>
+  <text x="235" y="1206" class="m">department = "Marketing"</text>
+
+  <!-- right column: the directory -->
+  <rect x="505" y="930" width="360" height="52" rx="8" class="node"/>
+  <text x="685" y="952" class="t">Live OpenLDAP lookup</text>
+  <text x="685" y="970" class="s">match found for diana</text>
+
+  <path d="M685,982 V1004" class="edge"/>
+
+  <rect x="505" y="1006" width="360" height="104" rx="8" class="io"/>
+  <text x="685" y="1030" class="t">Directory entry</text>
+  <text x="685" y="1054" class="m">cn = "Diana Prince"</text>
+  <text x="685" y="1076" class="m">departmentNumber = "Engineering"</text>
+  <text x="685" y="1096" class="s">&#8230;plus mail, employeeType, memberOf</text>
+
+  <path d="M685,1110 V1132" class="edge"/>
+
+  <rect x="530" y="1134" width="310" height="50" rx="8" class="node"/>
+  <text x="685" y="1155" class="t">LDAP protocol adapter</text>
+  <text x="685" y="1174" class="s">claims &#8594; unified schema</text>
+
+  <path d="M685,1184 V1206" class="edge"/>
+
+  <rect x="505" y="1208" width="360" height="88" rx="8" class="node"/>
+  <text x="685" y="1232" class="t">Unified &#8212; from the directory</text>
+  <text x="685" y="1256" class="m">display_name = "Diana Prince"</text>
+  <text x="685" y="1278" class="m">department = "Engineering"</text>
+
+  <!-- convergence -->
+  <path d="M235,1224 V1324 H380 V1352" class="edge"/>
+  <path d="M685,1296 V1324 H560 V1352" class="edge"/>
+  <rect x="390" y="1316" width="142" height="16" fill="#0D1117"/>
+  <text x="461" y="1328" class="lab">two sources, one identity</text>
+
+  <rect x="150" y="1354" width="620" height="142" rx="8" class="key"/>
+  <text x="460" y="1380" class="t">Per-attribute authority resolution</text>
+  <text x="460" y="1408" class="m">display_name &#8594; OIDC wins &#8594; "Di Prince"</text>
+  <text x="460" y="1434" class="m">department &#8594; LDAP wins &#8594; "Engineering"</text>
+  <text x="460" y="1458" class="s">every other attribute: sources agree &#8212; unanimous</text>
+  <text x="460" y="1480" class="s">presentation belongs to the IdP; org facts belong to the directory</text>
+
+  <path d="M460,1496 V1522" class="edge"/>
+
+  <rect x="150" y="1524" width="620" height="112" rx="8" class="key"/>
+  <text x="460" y="1550" class="t">Confidence score</text>
+  <text x="460" y="1576" class="m">display_name: 0.70 &#215; 0.8 = 0.56&#160;&#160;(conflict penalty)</text>
+  <text x="460" y="1600" class="m">department:&#160;&#160;0.90 &#215; 0.8 = 0.72&#160;&#160;(conflict penalty)</text>
+  <text x="460" y="1622" class="s">unanimous attributes keep full weight &#8212; overall &#8776; 0.82</text>
+
+  <path d="M460,1636 V1662" class="edge"/>
+
+  <rect x="190" y="1664" width="540" height="92" rx="8" class="out"/>
+  <text x="460" y="1690" class="t">Unified identity &#8212; diana</text>
+  <text x="460" y="1714" class="m">display_name = "Di Prince" &#183; department = "Engineering"</text>
+  <text x="460" y="1736" class="s">full provenance &#183; per-attribute detail &#183; confidence &#8776; 0.82</text>
+
+  <text x="55" y="1788" class="cap">Panel 2 is Scene 6 of demo/demo_normalization.py &#8212; run it and read these exact resolutions out of PostgreSQL.</text>
+</svg>

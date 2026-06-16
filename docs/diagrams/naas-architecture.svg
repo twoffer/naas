@@ -1,0 +1,194 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 1150" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif" role="img" aria-labelledby="d1title d1desc">
+  <title id="d1title">NAAS architecture: event origins, Redis stream backbone, and build status</title>
+  <desc id="d1desc">Three event origins converge on Event Ingestion: live OIDC authentication via Keycloak through the dashboard and API Gateway (source=user), the Persona Simulator generating synthetic OIDC, SAML, and LDAP events (source=simulator), and direct REST calls (source=api). A blue Redis Streams backbone carries events from Ingestion through Identity Normalization (with live OpenLDAP enrichment lookup), Signal Enrichment, and the Risk Evaluator, whose decisions broadcast over Redis Pub/Sub to the Alert Service and back up to the API Gateway for WebSocket fan-out to the dashboard. A PostgreSQL rail on the left shows each service persisting to the system of record.</desc>
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#AEB9C5"/>
+    </marker>
+    <marker id="barr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#58A6FF"/>
+    </marker>
+    <style>
+      .t    { font-size: 14px; font-weight: 700; fill: #F0F6FC; text-anchor: middle; }
+      .s    { font-size: 11.5px; fill: #B9C4D0; text-anchor: middle; }
+      .lab  { font-size: 11px; font-weight: 600; fill: #D7DEE5; text-anchor: middle; }
+      .lm   { font-size: 11px; font-weight: 700; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; fill: #8CC8FF; text-anchor: start; }
+      .gm   { font-size: 11px; font-weight: 700; font-family: 'SFMono-Regular', Consolas, Menlo, monospace; fill: #C9D1D9; text-anchor: middle; }
+      .band { font-size: 11px; font-weight: 700; letter-spacing: 1.2px; fill: #AEB9C5; }
+      .leg  { font-size: 11.5px; fill: #F0F6FC; text-anchor: start; }
+      .cap  { font-size: 12px; font-weight: 600; fill: #C3CDD8; }
+      .edge  { fill: none; stroke: #AEB9C5; stroke-width: 2; marker-end: url(#arr); }
+      .edged { fill: none; stroke: #AEB9C5; stroke-width: 2; stroke-dasharray: 6 5; marker-end: url(#arr); }
+      .tick  { fill: none; stroke: #6E7681; stroke-width: 1.4; }
+      .pipe  { fill: none; stroke: #58A6FF; stroke-width: 9; stroke-linecap: round; }
+      .bus   { fill: none; stroke: #58A6FF; stroke-width: 4; stroke-dasharray: 2 6; stroke-linecap: round; }
+      .busa  { fill: none; stroke: #58A6FF; stroke-width: 2.5; stroke-dasharray: 2 5; marker-end: url(#barr); }
+      .nbuilt { fill: #161B22; stroke: #3FB950; stroke-width: 3; }
+      .ninfra { fill: #1C2128; stroke: #C9D1D9; stroke-width: 2; }
+      .ndes   { fill: #161B22; stroke: #98A4B1; stroke-width: 2; stroke-dasharray: 7 5; }
+    </style>
+  </defs>
+
+  <rect x="0" y="0" width="980" height="1150" fill="#0D1117"/>
+
+  <!-- ==================== event origins ==================== -->
+  <text x="55" y="36" class="band">EVENT ORIGINS &#8212; ANY PROTOCOL CAN ARRIVE AS AN EVENT; ONLY OIDC ARRIVES AS LIVE AUTHENTICATION</text>
+
+  <rect x="55" y="66" width="220" height="84" rx="8" class="ndes"/>
+  <text x="165" y="94" class="t">Persona Simulator</text>
+  <text x="165" y="112" class="s">synthetic OIDC &#183; SAML &#183; LDAP events</text>
+  <text x="165" y="130" class="s">port 8007 &#183; dashboard-controlled</text>
+
+  <rect x="315" y="66" width="190" height="84" rx="8" class="ninfra"/>
+  <text x="410" y="94" class="t">Keycloak</text>
+  <text x="410" y="112" class="s">live OIDC authentication</text>
+  <text x="410" y="130" class="s">the only live auth path</text>
+
+  <rect x="690" y="66" width="230" height="84" rx="8" class="ndes"/>
+  <text x="805" y="94" class="t">React Dashboard</text>
+  <text x="805" y="112" class="s">analyst UI &#183; simulator panel</text>
+  <text x="805" y="130" class="s">OIDC login via Keycloak</text>
+
+  <path d="M515,100 H678" class="edge" marker-start="url(#arr)"/>
+  <text x="597" y="92" class="lab">OIDC login</text>
+
+  <rect x="55" y="200" width="160" height="48" rx="8" class="ninfra"/>
+  <text x="135" y="222" class="t">Direct REST API</text>
+  <text x="135" y="240" class="s">curl &#183; demo scripts</text>
+
+  <rect x="630" y="196" width="290" height="86" rx="8" class="ndes"/>
+  <text x="775" y="222" class="t">API Gateway / BFF</text>
+  <text x="775" y="244" class="s">JWT (Keycloak JWKS) &#183; WebSocket &#183; port 8000</text>
+  <text x="775" y="265" class="gm" style="font-size:10.5px">&#8594; events &#183; policies &#183; alerts &#183; analytics</text>
+
+  <path d="M805,150 V194" class="edge" marker-start="url(#arr)"/>
+  <text x="817" y="175" class="lab" text-anchor="start">REST + WebSocket</text>
+
+  <path d="M470,150 V225 H628" class="edged"/>
+  <text x="554" y="220" class="lab">OIDC tokens &#183; JWKS</text>
+
+  <!-- entry paths into ingestion -->
+  <path d="M245,150 V275 H430 V328" class="edge"/>
+  <text x="264" y="270" class="lm" fill="#C9D1D9">source=simulator</text>
+
+  <path d="M135,248 V300 H385 V328" class="edge"/>
+  <text x="196" y="295" class="lm" fill="#C9D1D9">source=api</text>
+
+  <path d="M700,282 V305 H560 V328" class="edge"/>
+  <text x="586" y="300" class="lm" fill="#C9D1D9">source=user</text>
+
+  <!-- ==================== pipeline spine ==================== -->
+  <rect x="350" y="330" width="260" height="65" rx="8" class="nbuilt"/>
+  <text x="480" y="358" class="t">Event Ingestion</text>
+  <text x="480" y="378" class="s">dual write: PostgreSQL + stream &#183; port 8001</text>
+
+  <path d="M480,395 V460" class="pipe"/>
+  <text x="456" y="416" class="lab" text-anchor="end" font-style="italic" fill="#6CB6FF">Redis Streams</text>
+  <text x="494" y="446" class="lm">login_events</text>
+
+  <rect x="330" y="460" width="300" height="80" rx="8" class="nbuilt"/>
+  <text x="480" y="488" class="t">Identity Normalization</text>
+  <text x="480" y="508" class="s">protocol adapters &#183; per-attribute resolution</text>
+  <text x="480" y="526" class="s">confidence scoring &#183; port 8002</text>
+
+  <!-- OpenLDAP + enrichment lookup -->
+  <path d="M690,342 A95,12 0 0 1 880,342 L880,413 A95,12 0 0 1 690,413 Z" class="ninfra"/>
+  <ellipse cx="785" cy="342" rx="95" ry="12" class="ninfra"/>
+  <text x="785" y="380" class="t">OpenLDAP</text>
+  <text x="785" y="398" class="s">directory</text>
+
+  <path d="M785,425 V500 H634" class="edged"/>
+  <text x="716" y="492" class="lab">live directory lookup</text>
+
+  <path d="M480,540 V610" class="pipe"/>
+  <text x="494" y="580" class="lm">normalized_events</text>
+
+  <rect x="350" y="610" width="260" height="68" rx="8" class="ndes"/>
+  <text x="480" y="634" class="t">Signal Enrichment</text>
+  <text x="480" y="652" class="s">IP rep &#183; geo &#183; device &#183; impossible travel</text>
+  <text x="480" y="668" class="s">port 8003</text>
+
+  <path d="M480,678 V748" class="pipe"/>
+  <text x="494" y="718" class="lm">enriched_events</text>
+
+  <rect x="350" y="748" width="245" height="72" rx="8" class="ndes"/>
+  <text x="472" y="772" class="t">Risk Evaluator</text>
+  <text x="472" y="790" class="s">rules + ML ensemble &#183; port 8005</text>
+  <text x="472" y="808" class="s">allow &#183; step-up MFA &#183; deny</text>
+
+  <rect x="675" y="748" width="210" height="72" rx="8" class="ndes"/>
+  <text x="780" y="772" class="t">Policy Management</text>
+  <text x="780" y="790" class="s">versioned YAML &#183; shadow mode</text>
+  <text x="780" y="808" class="s">stored in PostgreSQL</text>
+
+  <path d="M675,784 H599" class="edged"/>
+  <text x="637" y="803" class="lab" style="font-size:10.5px">active policy</text>
+
+  <!-- ==================== pub/sub bus ==================== -->
+  <path d="M472,820 V852" class="busa"/>
+  <text x="484" y="840" class="lm">decisions</text>
+
+  <path d="M230,858 H944" class="bus"/>
+  <text x="688" y="848" class="lab" font-style="italic" fill="#6CB6FF" text-anchor="middle">Redis Pub/Sub</text>
+
+  <path d="M340,858 V892" class="busa"/>
+  <text x="330" y="878" class="lm" text-anchor="end">decisions</text>
+
+  <path d="M440,894 V864" class="busa"/>
+  <text x="454" y="878" class="lm">alerts</text>
+
+  <rect x="280" y="896" width="220" height="66" rx="8" class="ndes"/>
+  <text x="390" y="922" class="t">Alert Service</text>
+  <text x="390" y="940" class="s">severity &#183; ack workflow &#183; port 8006</text>
+
+  <path d="M944,858 V240 H924" class="busa"/>
+  <text x="964" y="560" class="lab" transform="rotate(-90 964 560)">decisions &#183; alerts &#8594; dashboard WebSocket</text>
+
+  <!-- ==================== postgres rail ==================== -->
+  <path d="M55,342 A57.5,12 0 0 1 170,342 L170,950 A57.5,12 0 0 1 55,950 Z" class="ninfra"/>
+  <ellipse cx="112.5" cy="342" rx="57.5" ry="12" class="ninfra"/>
+  <text x="112.5" y="380" class="t" font-size="13">PostgreSQL</text>
+  <text x="112.5" y="398" class="s" font-size="10.5">system of record</text>
+
+  <path d="M170,362 H348" class="tick"/>
+  <text x="258" y="354" class="gm">events</text>
+
+  <path d="M170,500 H328" class="tick"/>
+  <text x="249" y="492" class="gm">normalized_attributes</text>
+
+  <path d="M170,644 H348" class="tick"/>
+  <text x="258" y="636" class="gm">signals &#183; history reads</text>
+
+  <path d="M170,784 H348" class="tick"/>
+  <text x="258" y="776" class="gm">risk_assessments</text>
+
+  <path d="M170,929 H278" class="tick"/>
+  <text x="224" y="921" class="gm">alerts</text>
+
+  <text x="112.5" y="982" class="cap" text-anchor="middle">also queried by the gateway</text>
+  <text x="112.5" y="996" class="cap" text-anchor="middle">(analytics) and policy service</text>
+
+  <!-- ==================== legend ==================== -->
+  <rect x="60" y="1032" width="30" height="18" rx="4" fill="#161B22" stroke="#3FB950" stroke-width="3"/>
+  <text x="100" y="1046" class="leg">implemented &amp; integration-validated</text>
+
+  <rect x="390" y="1032" width="30" height="18" rx="4" fill="#1C2128" stroke="#C9D1D9" stroke-width="2"/>
+  <text x="430" y="1046" class="leg">live infrastructure (running today)</text>
+
+  <rect x="720" y="1032" width="30" height="18" rx="4" fill="#161B22" stroke="#98A4B1" stroke-width="2" stroke-dasharray="7 5"/>
+  <text x="760" y="1046" class="leg">designed, not yet built</text>
+
+  <path d="M60,1081 H98" class="pipe" stroke-width="7"/>
+  <text x="108" y="1086" class="leg">Redis Stream</text>
+
+  <path d="M230,1081 H268" class="bus"/>
+  <text x="278" y="1086" class="leg">Redis Pub/Sub</text>
+
+  <path d="M410,1081 H448" class="edge"/>
+  <text x="458" y="1086" class="leg">REST / API call</text>
+
+  <path d="M600,1081 H638" class="edged"/>
+  <text x="648" y="1086" class="leg">directory lookup</text>
+
+  <text x="60" y="1122" class="cap">Redis also provides the cache layer: active policy &#183; LDAP lookups &#183; IP &amp; geo reputation &#183; JWKS.</text>
+</svg>

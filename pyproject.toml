@@ -11,3 +11,9 @@ markers = [
     "integration: live-docker integration test (skip by default; opt in via --integration flag or NAAS_RUN_INTEGRATION=1 env var)",
 ]
 
+[tool.ruff]
+# Minimal, near-default config: formalizes the lint standard (matching the
+# `ruff check .` step in .github/workflows/ci.yml) without expanding the rule
+# set beyond ruff's defaults. Rule-set ratcheting is a separate, future change.
+target-version = "py312"
+
