@@ -30,7 +30,7 @@ psycopg-binary==3.3.4
     # via psycopg
 pygments==2.20.0
     # via rich
-rich==13.9.4
+rich==15.0.0
     # via -r demo/requirements.in
 typing-extensions==4.15.0
     # via
