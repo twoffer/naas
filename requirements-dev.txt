@@ -87,7 +87,7 @@ pytest==8.4.2
     #   pytest-cov
     #   pytest-mock
     #   pytest-timeout
-pytest-asyncio==0.25.0
+pytest-asyncio==1.4.0
     # via -r requirements-dev.in
 pytest-cov==7.1.0
     # via -r requirements-dev.in
@@ -119,6 +119,7 @@ typing-extensions==4.15.0
     #   psycopg
     #   pydantic
     #   pydantic-core
+    #   pytest-asyncio
     #   sqlalchemy
     #   starlette
     #   typing-inspection
