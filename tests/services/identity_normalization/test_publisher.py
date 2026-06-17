@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 from uuid import UUID
 
 import pytest
-
 from naas_shared.constants import STREAM_NORMALIZED_EVENTS
 from naas_shared.models import (
     EnrichmentSkipped,
@@ -20,7 +19,7 @@ from naas_shared.models import (
 # ---------------------------------------------------------------------------
 
 _UUID = UUID("12345678-1234-5678-1234-567812345678")
-_NOW = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+_NOW = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
 
 
 def _make_record() -> LoginEventRecord:

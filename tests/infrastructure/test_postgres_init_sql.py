@@ -11,12 +11,9 @@ import re
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
 from tests.helpers import REPO_ROOT
 
 INIT_SQL_PATH = REPO_ROOT / "infrastructure" / "postgres" / "init.sql"

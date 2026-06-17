@@ -8,4 +8,4 @@ from app.adapters.ldap import LdapAdapter
 from app.adapters.oidc import OidcAdapter
 from app.adapters.saml import SamlAdapter
 
-__all__ = ["OidcAdapter", "SamlAdapter", "LdapAdapter"]
+__all__ = ["LdapAdapter", "OidcAdapter", "SamlAdapter"]

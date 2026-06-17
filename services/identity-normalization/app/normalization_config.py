@@ -90,9 +90,12 @@ class NormalizationConfig(BaseModel):
         degrade gracefully to default weights rather than crashing resolution.
         """
         attr_cfg = self.attributes.get(attribute)
-        if attr_cfg is not None and attr_cfg.weights is not None:
-            if source in attr_cfg.weights:
-                return attr_cfg.weights[source]
+        if (
+            attr_cfg is not None
+            and attr_cfg.weights is not None
+            and source in attr_cfg.weights
+        ):
+            return attr_cfg.weights[source]
         return self.defaults.source_weights.get(source, _UNKNOWN_SOURCE_WEIGHT_FLOOR)
 
     def priority_for(self, attribute: str) -> list[str]:

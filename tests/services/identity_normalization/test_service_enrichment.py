@@ -2,24 +2,25 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
-from tests.helpers import REPO_ROOT as _REPO
 from naas_shared.models import (
     EnrichmentSkipped,
     LoginEventRecord,
     NormalizedAttributes,
 )
 
+from tests.helpers import REPO_ROOT as _REPO
+
 # ---------------------------------------------------------------------------
 # Helpers — deterministic test fixtures
 # ---------------------------------------------------------------------------
 
 _UUID = UUID("12345678-1234-5678-1234-567812345678")
-_NOW = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+_NOW = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
 
 
 def _oidc_record(
@@ -105,11 +106,11 @@ def _make_service(
     The ldap_adapter.enrich is replaced with an AsyncMock that returns enrich_return.
     Adapter extract() methods call the real implementations.
     """
-    from app.service import NormalizationService
+    from app.adapters.ldap import LdapAdapter
     from app.adapters.oidc import OidcAdapter
     from app.adapters.saml import SamlAdapter
-    from app.adapters.ldap import LdapAdapter
     from app.normalization_config import load_config
+    from app.service import NormalizationService
 
     cfg_path = _REPO / "config" / "normalization.yaml"
     config = load_config(cfg_path)
@@ -231,10 +232,10 @@ class TestEnrichmentSourceAgnostic:
         Both records get the same enrich() call path. We verify enrich() call count
         is identical for both.
         """
-        from app.service import NormalizationService
+        from app.adapters.ldap import LdapAdapter
         from app.adapters.oidc import OidcAdapter
         from app.adapters.saml import SamlAdapter
-        from app.adapters.ldap import LdapAdapter
+        from app.service import NormalizationService
 
         cfg = _load_real_config()
 
@@ -275,10 +276,10 @@ class TestEnrichmentSourceAgnostic:
         self,
     ):
         """LDAP protocol events skip enrichment regardless of is_synthetic value."""
-        from app.service import NormalizationService
+        from app.adapters.ldap import LdapAdapter
         from app.adapters.oidc import OidcAdapter
         from app.adapters.saml import SamlAdapter
-        from app.adapters.ldap import LdapAdapter
+        from app.service import NormalizationService
 
         cfg = _load_real_config()
         ldap = LdapAdapter()
@@ -510,10 +511,10 @@ class TestConnectionErrorStatefulLogging:
 
     def _make_service_with_ldap_outcome(self, outcome: str):
         """Build NormalizationService with ldap.enrich always returning (None, outcome)."""
-        from app.service import NormalizationService
+        from app.adapters.ldap import LdapAdapter
         from app.adapters.oidc import OidcAdapter
         from app.adapters.saml import SamlAdapter
-        from app.adapters.ldap import LdapAdapter
+        from app.service import NormalizationService
 
         cfg = _load_real_config()
         oidc = OidcAdapter()
@@ -620,10 +621,10 @@ class TestConnectionErrorStatefulLogging:
             def __getattr__(self, name):
                 return lambda *a, **kw: None
 
-        from app.service import NormalizationService
+        from app.adapters.ldap import LdapAdapter
         from app.adapters.oidc import OidcAdapter
         from app.adapters.saml import SamlAdapter
-        from app.adapters.ldap import LdapAdapter
+        from app.service import NormalizationService
 
         cfg = _load_real_config()
         oidc = OidcAdapter()
@@ -687,11 +688,11 @@ class TestLdapAttrMergeIntoResolution:
         outcome: str = "ldap_match",
     ):
         """Build NormalizationService whose ldap.enrich() returns the given attrs."""
-        from app.service import NormalizationService
+        from app.adapters.ldap import LdapAdapter
         from app.adapters.oidc import OidcAdapter
         from app.adapters.saml import SamlAdapter
-        from app.adapters.ldap import LdapAdapter
         from app.normalization_config import load_config
+        from app.service import NormalizationService
 
         cfg = load_config(_REPO / "config" / "normalization.yaml")
         oidc = OidcAdapter()

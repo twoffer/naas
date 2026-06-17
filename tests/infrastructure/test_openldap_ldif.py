@@ -288,7 +288,7 @@ class TestLdifUserAttributes:
         cross-protocol enrichment to fail for that user.
         """
         block = self._user_block(blocks, uid)
-        assert "mail" in block and block["mail"], (
+        assert block.get("mail"), (
             f"User {uid!r}: missing or empty 'mail' attribute"
         )
 
@@ -300,7 +300,7 @@ class TestLdifUserAttributes:
         attribute as required by inetOrgPerson schema.
         """
         block = self._user_block(blocks, uid)
-        assert "uid" in block and block["uid"], (
+        assert block.get("uid"), (
             f"User {uid!r}: missing or empty 'uid' attribute"
         )
         assert uid in block["uid"], (
@@ -315,7 +315,7 @@ class TestLdifUserAttributes:
         for this user will fail with 'Invalid credentials'.
         """
         block = self._user_block(blocks, uid)
-        assert "userpassword" in block and block["userpassword"], (
+        assert block.get("userpassword"), (
             f"User {uid!r}: missing or empty 'userPassword' attribute"
         )
 
@@ -339,7 +339,7 @@ class TestLdifUserAttributes:
         for access-control policy evaluation. Missing values degrade policy accuracy.
         """
         block = self._user_block(blocks, uid)
-        assert "departmentnumber" in block and block["departmentnumber"], (
+        assert block.get("departmentnumber"), (
             f"User {uid!r}: missing or empty 'departmentNumber' attribute"
         )
 
@@ -352,7 +352,7 @@ class TestLdifUserAttributes:
         which triggers a confidence penalty and degrades risk signal quality.
         """
         block = self._user_block(blocks, uid)
-        assert "employeetype" in block and block["employeetype"], (
+        assert block.get("employeetype"), (
             f"User {uid!r}: missing or empty 'employeeType' attribute"
         )
 

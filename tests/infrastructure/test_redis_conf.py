@@ -10,12 +10,9 @@ import re
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
 from tests.helpers import REPO_ROOT
 
 REDIS_CONF_PATH = REPO_ROOT / "infrastructure" / "redis" / "redis.conf"

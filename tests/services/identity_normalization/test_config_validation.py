@@ -3,8 +3,8 @@
 from pathlib import Path
 
 # third-party
+import pydantic
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helper — build a minimal valid YAML with overrides
@@ -181,7 +181,7 @@ class TestCorrelationKeyValidation:
 
         p = _write_enrichment_yaml(tmp_path, correlation_key=absent_key)
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             load_config(p)
 
 
@@ -340,7 +340,7 @@ class TestCacheTtlValidation:
 
         p = _write_enrichment_yaml(tmp_path, cache_ttl_seconds=-1)
 
-        with pytest.raises(Exception):
+        with pytest.raises(pydantic.ValidationError):
             load_config(p)
 
     def test_cache_ttl_positive_does_not_raise(self, tmp_path: Path) -> None:
@@ -414,7 +414,7 @@ class TestEnrichAttributesValidation:
             tmp_path, enrich_attributes=["not_a_field", "also_not_a_field"]
         )
 
-        with pytest.raises(Exception):
+        with pytest.raises(ValueError):
             load_config(p)
 
     def test_enrich_attributes_valid_subset_does_not_raise(

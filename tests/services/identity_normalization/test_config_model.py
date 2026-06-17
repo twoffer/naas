@@ -1,5 +1,6 @@
 """NormalizationConfig model: load_config(), accessor helpers, fallback behaviour."""
 
+import contextlib
 from pathlib import Path
 
 # third-party
@@ -530,10 +531,8 @@ enrichment:
         try:
             ldap_cfg = cfg.enrichment.sources.ldap  # type: ignore[attr-defined]
         except AttributeError:
-            try:
+            with contextlib.suppress(AttributeError, KeyError, TypeError):
                 ldap_cfg = cfg.enrichment.sources["ldap"]  # type: ignore[index]
-            except (AttributeError, KeyError, TypeError):
-                pass
 
         assert ldap_cfg is not None, (
             "The LDAP enrichment sub-config must be accessible from the loaded config. "

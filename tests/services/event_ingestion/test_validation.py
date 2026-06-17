@@ -5,7 +5,6 @@ import uuid
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Deterministic test data
 # ---------------------------------------------------------------------------
@@ -99,8 +98,8 @@ class TestBulkSizeValidation:
         an empty transaction. The spec mandates at least 1 event. FastAPI should
         reject this at the body-validation layer.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         spy = SpyIngestionService()
         dep_callable = _get_dep_callable()
@@ -127,8 +126,8 @@ class TestBulkSizeValidation:
         ran. If ingest_many were called, it would mean the validation was done
         inside the handler (wrong) or validation was skipped entirely (very wrong).
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         spy = SpyIngestionService()
         dep_callable = _get_dep_callable()
@@ -156,8 +155,8 @@ class TestBulkSizeValidation:
         constructs 5001 minimal valid event dicts — this is unavoidable for a
         boundary test.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         # 5001 minimal valid events — deterministic, no network calls
         oversized = [_minimal_valid_event(user_id=f"u{i}") for i in range(5001)]
@@ -187,8 +186,8 @@ class TestBulkSizeValidation:
         PostgreSQL rows before we even checked the limit, wasting resources and
         ignoring the spec constraint. Validation must fire first.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         oversized = [_minimal_valid_event(user_id=f"u{i}") for i in range(5001)]
 
@@ -218,8 +217,8 @@ class TestBulkSizeValidation:
         reject valid batches at exactly the maximum, breaking the simulator which
         generates exactly 5000 historical events.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         max_events = [_minimal_valid_event(user_id=f"u{i}") for i in range(5000)]
         fake_ids = [uuid.uuid4() for _ in range(5000)]
@@ -265,8 +264,8 @@ class TestBulkSizeValidation:
         (too small: 0 vs 1; too large: 5000 vs 5001). Testing only the extremes
         would miss the inclusive/exclusive edge.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         events = [_minimal_valid_event(user_id=f"u{i}") for i in range(length)]
         fake_ids = [uuid.uuid4() for _ in range(max(length, 1))]
@@ -325,8 +324,8 @@ class TestFieldValidationRejections:
 
         Reference IP from project test-data values: 256.0.0.1 (deliberately invalid).
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         bad_ip_payload = dict(_VALID_EVENT, client_ip="256.0.0.1")
         spy = SpyIngestionService()
@@ -356,8 +355,8 @@ class TestFieldValidationRejections:
         that would return 500. This is the defense-in-depth: validation at the Pydantic
         layer prevents the DB error layer from being reached.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         bad_ip_payload = dict(_VALID_EVENT, client_ip="256.0.0.1")
         spy = SpyIngestionService()
@@ -386,8 +385,8 @@ class TestFieldValidationRejections:
         Literal. An unknown protocol that reaches the pipeline would cause the
         Identity Normalization service to fail with no adapter for the protocol.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         bad_protocol_payload = dict(_VALID_EVENT, protocol="kerberos")
         spy = SpyIngestionService()
@@ -416,8 +415,8 @@ class TestFieldValidationRejections:
         would propagate to Identity Normalization (via the Redis stream) where it
         would cause a routing error with no adapter to handle it.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         bad_protocol_payload = dict(_VALID_EVENT, protocol="kerberos")
         spy = SpyIngestionService()
@@ -444,8 +443,8 @@ class TestFieldValidationRejections:
         caught by Pydantic before the handler runs. This is a baseline sanity test
         for FastAPI's built-in body validation wiring.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         no_user_id = {k: v for k, v in _VALID_EVENT.items() if k != "user_id"}
         spy = SpyIngestionService()
@@ -487,8 +486,8 @@ class TestFieldValidationRejections:
         (e.g., one that only checks 256+ but not format) might pass some forms.
         Spec §7: IPv6 is explicitly excluded ('Do NOT add IPv6 handling').
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         bad_payload = dict(_VALID_EVENT, client_ip=bad_ip)
         dep_callable = _get_dep_callable()
@@ -524,8 +523,8 @@ class TestFieldValidationRejections:
         (192.168.1.1, 8.8.8.8, 198.51.100.1) must all pass. Boundary values
         (0.0.0.0, 255.255.255.255) must also pass.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         good_payload = dict(_VALID_EVENT, client_ip=valid_ip)
         fake_ids = [uuid.uuid4()]

@@ -15,8 +15,6 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-
-from tests.helpers import REPO_ROOT
 from naas_shared.models import (
     EnrichmentApplied,
     EnrichmentSkipped,
@@ -26,6 +24,8 @@ from naas_shared.models import (
     SingleSourceResolution,
     UnanimousResolution,
 )
+
+from tests.helpers import REPO_ROOT
 
 DEMO_SCRIPT = REPO_ROOT / "demo" / "demo_normalization.py"
 

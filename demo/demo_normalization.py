@@ -14,7 +14,6 @@ import sys
 import time
 from typing import Any
 
-
 # ---------------------------------------------------------------------------
 # Optional soft import — naas_shared is not required at runtime.
 # ---------------------------------------------------------------------------
@@ -273,9 +272,8 @@ def _check_db(dsn: str) -> None:
     import psycopg  # local import
 
     try:
-        with psycopg.connect(dsn) as conn:
-            with conn.cursor() as cur:
-                cur.execute("SELECT 1")
+        with psycopg.connect(dsn) as conn, conn.cursor() as cur:
+            cur.execute("SELECT 1")
     except Exception as exc:  # noqa: BLE001
         sys.exit(f"Preflight failed: could not connect to PostgreSQL: {exc}")
 
@@ -987,8 +985,8 @@ def _render_scene_panel(
         )
 
     # Build panel content
-    from rich.console import Group
     from rich import box
+    from rich.console import Group
 
     panel_content_parts: list[Any] = [
         ba_table,
@@ -1036,7 +1034,7 @@ def render_results(
     con = console or get_console()
 
     # Render each scene
-    for i, (scene, result) in enumerate(zip(scenes, results)):
+    for i, (scene, result) in enumerate(zip(scenes, results, strict=True)):
         con.print()
         if i > 0:
             if step:
@@ -1056,7 +1054,7 @@ def render_results(
     summary.add_column("Resolution mix")
     summary.add_column("Confidence")
 
-    for i, (scene, result) in enumerate(zip(scenes, results)):
+    for i, (scene, result) in enumerate(zip(scenes, results, strict=True)):
         na = result.get("normalized_attributes") or {}
         details = na.get("resolution_details") or {}
         enr = na.get("enrichment") or {}
@@ -1110,10 +1108,9 @@ def cleanup_events(
     import psycopg  # local import
 
     try:
-        with psycopg.connect(db_dsn) as conn:
-            with conn.cursor() as cur:
-                cur.execute(CLEANUP_QUERY, {"ids": event_ids})
-                count = cur.rowcount
+        with psycopg.connect(db_dsn) as conn, conn.cursor() as cur:
+            cur.execute(CLEANUP_QUERY, {"ids": event_ids})
+            count = cur.rowcount
         get_console().print(
             f"Cleanup: removed {count} event(s) from the database.",
             style="dim",

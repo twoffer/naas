@@ -5,7 +5,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # third-party
 import pytest
 
-
 # ===========================================================================
 # CLASS 1 — Import: app.main resolves to a FastAPI instance
 # ===========================================================================
@@ -35,9 +34,8 @@ class TestAppMainImport:
         Starlette instance without FastAPI's OpenAPI/validation layer would break
         the service's contract with upstream callers.
         """
-        from fastapi import FastAPI
-
         from app.main import app
+        from fastapi import FastAPI
 
         assert isinstance(app, FastAPI), (
             f"Expected app to be a FastAPI instance, got {type(app).__name__!r}. "
@@ -139,9 +137,8 @@ class TestOnlyHealthRouteExposed:
         WHY: End-to-end validation that the route is wired to a handler, not just
         registered as a placeholder. A route without a handler returns 422 or 500.
         """
-        from starlette.testclient import TestClient
-
         from app.main import app
+        from starlette.testclient import TestClient
 
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get("/health")

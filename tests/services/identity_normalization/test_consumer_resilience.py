@@ -10,16 +10,19 @@ real python-ldap exception types to outcome strings without raising.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import sys
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from tests.services.identity_normalization.conftest import (
     FakeRedis as _FakeRedis,
+)
+from tests.services.identity_normalization.conftest import (
     inject_fake_ldap as _inject_fake_ldap,
 )
-
 
 # ---------------------------------------------------------------------------
 # Note: inject_fake_ldap/_FakeRedis come from the per-service conftest.
@@ -140,18 +143,19 @@ class TestConsumerLoopXreadgroupResilience:
         publisher = AsyncMock()
         publisher.publish_normalized = AsyncMock(return_value=None)
 
-        from naas_shared.models import LoginEventRecord
-        from naas_shared.constants import STREAM_LOGIN_EVENTS
-        from datetime import datetime, timezone
-        from uuid import UUID
         import json as _json
+        from datetime import datetime
+        from uuid import UUID
+
+        from naas_shared.constants import STREAM_LOGIN_EVENTS
+        from naas_shared.models import LoginEventRecord
 
         record = LoginEventRecord(
             id=UUID("12345678-1234-5678-1234-567812345678"),
             user_id="alice",
             client_ip="192.168.1.1",
             protocol="oidc",
-            timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
             source="user",
             is_synthetic=False,
             is_historical=False,
@@ -170,15 +174,13 @@ class TestConsumerLoopXreadgroupResilience:
         )
         redis.xack = AsyncMock()
 
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await run_consumer_loop(
                 service=service,
                 repository=repository,
                 publisher=publisher,
                 redis=redis,
             )
-        except asyncio.CancelledError:
-            pass
 
         assert normalize_call_count[0] == 1, (
             f"After a transient xreadgroup error, the loop must continue and process "
@@ -250,15 +252,13 @@ class TestConsumerLoopXreadgroupResilience:
         redis.xack = AsyncMock()
 
         with patch("asyncio.sleep", side_effect=_capturing_sleep):
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await run_consumer_loop(
                     service=service,
                     repository=repository,
                     publisher=publisher,
                     redis=redis,
                 )
-            except asyncio.CancelledError:
-                pass
 
         error_sleeps = [d for d in sleep_calls if d > 0]
         assert len(error_sleeps) >= 1, (
@@ -288,12 +288,12 @@ class TestWeightForUnknownSource:
     def _make_minimal_config(self):
         """Build a NormalizationConfig with known default weights."""
         from app.normalization_config import (
-            NormalizationConfig,
-            Defaults,
             AttributeConfig,
+            Defaults,
             EnrichmentConfig,
             EnrichmentSources,
             LdapEnrichmentConfig,
+            NormalizationConfig,
         )
 
         return NormalizationConfig(
@@ -478,7 +478,7 @@ class TestPoolSearchUnbindOnBrokenConnection:
             await asyncio.wait_for(
                 adapter.enrich("primary_email", "bob@corp.com"), timeout=2.0
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail(
                 "Second enrich() call timed out — the pool slot was not freed after "
                 "a failed unbind_s(). put_nowait(None) must be called even when "

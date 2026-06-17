@@ -1,13 +1,13 @@
 """Event ingestion service integration: dual-write to PostgreSQL and Redis Stream."""
 
+import contextlib
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import MagicMock
 
 # third-party
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Shared test data helpers
@@ -27,7 +27,7 @@ def _make_event(**overrides: Any):
         "user_id": "alice",
         "client_ip": "192.168.1.1",
         "protocol": "oidc",
-        "timestamp": datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+        "timestamp": datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
         "source": "user",
         "is_synthetic": False,
         "is_historical": False,
@@ -754,10 +754,9 @@ class TestPersistFailurePropagation:
             logger=_make_fake_logger(),
         )
 
-        try:
+        # Expected RuntimeError — we are testing the side-effects, not the exception
+        with contextlib.suppress(RuntimeError):
             await service.ingest_one(_make_event())
-        except RuntimeError:
-            pass  # Expected — we are testing the side-effects, not the exception
 
         assert publisher.published_records == [], (
             f"publisher.publish must NEVER be called when persist raises. "
@@ -790,10 +789,8 @@ class TestPersistFailurePropagation:
             logger=_make_fake_logger(),
         )
 
-        try:
+        with contextlib.suppress(RuntimeError):
             await service.ingest_one(_make_event())
-        except RuntimeError:
-            pass
 
         persist_entries = [entry for entry in call_log if entry[0] == "persist"]
         assert len(persist_entries) == 1, (
@@ -846,10 +843,8 @@ class TestPersistFailurePropagation:
         )
         events = [_make_event(user_id=f"user{i}") for i in range(3)]
 
-        try:
+        with contextlib.suppress(RuntimeError):
             await service.ingest_many(events)
-        except RuntimeError:
-            pass
 
         assert publisher.published_records == [], (
             f"publisher.publish must never be called when persist_many raises. "

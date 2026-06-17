@@ -5,12 +5,9 @@ import uuid
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Repo-root discovery (needed to locate app/schemas.py under test)
 # ---------------------------------------------------------------------------
-
-
 from tests.helpers import REPO_ROOT
 
 SERVICE_DIR = REPO_ROOT / "services" / "event-ingestion"
@@ -108,9 +105,8 @@ class TestIngestAccepted:
         encoding, field validation, and OpenAPI schema generation. A plain dataclass
         or TypedDict would bypass Pydantic validation and break OpenAPI docs.
         """
-        from pydantic import BaseModel
-
         from app.schemas import IngestAccepted
+        from pydantic import BaseModel
 
         assert issubclass(IngestAccepted, BaseModel), (
             "IngestAccepted must inherit from pydantic.BaseModel for FastAPI "
@@ -144,9 +140,8 @@ class TestIngestAccepted:
         If status were a plain str, callers could set status="deny" and the service
         would silently return a misleading response. Literal enforces the contract.
         """
-        from pydantic import ValidationError
-
         from app.schemas import IngestAccepted
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             IngestAccepted(id=_TEST_UUID_1, status="rejected")  # type: ignore[arg-type]
@@ -208,9 +203,8 @@ class TestBulkIngestAccepted:
 
     def test_bulk_ingest_accepted_is_pydantic_basemodel(self) -> None:
         """BulkIngestAccepted must be a Pydantic BaseModel subclass."""
-        from pydantic import BaseModel
-
         from app.schemas import BulkIngestAccepted
+        from pydantic import BaseModel
 
         assert issubclass(BulkIngestAccepted, BaseModel), (
             "BulkIngestAccepted must inherit from pydantic.BaseModel."
@@ -236,9 +230,8 @@ class TestBulkIngestAccepted:
 
     def test_bulk_ingest_accepted_status_is_not_settable_to_non_accepted(self) -> None:
         """BulkIngestAccepted.status must reject values other than 'accepted'."""
-        from pydantic import ValidationError
-
         from app.schemas import BulkIngestAccepted
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             BulkIngestAccepted(

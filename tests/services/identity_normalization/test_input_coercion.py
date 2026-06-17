@@ -12,7 +12,6 @@ from tests.services.identity_normalization.conftest import (
     inject_fake_ldap as _inject_fake_ldap,
 )
 
-
 # ===========================================================================
 # normalize_department / normalize_employee_type — non-string inputs
 # ===========================================================================

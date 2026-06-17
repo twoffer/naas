@@ -238,11 +238,11 @@ class TestSingleIngestHappyPath:
         is accepted for asynchronous processing; 200 implies synchronous completion).
         201 Created would imply the resource is directly addressable. 202 is correct.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
-        app_dep, dep_callable = _import_app_and_service_dep()
+        _app_dep, dep_callable = _import_app_and_service_dep()
 
         app.dependency_overrides[dep_callable] = lambda: fake
         try:
@@ -264,8 +264,8 @@ class TestSingleIngestHappyPath:
         outputs (normalization result, risk decision). A missing or wrong id breaks
         that correlation chain.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
@@ -295,8 +295,8 @@ class TestSingleIngestHappyPath:
         Downstream callers check body.status == 'accepted' to confirm reception.
         Any other value breaks API contracts.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
@@ -323,8 +323,8 @@ class TestSingleIngestHappyPath:
         the same request, violating the 'exactly one row per event' contract.
         Calling it zero times would mean nothing was persisted.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
@@ -350,8 +350,8 @@ class TestSingleIngestHappyPath:
         port contract and makes it harder to distinguish single vs. batch paths
         in structured logs.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(one_returns=_KNOWN_UUID_1)
         _, dep_callable = _import_app_and_service_dep()
@@ -384,8 +384,8 @@ class TestBulkIngestHappyPath:
 
     def test_bulk_ingest_returns_202(self) -> None:
         """POST /events/bulk with 3 valid events returns HTTP 202."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
@@ -404,8 +404,8 @@ class TestBulkIngestHappyPath:
 
     def test_bulk_ingest_response_accepted_count_equals_input_length(self) -> None:
         """Response body 'accepted' field must equal the number of submitted events."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
@@ -426,8 +426,8 @@ class TestBulkIngestHappyPath:
 
     def test_bulk_ingest_response_event_ids_matches_service_return(self) -> None:
         """Response body 'event_ids' must equal the UUIDs returned by ingest_many."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
@@ -450,8 +450,8 @@ class TestBulkIngestHappyPath:
 
     def test_bulk_ingest_response_status_is_accepted(self) -> None:
         """Response body 'status' must be 'accepted'."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
@@ -475,8 +475,8 @@ class TestBulkIngestHappyPath:
         WHY: The route must delegate to the service. One call = one batch transaction.
         Multiple calls would break the all-or-nothing guarantee.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
@@ -495,8 +495,8 @@ class TestBulkIngestHappyPath:
 
     def test_bulk_ingest_does_not_call_ingest_one(self) -> None:
         """POST /events/bulk must NOT call ingest_one for each event in the batch."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(many_returns=list(_KNOWN_UUIDS))
         _, dep_callable = _import_app_and_service_dep()
@@ -521,8 +521,8 @@ class TestBulkIngestHappyPath:
         (not wrapped in an envelope).' The persona simulator sends bare arrays.
         An envelope (e.g., {"events": [...]}) would reject real upstream payloads.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         fake = FakeIngestionService(many_returns=[_KNOWN_UUID_1])
         _, dep_callable = _import_app_and_service_dep()
@@ -578,8 +578,8 @@ class TestPublishFailureResilience:
         _safe_publish catches it: ingest_one still returns the UUID normally.
         The route must accept that UUID and return 202.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         # This fake models the "committed OK, publish swallowed" case —
         # ingest_one returns normally (which is what IngestionService._safe_publish
@@ -687,8 +687,8 @@ class TestPersistFailureRouteResponse:
         NOT accepted and should be retried.  A 202 here would be a lie — nothing
         was written to PostgreSQL.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         service, _call_log, _publisher = _make_failing_service()
         _, dep_callable = _import_app_and_service_dep()
@@ -713,8 +713,8 @@ class TestPersistFailureRouteResponse:
         A stream message for an un-committed event would leave dangling references
         in the pipeline — normalization would fail to find the corresponding PG row.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         service, _call_log, publisher = _make_failing_service()
         _, dep_callable = _import_app_and_service_dep()
@@ -740,8 +740,8 @@ class TestPersistFailureRouteResponse:
         the batch are un-committed and the route must return 5xx so the caller
         knows to retry the entire batch.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         service, _call_log, _publisher = _make_failing_service()
         _, dep_callable = _import_app_and_service_dep()
@@ -766,8 +766,8 @@ class TestPersistFailureRouteResponse:
         All 3 events are un-committed; attempting to publish any of them would
         create dangling stream messages.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         service, _call_log, publisher = _make_failing_service()
         _, dep_callable = _import_app_and_service_dep()

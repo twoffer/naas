@@ -173,7 +173,7 @@ def _poll_normalized_attributes(
 @pytest.fixture(scope="module")
 def pg_connection(compose_stack: dict):
     """Synchronous psycopg3 connection shared across all tests in this module."""
-    import psycopg  # noqa: PLC0415
+    import psycopg
 
     conn = psycopg.connect(**compose_stack["pg_conninfo"])
     conn.autocommit = True
@@ -249,7 +249,7 @@ except ImportError:
     _NAAS_SHARED_AVAILABLE = False
 
 
-def _validate_normalized_attributes(attrs_dict: dict) -> "NormalizedAttributes":
+def _validate_normalized_attributes(attrs_dict: dict) -> NormalizedAttributes:
     """Parse attrs_dict through NormalizedAttributes.model_validate().
 
     Skips Pydantic validation if naas_shared is not importable; the raw dict

@@ -411,7 +411,7 @@ class TestEnrichSearchAndMatch:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
+        attrs, _outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is not None, "Expected a match result, got attrs=None"
 
@@ -458,7 +458,7 @@ class TestEnrichSearchAndMatch:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
+        attrs, _outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is not None, "Expected a match result, got attrs=None"
         assert attrs.get("department") == "Engineering", (

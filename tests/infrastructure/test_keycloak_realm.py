@@ -10,12 +10,9 @@ import json
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
 from tests.helpers import REPO_ROOT
 
 REALM_FILE = REPO_ROOT / "infrastructure" / "keycloak" / "naas-realm-export.json"

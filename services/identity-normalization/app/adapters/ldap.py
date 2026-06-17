@@ -47,20 +47,27 @@ discriminator without reading shared mutable state.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import inspect
 import json
 import re
-from app.adapters._mapping import FieldRule, apply_field_rules, coerce_str, coerce_str_list
+
+import naas_shared.redis_client as _redis_module
+from naas_shared.config import get_settings
+from naas_shared.constants import LDAP_ENRICHMENT_CACHE_PREFIX
+from naas_shared.logging import get_logger
+
+from app.adapters._mapping import (
+    FieldRule,
+    apply_field_rules,
+    coerce_str,
+    coerce_str_list,
+)
 from app.normalization_values import (
     UNIFIED_TO_LDAP,
     normalize_department_value,
     normalize_employee_type,
 )
-from naas_shared.config import get_settings
-from naas_shared.constants import LDAP_ENRICHMENT_CACHE_PREFIX
-from naas_shared.logging import get_logger
-
-import naas_shared.redis_client as _redis_module
 
 _logger = get_logger(__name__)
 
@@ -123,7 +130,7 @@ def _reduce_dn_to_group_name(dn: str) -> str | None:
 
     # Primary: use ldap.dn.str2dn for correct RFC-4514 escaped-character handling.
     try:
-        import ldap.dn  # noqa: PLC0415  lazy import — python-ldap not in dev venv
+        import ldap.dn
 
         parsed = ldap.dn.str2dn(dn_stripped)
         # parsed is list[list[(attr, value, flags)]] — one list per RDN component.
@@ -136,7 +143,7 @@ def _reduce_dn_to_group_name(dn: str) -> str | None:
         return None
     except ImportError:
         pass  # python-ldap not available; fall through to regex fallback
-    except Exception:
+    except Exception:  # noqa: BLE001 — defense-in-depth; any DN-reduction failure falls through to the regex fallback
         _logger.warning("ldap_dn_reduction_failed", dn_length=len(dn_stripped))
         return None
 
@@ -268,7 +275,7 @@ def build_search_filter(ldap_attr: str, lookup_value: str) -> str:
     Returns:
         A parenthesised equality filter string, e.g. '(mail=alice@corp.com)'.
     """
-    import ldap.filter  # noqa: PLC0415  lazy import — python-ldap not in dev venv
+    import ldap.filter
 
     escaped = ldap.filter.escape_filter_chars(lookup_value)
     return f"({ldap_attr}={escaped})"
@@ -327,7 +334,7 @@ def _create_ldap_connection(
     Raises:
         ldap.LDAPError subclass on connection or bind failure.
     """
-    import ldap  # noqa: PLC0415  lazy import
+    import ldap
 
     timeout_s = timeout_ms / 1000.0
     conn = ldap.initialize(uri)
@@ -362,7 +369,7 @@ def _ldap_search_on_conn(
 
     Raises any ldap.LDAPError subclass so the caller can classify the error.
     """
-    import ldap  # noqa: PLC0415  lazy import
+    import ldap
 
     return conn.search_s(base_dn, ldap.SCOPE_SUBTREE, filter_str, attrlist)  # type: ignore[union-attr]
 
@@ -421,10 +428,8 @@ async def _pool_search(
         # leaked under error conditions. Any exception from unbind_s() is
         # swallowed — the slot must be freed regardless.
         if conn is not None:
-            try:
+            with contextlib.suppress(Exception):
                 await asyncio.to_thread(_do_unbind_s, conn)
-            except Exception:
-                pass
         pool.put_nowait(None)  # discard broken connection; free the slot
         raise
 
@@ -539,10 +544,8 @@ class LdapAdapter:
                 # Log the length only (not the raw content) to prevent PII leakage:
                 # the cached string may contain the user's email address, display name,
                 # or other directory attributes collected during a prior successful query.
-                try:
+                with contextlib.suppress(Exception):
                     await redis.delete(cache_key)
-                except Exception:
-                    pass
                 _logger.warning(
                     "ldap_enrich_cache_decode_error",
                     ldap_attr=ldap_attr,
@@ -572,7 +575,7 @@ class LdapAdapter:
                 attrlist,
                 timeout_ms=timeout_ms,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — graceful degradation: classify any LDAP error, never drop the event (ADR-0008)
             outcome = _classify_ldap_error(exc)
             # For connection errors the service owns operator-facing logging;
             # log at DEBUG here to avoid duplicate ERRORs per event.
@@ -633,7 +636,7 @@ def _classify_ldap_error(exc: Exception) -> str:
         or 'ldap_unexpected_error'.
     """
     try:
-        import ldap as ldap_module  # noqa: PLC0415  lazy import
+        import ldap as ldap_module
 
         # Collect timeout exception types from the canonical attribute names.
         # ldap.TIMEOUT = client/network timeout; ldap.TIMELIMIT_EXCEEDED = server

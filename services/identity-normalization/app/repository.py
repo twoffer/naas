@@ -15,11 +15,10 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import update
-
 from naas_shared.logging import get_logger
 from naas_shared.models import NormalizedAttributes
 from naas_shared.schemas import EventORM
+from sqlalchemy import update
 
 _logger = get_logger(__name__)
 

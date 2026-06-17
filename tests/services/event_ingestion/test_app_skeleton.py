@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # third-party
 import pytest
 
-
 # ===========================================================================
 # CLASS 1 — Import: app.main resolves to a FastAPI instance
 # ===========================================================================
@@ -36,9 +35,8 @@ class TestAppMainImport:
         Starlette instance without FastAPI's OpenAPI/validation layer would break
         the service's contract with upstream callers.
         """
-        from fastapi import FastAPI
-
         from app.main import app
+        from fastapi import FastAPI
 
         assert isinstance(app, FastAPI), (
             f"Expected app to be a FastAPI instance, got {type(app).__name__!r}. "
@@ -113,9 +111,8 @@ class TestHealthEndpoint:
         Any non-200 status causes the container to report 'unhealthy' in docker-compose ps,
         blocking all depends_on services from starting.
         """
-        from starlette.testclient import TestClient
-
         from app.main import app
+        from starlette.testclient import TestClient
 
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get("/health")
@@ -132,9 +129,8 @@ class TestHealthEndpoint:
         Downstream monitoring tools (Grafana, Prometheus) also parse the /health body.
         A non-JSON response (e.g., plain text) breaks automated health monitoring.
         """
-        from starlette.testclient import TestClient
-
         from app.main import app
+        from starlette.testclient import TestClient
 
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get("/health")
@@ -159,9 +155,8 @@ class TestHealthEndpoint:
         multiple services are running. The wrong service name (e.g., 'api-gateway')
         causes false positive health checks that mask deployment errors.
         """
-        from starlette.testclient import TestClient
-
         from app.main import app
+        from starlette.testclient import TestClient
 
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get("/health")
@@ -182,9 +177,8 @@ class TestHealthEndpoint:
         default behavior or a mock that isn't matching the implementation's
         dependency call pattern.
         """
-        from starlette.testclient import TestClient
-
         from app.main import app
+        from starlette.testclient import TestClient
 
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get("/health")
@@ -205,11 +199,10 @@ class TestHealthEndpoint:
         in the correct types. An incomplete body would cause Pydantic validation errors
         in any consumer that calls HealthResponse.model_validate(body).
         """
+        from app.main import app
         from naas_shared.models import HealthResponse
         from pydantic import ValidationError
         from starlette.testclient import TestClient
-
-        from app.main import app
 
         with TestClient(app, raise_server_exceptions=False) as client:
             response = client.get("/health")

@@ -9,6 +9,8 @@ import pytest
 
 from tests.services.identity_normalization.conftest import (
     FakeRedis as _FakeRedis,
+)
+from tests.services.identity_normalization.conftest import (
     inject_fake_ldap as _inject_fake_ldap,
 )
 
@@ -102,7 +104,7 @@ class TestCacheMiss:
         class OrderRecordingRedis(_FakeRedis):
             async def get(self, key):
                 call_order.append("redis_get")
-                return None
+                return
 
         fake_redis = OrderRecordingRedis(get_return=None)
         monkeypatch.setattr(
@@ -362,7 +364,7 @@ class TestCachePositiveHit:
         from app.adapters.ldap import LdapAdapter
 
         adapter = LdapAdapter()
-        attrs, outcome = await adapter.enrich("primary_email", "alice@corp.com")
+        attrs, _outcome = await adapter.enrich("primary_email", "alice@corp.com")
 
         assert attrs is not None
         assert attrs.get("display_name") == "Alice Smith", (
@@ -554,7 +556,7 @@ class TestCacheWrites:
             f"Cache write for positive match must have a positive TTL. "
             f"Got TTL: {set_call['ttl']!r}"
         )
-        assert "ldap_enrichment:alice@corp.com" == set_call["key"], (
+        assert set_call["key"] == "ldap_enrichment:alice@corp.com", (
             f"Cache key for positive match must be 'ldap_enrichment:alice@corp.com', "
             f"got {set_call['key']!r}"
         )
@@ -971,8 +973,9 @@ class TestTransientFailureNotCached:
             MagicMock(return_value=fake_redis_err),
         )
 
-        from app.adapters import ldap as ldap_mod
         import importlib
+
+        from app.adapters import ldap as ldap_mod
 
         importlib.reload(ldap_mod)
 

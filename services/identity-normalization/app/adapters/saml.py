@@ -15,7 +15,12 @@ Mapping (spec §5.2 [TRANSCRIBE EXACTLY]):
 
 from __future__ import annotations
 
-from app.adapters._mapping import FieldRule, apply_field_rules, coerce_str, coerce_str_list
+from app.adapters._mapping import (
+    FieldRule,
+    apply_field_rules,
+    coerce_str,
+    coerce_str_list,
+)
 from app.normalization_values import normalize_department_value, normalize_employee_type
 
 SAML_FIELD_RULES: dict[str, FieldRule] = {
