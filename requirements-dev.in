@@ -11,7 +11,7 @@
 # silently dropped on regeneration, deleting the whole shared closure. The
 # package itself is suppressed from the lock via --unsafe-package=naas-shared
 # (an editable local path is not a portable pin); only its dependencies pin.
-pytest>=8.3.4
+pytest>=9.0.3
 pytest-asyncio>=0.25.0
 pytest-cov>=6.0.0
 pytest-mock>=3.14.0
