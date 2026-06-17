@@ -7,9 +7,10 @@ import pytest
 
 from tests.services.identity_normalization.conftest import (
     FakeRedis as _FakeRedis,
+)
+from tests.services.identity_normalization.conftest import (
     inject_fake_ldap as _inject_fake_ldap,
 )
-
 
 # ===========================================================================
 # CLASS 1 — escape_filter_chars is called on the lookup_value
@@ -150,10 +151,10 @@ class TestFilterUsesEscapedValue:
         """
         fake_ldap = _inject_fake_ldap(monkeypatch)
 
-        ESCAPE_MARKER = "SAFE_"
+        escape_marker = "SAFE_"
 
         def marking_escape(value: str) -> str:
-            return ESCAPE_MARKER + value
+            return escape_marker + value
 
         fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=marking_escape)
 
@@ -184,7 +185,7 @@ class TestFilterUsesEscapedValue:
         assert len(search_calls) >= 1, "search_s must be called"
         filter_str = search_calls[0]
 
-        escaped_value = ESCAPE_MARKER + raw_lookup  # "SAFE_alice@corp.com"
+        escaped_value = escape_marker + raw_lookup  # "SAFE_alice@corp.com"
 
         assert escaped_value in filter_str, (
             f"The filter string must contain the escaped output '{escaped_value}', "
@@ -283,10 +284,10 @@ class TestFilterUsesEscapedValue:
         """
         fake_ldap = _inject_fake_ldap(monkeypatch)
 
-        MARKER = "SAFE_"
+        marker = "SAFE_"
 
         def marking_escape(value: str) -> str:
-            return MARKER + value.replace("*", "").replace("(", "").replace(")", "")
+            return marker + value.replace("*", "").replace("(", "").replace(")", "")
 
         fake_ldap.filter.escape_filter_chars = MagicMock(side_effect=marking_escape)
 
@@ -318,9 +319,9 @@ class TestFilterUsesEscapedValue:
 
         filter_str = search_calls[0]
 
-        # The filter must contain the MARKER (escaped output) — not bare * or )
-        assert MARKER in filter_str, (
-            f"The filter must use the escape_filter_chars output (contains '{MARKER}'). "
+        # The filter must contain the marker (escaped output) — not bare * or )
+        assert marker in filter_str, (
+            f"The filter must use the escape_filter_chars output (contains '{marker}'). "
             f"Got: {filter_str!r}. Raw injection payload was used instead."
         )
 

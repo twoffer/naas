@@ -1,20 +1,19 @@
 """OIDC, SAML, and LDAP adapter protocol for event-ingestion (placeholder)."""
 
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Reference values (project test-data reference values from agent instructions)
 # ---------------------------------------------------------------------------
 
 _TEST_UUID = uuid.UUID("12345678-1234-5678-1234-567812345678")
-_TEST_TIMESTAMP = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+_TEST_TIMESTAMP = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
 _TEST_IP = "192.168.1.1"
 
 
@@ -81,7 +80,10 @@ class TestAdaptersModuleImport:
 
     def test_both_adapters_importable_together(self) -> None:
         """from app.adapters import PostgresEventRepository, RedisEventPublisher."""
-        from app.adapters import PostgresEventRepository, RedisEventPublisher  # noqa: F401
+        from app.adapters import (  # noqa: F401
+            PostgresEventRepository,
+            RedisEventPublisher,
+        )
 
 
 # ===========================================================================
@@ -515,8 +517,8 @@ class TestPostgresEventRepositoryPersistMany:
         WHY: If fewer ORM objects are passed, some events are silently not inserted.
         If more are passed, spurious duplicate rows appear.
         """
-        from naas_shared.schemas import EventORM
         from app.adapters import PostgresEventRepository
+        from naas_shared.schemas import EventORM
 
         session = _make_fake_async_session()
         repo = PostgresEventRepository(session=session)
@@ -607,8 +609,8 @@ class TestRedisEventPublisherPublish:
         the wrong stream name is used (e.g., 'normalized_events'), events would skip
         the normalization stage entirely.
         """
-        from naas_shared.constants import STREAM_LOGIN_EVENTS
         from app.adapters import RedisEventPublisher
+        from naas_shared.constants import STREAM_LOGIN_EVENTS
 
         record = _make_record()
         with patch("app.adapters.publish_to_stream", new=AsyncMock()) as mock_pts:

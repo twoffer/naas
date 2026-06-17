@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock
 from uuid import UUID
 
 import pytest
-
-from tests.helpers import REPO_ROOT as _REPO
 from naas_shared.models import (
     EnrichmentApplied,
     EnrichmentSkipped,
@@ -17,12 +15,14 @@ from naas_shared.models import (
     NormalizedAttributes,
 )
 
+from tests.helpers import REPO_ROOT as _REPO
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 _UUID = UUID("12345678-1234-5678-1234-567812345678")
-_NOW = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+_NOW = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
 
 _LDAP_MATCH_ATTRS: dict[str, Any] = {
     "display_name": "Alice Smith",
@@ -60,10 +60,10 @@ def _load_config():
 
 
 def _make_service(enrich_return: tuple, ldap_enabled: bool = True):
-    from app.service import NormalizationService
+    from app.adapters.ldap import LdapAdapter
     from app.adapters.oidc import OidcAdapter
     from app.adapters.saml import SamlAdapter
-    from app.adapters.ldap import LdapAdapter
+    from app.service import NormalizationService
 
     cfg = _load_config()
     cfg.enrichment.sources.ldap.enabled = ldap_enabled
@@ -339,10 +339,10 @@ class TestGracefulDegradation:
 
     async def test_enrichment_failure_does_not_raise_exception(self):
         """If enrich() raises an unexpected exception, normalize() handles it and does not propagate."""
-        from app.service import NormalizationService
+        from app.adapters.ldap import LdapAdapter
         from app.adapters.oidc import OidcAdapter
         from app.adapters.saml import SamlAdapter
-        from app.adapters.ldap import LdapAdapter
+        from app.service import NormalizationService
 
         cfg = _load_config()
         ldap = LdapAdapter()

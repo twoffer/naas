@@ -183,9 +183,8 @@ class TestEventORMColumnTypes:
         INET type ensures only valid dotted-quad values are persisted. Using the wrong
         SQLAlchemy type class causes the insert to fail with a type mismatch error.
         """
-        from sqlalchemy.dialects.postgresql import INET
-
         from naas_shared.schemas import EventORM
+        from sqlalchemy.dialects.postgresql import INET
 
         col = EventORM.__table__.columns["client_ip"]
         assert isinstance(col.type, INET), (
@@ -201,9 +200,8 @@ class TestEventORMColumnTypes:
         breaks GIN index queries and is slower for downstream consumers. The ORM type
         class must match to avoid insert failures.
         """
-        from sqlalchemy.dialects.postgresql import JSONB
-
         from naas_shared.schemas import EventORM
+        from sqlalchemy.dialects.postgresql import JSONB
 
         col = EventORM.__table__.columns["raw_attributes"]
         assert isinstance(col.type, JSONB), (
@@ -219,9 +217,8 @@ class TestEventORMColumnTypes:
         forces an extra JSON parse step that the JSONB type handles natively.
         Wrong type causes 'column of type json' errors on update.
         """
-        from sqlalchemy.dialects.postgresql import JSONB
-
         from naas_shared.schemas import EventORM
+        from sqlalchemy.dialects.postgresql import JSONB
 
         col = EventORM.__table__.columns["normalized_attributes"]
         assert isinstance(col.type, JSONB), (
@@ -236,9 +233,8 @@ class TestEventORMColumnTypes:
         geo, device fingerprint) to this column. The JSONB type is required by the DDL
         and enables efficient field-level querying by the Risk Evaluator.
         """
-        from sqlalchemy.dialects.postgresql import JSONB
-
         from naas_shared.schemas import EventORM
+        from sqlalchemy.dialects.postgresql import JSONB
 
         col = EventORM.__table__.columns["enriched_signals"]
         assert isinstance(col.type, JSONB), (
@@ -254,9 +250,8 @@ class TestEventORMColumnTypes:
         allowing a session-timezone-shifted value to corrupt the stored UTC instant
         that downstream risk logic depends on.
         """
-        from sqlalchemy import DateTime
-
         from naas_shared.schemas import EventORM
+        from sqlalchemy import DateTime
 
         col = EventORM.__table__.columns["timestamp"]
         assert isinstance(col.type, DateTime), (
@@ -275,9 +270,8 @@ class TestEventORMColumnTypes:
         here would cause asyncpg to return a naive datetime on read, losing the UTC
         anchor and potentially shifting the value in a non-UTC session.
         """
-        from sqlalchemy import DateTime
-
         from naas_shared.schemas import EventORM
+        from sqlalchemy import DateTime
 
         col = EventORM.__table__.columns["created_at"]
         assert isinstance(col.type, DateTime), (

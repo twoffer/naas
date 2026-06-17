@@ -104,7 +104,7 @@ class Normalizer(Protocol):
     the consumer layer is typed without a hard import of NormalizationService.
     """
 
-    async def normalize(self, record: "LoginEventRecord") -> "NormalizedAttributes":
+    async def normalize(self, record: LoginEventRecord) -> NormalizedAttributes:
         """Extract, enrich, and resolve attributes for a single login event.
 
         WHY: Declared async because every internal stage (LDAP enrichment via

@@ -1,5 +1,4 @@
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -22,7 +21,7 @@ class Settings(BaseSettings):
     postgres_host: str = "postgres"
     postgres_port: int = 5432
     postgres_user: str = "naas"
-    postgres_password: str = "naas_dev_password"
+    postgres_password: str = "naas_dev_password"  # noqa: S105 — local-dev/compose default, overridden by env in real deploys
     postgres_db: str = "naas"
 
     # Redis
@@ -34,7 +33,7 @@ class Settings(BaseSettings):
     ldap_port: int = 389
     ldap_base_dn: str = "dc=corp,dc=com"
     ldap_admin_dn: str = "cn=admin,dc=corp,dc=com"
-    ldap_admin_password: str = "admin"
+    ldap_admin_password: str = "admin"  # noqa: S105 — local-dev/compose default, overridden by env in real deploys
     ldap_pool_size: int = Field(default=3, ge=1, le=10)
 
     # Keycloak
@@ -45,7 +44,7 @@ class Settings(BaseSettings):
     # LLM Provider Configuration
     llm_provider: str = Field(default="mock", pattern="^(claude|ollama|mock)$")
     llm_model: str = Field(default="claude-sonnet-4-20250514")
-    anthropic_api_key: Optional[str] = None
+    anthropic_api_key: str | None = None
     ollama_url: str = Field(default="http://host.docker.internal:11434")
     ollama_model: str = Field(default="llama3.1")
     simulation_batch_size: int = Field(default=10, ge=1, le=50)

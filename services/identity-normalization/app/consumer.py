@@ -24,14 +24,14 @@ import asyncio
 import json
 import socket
 
+import naas_shared.redis_client as _redis_mod
 import pydantic
 import structlog
-
-import naas_shared.redis_client as _redis_mod
-from app.ports import EventPublisher, Normalizer, NormalizationRepository
 from naas_shared.constants import GROUP_NORMALIZATION, STREAM_LOGIN_EVENTS
 from naas_shared.logging import get_logger
 from naas_shared.models import LoginEventRecord
+
+from app.ports import EventPublisher, NormalizationRepository, Normalizer
 
 # Minimum pause on an empty XREADGROUP batch.  In production, `block=2000` means
 # Redis holds the connection open for up to 2 s before returning [] — so this
@@ -92,7 +92,7 @@ async def run_consumer_loop(
                 count=10,
                 block=2000,
             )
-        except Exception as xread_exc:
+        except Exception as xread_exc:  # noqa: BLE001 — any transient read error must not kill the consumer loop
             log.warning(
                 "xreadgroup_transient_error",
                 error=str(xread_exc)[:200],
@@ -168,7 +168,7 @@ async def _process_message(
             protocol=record.protocol,
         )
 
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 — per-message boundary: a poison message must not crash the loop (no-ACK leaves it pending)
         # For Pydantic ValidationErrors: log field locations only, NOT the raw exception
         # string. str(ValidationError) embeds input_value for each failing field, which
         # can contain PII (e.g., an email address that arrived in a UUID field).

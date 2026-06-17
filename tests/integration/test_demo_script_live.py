@@ -46,7 +46,7 @@ pytestmark = [
 @pytest.fixture(scope="module")
 def pg_connection(compose_stack: dict):
     """Synchronous psycopg3 connection for this module."""
-    import psycopg  # noqa: PLC0415
+    import psycopg
 
     conn = psycopg.connect(**compose_stack["pg_conninfo"])
     conn.autocommit = True

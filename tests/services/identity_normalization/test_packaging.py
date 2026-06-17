@@ -151,7 +151,7 @@ class TestRequirementsTxt:
         ldap_lines = [
             line
             for line in lines
-            if line.startswith("python-ldap") or line.startswith("python_ldap")
+            if line.startswith(("python-ldap", "python_ldap"))
         ]
         assert ldap_lines, (
             f"requirements.in must list 'python-ldap' (with or without version pin). "
@@ -212,10 +212,7 @@ class TestRequirementsTxt:
         redis_lines = [
             line
             for line in lines
-            if line == "redis"
-            or line.startswith("redis==")
-            or line.startswith("redis>=")
-            or line.startswith("redis~=")
+            if line == "redis" or line.startswith(("redis==", "redis>=", "redis~="))
         ]
         assert not redis_lines, (
             f"requirements.in must NOT declare 'redis' — it is owned by "

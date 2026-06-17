@@ -21,7 +21,6 @@ from __future__ import annotations
 
 import sys
 
-
 from tests.helpers import REPO_ROOT
 
 # Production service dir stays hyphenated — only test dirs use underscores.

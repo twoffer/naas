@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import UUID
 
@@ -13,7 +13,7 @@ from naas_shared.models import EnrichmentSkipped, NormalizedAttributes
 # ---------------------------------------------------------------------------
 
 _UUID = UUID("12345678-1234-5678-1234-567812345678")
-_NOW = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+_NOW = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
 
 
 def _make_normalized() -> NormalizedAttributes:

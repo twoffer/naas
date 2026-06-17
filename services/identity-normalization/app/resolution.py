@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.normalization_config import NormalizationConfig
 from naas_shared.models import (
     EnrichmentMetadata,
     ListMergeResolution,
@@ -21,6 +20,8 @@ from naas_shared.models import (
     SingleSourceResolution,
     UnanimousResolution,
 )
+
+from app.normalization_config import NormalizationConfig
 
 # §5.5.2 — Importance weights for normalization_confidence. TRANSCRIBE EXACTLY.
 ATTRIBUTE_IMPORTANCE: dict[str, float] = {
@@ -359,7 +360,7 @@ def _apply_merge_strategy(
     if strategy == "priority":
         # Walk configured priority; return first source with a non-empty list.
         for src in priority or []:
-            if src in groups_map and groups_map[src]:
+            if groups_map.get(src):
                 return sorted(set(groups_map[src]))
         # Fallback: sorted-key order (deterministic when no priority configured or
         # all priority sources are absent/empty).

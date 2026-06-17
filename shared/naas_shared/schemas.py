@@ -6,7 +6,10 @@ Base.metadata.create_all here; the DDL is owned by the init script.
 """
 
 from datetime import datetime
-from uuid import UUID as PyUUID, uuid4
+
+# Alias stdlib UUID to disambiguate from sqlalchemy.dialects.postgresql.UUID (below).
+from uuid import UUID as PyUUID  # noqa: N811
+from uuid import uuid4
 
 from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.dialects.postgresql import INET, JSONB, UUID
@@ -16,7 +19,6 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 class Base(DeclarativeBase):
     """Shared declarative base for all NAAS ORM models."""
 
-    pass
 
 
 class EventORM(Base):

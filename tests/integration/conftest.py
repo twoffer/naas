@@ -35,8 +35,8 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Generator
 from pathlib import Path
-from typing import Generator
 
 import pytest
 
@@ -264,14 +264,14 @@ def _capture_compose_logs(services: list[str], app_services: list[str]) -> None:
         log_path = _LOGS_DIR / f"{svc}.log"
         try:
             result = subprocess.run(
-                _COMPOSE_CMD + ["logs", "--no-color", svc],
+                [*_COMPOSE_CMD, "logs", "--no-color", svc],
                 capture_output=True,
                 text=True,
                 cwd=str(REPO_ROOT),
                 timeout=30,
             )
             log_path.write_text(result.stdout + result.stderr, encoding="utf-8")
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             log_path.write_text(f"Failed to capture logs: {exc}", encoding="utf-8")
 
 
@@ -331,7 +331,7 @@ def compose_stack(request: pytest.FixtureRequest) -> Generator[dict, None, None]
     }
     app_services = list(app_health_urls)
 
-    cmd = _COMPOSE_CMD + ["up", "-d", "--build", "--wait"] + services
+    cmd = [*_COMPOSE_CMD, "up", "-d", "--build", "--wait", *services]
 
     up_result = subprocess.run(
         cmd,
@@ -389,7 +389,7 @@ def compose_stack(request: pytest.FixtureRequest) -> Generator[dict, None, None]
         keep_stack = bool(os.environ.get("NAAS_IT_KEEP_STACK"))
         if not keep_stack:
             subprocess.run(
-                _COMPOSE_CMD + ["down", "-v", "--remove-orphans"],
+                [*_COMPOSE_CMD, "down", "-v", "--remove-orphans"],
                 cwd=str(REPO_ROOT),
                 timeout=60,
                 capture_output=True,

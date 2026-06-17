@@ -23,7 +23,7 @@ async def lifespan(application: FastAPI):
     """Warm the Redis client at startup; tear down connections on shutdown."""
     try:
         await _redis_mod.get_redis()
-    except Exception:
+    except Exception:  # noqa: BLE001 — startup warmup is best-effort; any failure degrades to retry-on-first-request
         get_logger("event-ingestion").warning(
             "redis_warmup_skipped",
             reason="Redis unavailable at startup — will retry on first request",

@@ -8,12 +8,9 @@ from typing import Any
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Repo root discovery (same repo-root discovery pattern used across the infrastructure and repo test files)
 # ---------------------------------------------------------------------------
-
-
 from tests.helpers import REPO_ROOT
 
 COMPOSE_FILE = REPO_ROOT / "docker-compose.yml"
@@ -96,7 +93,7 @@ def _extract_bind_mounts(service_cfg: dict[str, Any]) -> list[tuple[str, str]]:
     for entry in service_cfg.get("volumes", []):
         if isinstance(entry, str):
             # Skip named-volume shorthand (no leading './' or '/')
-            if entry.startswith("./") or entry.startswith("/"):
+            if entry.startswith(("./", "/")):
                 parts = entry.split(":")
                 if len(parts) >= 2:
                     mounts.append((parts[0], parts[1]))

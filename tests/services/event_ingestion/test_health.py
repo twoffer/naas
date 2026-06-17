@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Mock builders for DB session and Redis client
 # ---------------------------------------------------------------------------
@@ -122,10 +121,10 @@ class TestHealthStatusHealthy:
 
     def test_health_returns_200_when_both_deps_ok(self) -> None:
         """GET /health returns HTTP 200 when PG and Redis are both responsive."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
-        with _patch_health_deps() as (db_sess, redis_cli):
+        with _patch_health_deps() as (_db_sess, _redis_cli):
             with TestClient(app, raise_server_exceptions=False) as client:
                 response = client.get("/health")
 
@@ -136,8 +135,8 @@ class TestHealthStatusHealthy:
 
     def test_health_status_is_healthy_when_both_deps_ok(self) -> None:
         """GET /health body status is 'healthy' when both PG and Redis respond."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps() as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -152,8 +151,8 @@ class TestHealthStatusHealthy:
 
     def test_health_service_field_is_event_ingestion_when_healthy(self) -> None:
         """GET /health body service field is 'event-ingestion' in healthy state."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps() as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -168,10 +167,10 @@ class TestHealthStatusHealthy:
 
     def test_health_body_conforms_to_health_response_schema_when_healthy(self) -> None:
         """GET /health body must validate against the shared HealthResponse model."""
+        from app.main import app
         from naas_shared.models import HealthResponse
         from pydantic import ValidationError
         from starlette.testclient import TestClient
-        from app.main import app
 
         with _patch_health_deps() as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -213,8 +212,8 @@ class TestHealthStatusDegraded:
         to report the container as unhealthy, preventing depends_on services from
         starting — even though ingestion can still write to PostgreSQL.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps(redis_client=_make_failing_redis_client()) as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -231,15 +230,14 @@ class TestHealthStatusDegraded:
         WHY: Spec §5.6 — 'Redis down but PG OK → "degraded"'. The probe reports
         'degraded', not the unconditional 'healthy' that a stub would return.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps(
             db_session=_make_ok_db_session(),
             redis_client=_make_failing_redis_client(),
-        ) as _:
-            with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.get("/health")
+        ) as _, TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get("/health")
 
         assert response.status_code == 200
         body = response.json()
@@ -251,10 +249,10 @@ class TestHealthStatusDegraded:
 
     def test_health_body_conforms_to_health_response_schema_when_degraded(self) -> None:
         """GET /health body must validate against HealthResponse when degraded."""
+        from app.main import app
         from naas_shared.models import HealthResponse
         from pydantic import ValidationError
         from starlette.testclient import TestClient
-        from app.main import app
 
         with _patch_health_deps(redis_client=_make_failing_redis_client()) as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -276,8 +274,8 @@ class TestHealthStatusDegraded:
 
     def test_health_service_field_is_event_ingestion_when_degraded(self) -> None:
         """Service field is 'event-ingestion' even in degraded state."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps(redis_client=_make_failing_redis_client()) as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -313,8 +311,8 @@ class TestHealthStatusUnhealthy:
         consumption. Returning 503 here would mark the container unhealthy and
         prevent dependent services from starting.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps(db_session=_make_failing_db_session()) as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -332,15 +330,14 @@ class TestHealthStatusUnhealthy:
         health state: no new events can be accepted at all. The probe reports
         'unhealthy' when Postgres is down (not an unconditional 'healthy').
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps(
             db_session=_make_failing_db_session(),
             redis_client=_make_ok_redis_client(),
-        ) as _:
-            with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.get("/health")
+        ) as _, TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get("/health")
 
         assert response.status_code == 200
         body = response.json()
@@ -359,15 +356,14 @@ class TestHealthStatusUnhealthy:
         must be 'unhealthy', not 'degraded'. Spec §5.6 does not define a fourth
         state; 'unhealthy' covers the case where PG is down regardless of Redis.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps(
             db_session=_make_failing_db_session(),
             redis_client=_make_failing_redis_client(),
-        ) as _:
-            with TestClient(app, raise_server_exceptions=False) as client:
-                response = client.get("/health")
+        ) as _, TestClient(app, raise_server_exceptions=False) as client:
+            response = client.get("/health")
 
         assert response.status_code == 200
         body = response.json()
@@ -381,10 +377,10 @@ class TestHealthStatusUnhealthy:
         self,
     ) -> None:
         """GET /health body must validate against HealthResponse when unhealthy."""
+        from app.main import app
         from naas_shared.models import HealthResponse
         from pydantic import ValidationError
         from starlette.testclient import TestClient
-        from app.main import app
 
         with _patch_health_deps(db_session=_make_failing_db_session()) as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -406,8 +402,8 @@ class TestHealthStatusUnhealthy:
 
     def test_health_service_field_is_event_ingestion_when_unhealthy(self) -> None:
         """Service field is 'event-ingestion' even in unhealthy state."""
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         with _patch_health_deps(db_session=_make_failing_db_session()) as _:
             with TestClient(app, raise_server_exceptions=False) as client:
@@ -459,8 +455,8 @@ class TestHealthAlwaysReturnsHttp200:
         in one test class. The expected_body_status values come directly from
         spec §5.6's decision table.
         """
-        from starlette.testclient import TestClient
         from app.main import app
+        from starlette.testclient import TestClient
 
         db_session = _make_ok_db_session() if db_ok else _make_failing_db_session()
         redis_client = (

@@ -11,3 +11,4 @@
 ## Validation Recipes / Results
 - [normalization-validation.md](normalization-validation.md) — live inject+trace recipe (redis host="redis" gotcha) + adapter rule-table refactor regression PASS (2026-06-07)
 - [lockfile-drift-validation.md](lockfile-drift-validation.md) — PR #22 dep-pinning: faithfully replicate CI drift job by recompiling IN PLACE (fresh-output gives false drift); GO verdict, 1572 unit tests green
+- [ruff-ratchet-validation.md](ruff-ratchet-validation.md) — e2ada32 ruff ratchet: 30/30 integration PASS, live config-path refactor verified, safe to merge. GOTCHA: integration harness refuses to run while default naas-* stack is up — `docker compose down` first; remove stray naas-it_default net after

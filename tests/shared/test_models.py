@@ -8,14 +8,13 @@ propagate silently to every downstream service.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 
-
 VALID_USER_ID = "alice"
 VALID_CLIENT_IP = "192.168.1.1"
-VALID_TIMESTAMP = datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc)
+VALID_TIMESTAMP = datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC)
 
 
 # ===========================================================================
@@ -70,8 +69,8 @@ class TestLoginEventIngestValidation:
 
     def test_login_event_ingest_rejects_invalid_ip_not_dotted_quad(self):
         """LoginEventIngest must raise ValidationError for client_ip='not-an-ip'."""
-        from pydantic import ValidationError
         from naas_shared.models import LoginEventIngest
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError, match="client_ip"):
             LoginEventIngest(
@@ -83,8 +82,8 @@ class TestLoginEventIngestValidation:
 
     def test_login_event_ingest_rejects_hostname_as_ip(self):
         """client_ip='example.com' must raise ValidationError."""
-        from pydantic import ValidationError
         from naas_shared.models import LoginEventIngest
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             LoginEventIngest(
@@ -96,8 +95,8 @@ class TestLoginEventIngestValidation:
 
     def test_login_event_ingest_rejects_out_of_range_octet(self):
         """client_ip='256.0.0.1' must raise ValidationError."""
-        from pydantic import ValidationError
         from naas_shared.models import LoginEventIngest
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             LoginEventIngest(
@@ -109,8 +108,8 @@ class TestLoginEventIngestValidation:
 
     def test_login_event_ingest_rejects_all_octets_out_of_range(self):
         """client_ip='999.999.999.999' must raise ValidationError."""
-        from pydantic import ValidationError
         from naas_shared.models import LoginEventIngest
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             LoginEventIngest(
@@ -122,8 +121,8 @@ class TestLoginEventIngestValidation:
 
     def test_login_event_ingest_rejects_leading_zero_octet(self):
         """client_ip='192.168.001.1' must raise ValidationError."""
-        from pydantic import ValidationError
         from naas_shared.models import LoginEventIngest
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             LoginEventIngest(
@@ -147,8 +146,8 @@ class TestLoginEventIngestValidation:
 
     def test_login_event_ingest_rejects_unknown_protocol(self):
         """LoginEventIngest must raise ValidationError for protocol='kerberos'."""
-        from pydantic import ValidationError
         from naas_shared.models import LoginEventIngest
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             LoginEventIngest(
@@ -215,8 +214,8 @@ class TestLoginEventIngestValidation:
 
     def test_login_event_ingest_rejects_empty_user_id(self):
         """user_id must have min_length=1."""
-        from pydantic import ValidationError
         from naas_shared.models import LoginEventIngest
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             LoginEventIngest(
@@ -244,7 +243,7 @@ class TestLoginEventTimestampValidator:
         """A naive datetime (no tzinfo) must be returned as UTC-aware."""
         from naas_shared.models import LoginEventIngest
 
-        naive_ts = datetime(2026, 6, 3, 14, 5, 0)
+        naive_ts = datetime(2026, 6, 3, 14, 5, 0)  # noqa: DTZ001 — naive input is the point of the test
         event = LoginEventIngest(
             user_id="alice",
             client_ip=VALID_CLIENT_IP,
@@ -267,7 +266,7 @@ class TestLoginEventTimestampValidator:
             timestamp="2026-06-03T19:05:00+05:00",
         )
         assert event.timestamp.tzinfo is not None
-        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=timezone.utc)
+        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=UTC)
         assert event.timestamp == expected_utc
 
     def test_z_suffix_timestamp_stays_utc_aware(self) -> None:
@@ -281,7 +280,7 @@ class TestLoginEventTimestampValidator:
             timestamp="2026-06-03T14:05:00Z",
         )
         assert event.timestamp.tzinfo is not None
-        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=timezone.utc)
+        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=UTC)
         assert event.timestamp == expected_utc
 
     def test_login_event_record_created_at_default_is_aware(self) -> None:
@@ -300,7 +299,7 @@ class TestLoginEventTimestampValidator:
         """An explicitly-supplied naive created_at must be normalized to aware UTC."""
         from naas_shared.models import LoginEventRecord
 
-        naive_created = datetime(2026, 6, 3, 14, 5, 0)
+        naive_created = datetime(2026, 6, 3, 14, 5, 0)  # noqa: DTZ001 — naive input is the point of the test
         record = LoginEventRecord(
             user_id="alice",
             client_ip=VALID_CLIENT_IP,
@@ -322,7 +321,7 @@ class TestLoginEventTimestampValidator:
             timestamp=VALID_TIMESTAMP,
             created_at="2026-06-03T19:05:00+05:00",
         )
-        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=timezone.utc)
+        expected_utc = datetime(2026, 6, 3, 14, 5, 0, tzinfo=UTC)
         assert record.created_at == expected_utc
 
     def test_json_serialized_timestamp_carries_utc_offset(self) -> None:
@@ -333,10 +332,10 @@ class TestLoginEventTimestampValidator:
             user_id="alice",
             client_ip=VALID_CLIENT_IP,
             protocol="oidc",
-            timestamp=datetime(2026, 6, 3, 14, 5, 0),
+            timestamp=datetime(2026, 6, 3, 14, 5, 0),  # noqa: DTZ001 — naive input is the point of the test
         )
         dumped = record.model_dump(mode="json")["timestamp"]
-        assert dumped.endswith("+00:00") or dumped.endswith("Z")
+        assert dumped.endswith(("+00:00", "Z"))
 
     def test_json_serialized_created_at_carries_utc_offset(self) -> None:
         """The JSON-serialized created_at must carry an explicit UTC offset."""
@@ -347,10 +346,10 @@ class TestLoginEventTimestampValidator:
             client_ip=VALID_CLIENT_IP,
             protocol="oidc",
             timestamp=VALID_TIMESTAMP,
-            created_at=datetime(2026, 6, 3, 14, 5, 0),
+            created_at=datetime(2026, 6, 3, 14, 5, 0),  # noqa: DTZ001 — naive input is the point of the test
         )
         dumped = record.model_dump(mode="json")["created_at"]
-        assert dumped.endswith("+00:00") or dumped.endswith("Z")
+        assert dumped.endswith(("+00:00", "Z"))
 
     def test_naive_and_equivalent_offset_yield_same_instant(self) -> None:
         """A naive UTC submission and its equivalent offset form must store the same instant."""
@@ -420,16 +419,16 @@ class TestRiskDecisionValidation:
         Only allow/step_up_mfa/deny are in the Literal — 'challenge' is not a
         valid NAAS decision.
         """
-        from pydantic import ValidationError
         from naas_shared.models import RiskDecision
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             RiskDecision(**self._valid_decision_kwargs("challenge"))
 
     def test_risk_decision_rejects_unknown_decision(self):
         """An arbitrary unknown string like 'block' must raise ValidationError."""
-        from pydantic import ValidationError
         from naas_shared.models import RiskDecision
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             RiskDecision(**self._valid_decision_kwargs("block"))
@@ -478,16 +477,16 @@ class TestNormalizedAttributesValidation:
 
     def test_normalized_attributes_requires_enrichment_field(self):
         """NormalizedAttributes without an enrichment field must raise ValidationError."""
-        from pydantic import ValidationError
         from naas_shared.models import NormalizedAttributes
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             NormalizedAttributes(source_protocol="oidc")
 
     def test_normalized_attributes_requires_source_protocol(self):
         """source_protocol is required (no default)."""
+        from naas_shared.models import EnrichmentSkipped, NormalizedAttributes
         from pydantic import ValidationError
-        from naas_shared.models import NormalizedAttributes, EnrichmentSkipped
 
         with pytest.raises(ValidationError):
             NormalizedAttributes(
@@ -635,8 +634,8 @@ class TestAlertMessageValidation:
 
     def test_alert_message_rejects_unknown_severity(self):
         """AlertMessage must reject an unknown severity like 'info'."""
-        from pydantic import ValidationError
         from naas_shared.models import AlertMessage
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             AlertMessage(
@@ -682,8 +681,8 @@ class TestHealthResponseValidation:
 
     def test_health_response_rejects_unknown_status(self):
         """HealthResponse must reject status values outside {healthy, degraded, unhealthy}."""
-        from pydantic import ValidationError
         from naas_shared.models import HealthResponse
+        from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             HealthResponse(

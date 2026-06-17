@@ -2,7 +2,6 @@
 
 import pytest
 
-
 # ===========================================================================
 # CLASS 1 — LDAP_ENRICHMENT_CACHE_PREFIX constant
 # ===========================================================================
@@ -281,9 +280,8 @@ class TestLdapPoolSizeConstraints:
         WHY: Zero connections would silently disable all LDAP enrichment without any
         indication that a misconfiguration occurred. The service must refuse to start.
         """
-        from pydantic import ValidationError
-
         from naas_shared.config import Settings
+        from pydantic import ValidationError
 
         monkeypatch.setenv("LDAP_POOL_SIZE", "0")
 
@@ -303,9 +301,8 @@ class TestLdapPoolSizeConstraints:
         WHY: More than 10 connections may exhaust the LDAP server's connection limit.
         The upper cap prevents runaway resource usage from a misconfigured deployment.
         """
-        from pydantic import ValidationError
-
         from naas_shared.config import Settings
+        from pydantic import ValidationError
 
         monkeypatch.setenv("LDAP_POOL_SIZE", "11")
 
@@ -324,9 +321,8 @@ class TestLdapPoolSizeConstraints:
         WHY: Negative pool size is nonsensical. The ge=1 constraint must cover
         negative values, not just zero.
         """
-        from pydantic import ValidationError
-
         from naas_shared.config import Settings
+        from pydantic import ValidationError
 
         monkeypatch.setenv("LDAP_POOL_SIZE", "-1")
 

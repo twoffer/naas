@@ -9,7 +9,7 @@ Exposes GET /health; the full consumer loop pipeline is wired in the lifespan
 
 import asyncio
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import naas_shared.database as _db_mod
@@ -22,9 +22,10 @@ from naas_shared.models import HealthResponse
 from naas_shared.redis_client import close_redis
 from sqlalchemy import text
 
+from app.consumer import run_consumer_loop
+
 # Import load_config at module level so tests can patch app.main.load_config
 from app.normalization_config import load_config
-from app.consumer import run_consumer_loop
 
 _logger = get_logger(__name__)
 
@@ -51,7 +52,7 @@ async def health() -> HealthResponse:
     try:
         session = await agen.__anext__()
         await session.execute(text("SELECT 1"))
-    except Exception:
+    except Exception:  # noqa: BLE001 — health probe must report unhealthy on any failure, never raise
         pg_ok = False
     finally:
         await agen.aclose()
@@ -60,7 +61,7 @@ async def health() -> HealthResponse:
     try:
         client = await _redis_mod.get_redis()
         await client.ping()
-    except Exception:
+    except Exception:  # noqa: BLE001 — health probe must report unhealthy on any failure, never raise
         redis_ok = False
 
     if not pg_ok:
@@ -71,6 +72,29 @@ async def health() -> HealthResponse:
         status = "healthy"
 
     return HealthResponse(status=status, service="identity-normalization")
+
+
+def _resolve_config_path() -> Path:
+    """Resolve the normalization config path (sync — kept out of the async lifespan).
+
+    Resolution order:
+      1. NORMALIZATION_CONFIG_PATH env var (Docker/CI/test override)
+      2. /app/config/normalization.yaml (compose mount: ./config:/app/config:ro)
+      3. Repo-relative fallback for host/dev: 4 parents from __file__ → repo root
+
+    The blocking filesystem stat (`Path.exists()`) lives here rather than in the
+    async lifespan so it never runs on the event loop (ASYNC240).
+    """
+    _compose_default = Path("/app/config/normalization.yaml")
+    _repo_fallback = (
+        Path(__file__).parent.parent.parent.parent / "config" / "normalization.yaml"
+    )
+    _env_override = os.environ.get("NORMALIZATION_CONFIG_PATH")
+    if _env_override:
+        return Path(_env_override)
+    if _compose_default.exists():
+        return _compose_default
+    return _repo_fallback
 
 
 @asynccontextmanager
@@ -98,22 +122,7 @@ async def lifespan(application: FastAPI):
     from app.service import NormalizationPublisher, NormalizationService
 
     # Load and validate config — let the exception propagate on invalid config.
-    # Resolution order:
-    #   1. NORMALIZATION_CONFIG_PATH env var (Docker/CI/test override)
-    #   2. /app/config/normalization.yaml (compose mount: ./config:/app/config:ro)
-    #   3. Repo-relative fallback for host/dev: 4 parents from __file__ → repo root
-    _compose_default = Path("/app/config/normalization.yaml")
-    _repo_fallback = (
-        Path(__file__).parent.parent.parent.parent / "config" / "normalization.yaml"
-    )
-    _env_override = os.environ.get("NORMALIZATION_CONFIG_PATH")
-    if _env_override:
-        config_path = Path(_env_override)
-    elif _compose_default.exists():
-        config_path = _compose_default
-    else:
-        config_path = _repo_fallback
-    config = load_config(config_path)
+    config = load_config(_resolve_config_path())
 
     # Ensure the consumer group exists (idempotent; BUSYGROUP is swallowed).
     # Call via module reference so tests can patch naas_shared.redis_client.ensure_consumer_group.
@@ -161,10 +170,8 @@ async def lifespan(application: FastAPI):
         # Cancel the background consumer task and wait for it to unwind
         # (cancellation interrupts a mid-flight handler via CancelledError).
         consumer_task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await consumer_task
-        except asyncio.CancelledError:
-            pass
         # Teardown must follow the awaited cancellation above so the consumer
         # has fully released the shared clients before they are closed.
         await close_redis()

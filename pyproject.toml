@@ -12,8 +12,93 @@ markers = [
 ]
 
 [tool.ruff]
-# Minimal, near-default config: formalizes the lint standard (matching the
-# `ruff check .` step in .github/workflows/ci.yml) without expanding the rule
-# set beyond ruff's defaults. Rule-set ratcheting is a separate, future change.
 target-version = "py312"
+
+[tool.ruff.lint]
+# Enterprise rule-set ratchet (see the `select` groups below). The lint standard
+# is enforced by the `ruff check .` step in .github/workflows/ci.yml.
+#
+# Deliberately NOT enabled (would fight this codebase or are separate efforts):
+#   RUF001/002/003  ambiguous-unicode  — CLAUDE.md mandates preserving emoji,
+#                                        box-drawing, and arrow glyphs verbatim.
+#   PLC0415         import-outside-top-level — lazy imports here are deliberate
+#                                        (e.g. optional `ldap`, see CLAUDE.md).
+#   ANN*, D*, E501, PLR2004, COM812    — large/opinionated; future ratchets.
+select = [
+    "E4", "E7", "E9", "F",  # ruff defaults: pyflakes (F) + a subset of pycodestyle (E)
+    "I",                    # isort — import ordering
+    "UP",                   # pyupgrade — modern py312 syntax
+    "C4",                   # flake8-comprehensions
+    "PIE",                  # flake8-pie — misc lints
+    "PERF",                 # perflint — performance anti-patterns
+    "SIM",                  # flake8-simplify
+    "RET",                  # flake8-return
+    "RUF",                  # ruff-specific (unicode subset RUF001-003 ignored below)
+    "ASYNC",                # flake8-async — blocking calls in async code
+    "DTZ",                  # flake8-datetimez — tz-aware datetimes (audit safety)
+    "G",                    # flake8-logging-format
+    "LOG",                  # flake8-logging
+    "ISC",                  # flake8-implicit-str-concat
+    "FLY",                  # flynt — static str-join → f-string
+    "B",                    # flake8-bugbear — likely bugs
+    "BLE",                  # flake8-blind-except — no bare `except Exception`
+    "S",                    # flake8-bandit — security (IAM platform)
+    "N",                    # pep8-naming
+]
+
+# Rules selected by family above but deliberately suppressed, with rationale.
+ignore = [
+    # Combining nested context managers into one `with a, b:` forces large body
+    # dedents across the test mock-stacks (patch-deps wrapping a TestClient) for
+    # marginal benefit; the layered nesting reads as intentional setup/teardown.
+    "SIM117",  # multiple-with-statements
+    # Ambiguous-unicode rules flag the emoji / box-drawing / arrow glyphs that
+    # CLAUDE.md mandates preserving verbatim in docstrings, comments, and strings.
+    "RUF001",  # ambiguous-unicode-character-string
+    "RUF002",  # ambiguous-unicode-character-docstring
+    "RUF003",  # ambiguous-unicode-character-comment
+]
+
+[tool.ruff.lint.flake8-bugbear]
+# FastAPI's dependency-injection markers are designed to be called in argument
+# defaults (`param: T = Depends(...)`); they are effectively immutable sentinels,
+# so B008 (function-call-in-default-argument) is a false positive for them.
+extend-immutable-calls = [
+    "fastapi.Body",
+    "fastapi.Cookie",
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Header",
+    "fastapi.Path",
+    "fastapi.Query",
+    "fastapi.Security",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Test code legitimately exercises patterns bandit flags in production: bare
+# asserts ARE the assertion mechanism; the subprocess/urllib calls drive the
+# test harness against the local compose stack with hardcoded args; and the
+# "credentials" are throwaway fixtures, never real secrets.
+"tests/**" = [
+    # Naming rules relaxed where test identifiers must mirror external names:
+    #   N802 — test names embed protocol attribute identifiers verbatim
+    #          (e.g. test_departmentNumber_maps_to_department, test_E_maps_to_FTE).
+    #   N801/N818 — fake exception classes mirror python-ldap's real class names
+    #          (ldap.SERVER_DOWN, ldap.TIMEOUT, ...) so they are drop-in doubles.
+    "N801",  # invalid-class-name
+    "N802",  # invalid-function-name
+    "N818",  # error-suffix-on-exception-name
+    # `except Exception: pytest.fail(...)` (and startup-error capture) is a
+    # standard test assertion idiom — assert that NO exception type escapes and
+    # report the offender. Enforced in shipped code (services/, demo/), not here.
+    "BLE001",  # blind-except
+    "S101",  # assert — the pytest assertion mechanism
+    "S104",  # hardcoded-bind-all-interfaces — "0.0.0.0" appears in test data/assertions
+    "S105",  # hardcoded-password-string — fixture/expected values, not real secrets
+    "S106",  # hardcoded-password-func-arg — fixture credentials
+    "S310",  # suspicious-url-open — urllib against fixed localhost test endpoints
+    "S603",  # subprocess-without-shell — controlled test-harness invocations
+    "S607",  # start-process-with-partial-path — e.g. `docker`/`python` on PATH in harness
+]
 

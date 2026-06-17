@@ -1,5 +1,5 @@
-from datetime import datetime, timezone
-from typing import Annotated, Any, Dict, Literal, Optional, Union
+from datetime import UTC, datetime
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -15,8 +15,8 @@ def _to_utc(v: datetime) -> datetime:
     representation.
     """
     if v.tzinfo is None:
-        return v.replace(tzinfo=timezone.utc)
-    return v.astimezone(timezone.utc)
+        return v.replace(tzinfo=UTC)
+    return v.astimezone(UTC)
 
 
 class LoginEventBase(BaseModel):
@@ -29,11 +29,11 @@ class LoginEventBase(BaseModel):
     )
     protocol: Literal["oidc", "saml", "ldap"]
     timestamp: datetime
-    user_agent: Optional[str] = None
+    user_agent: str | None = None
     source: Literal["user", "simulator", "api"] = "user"
     is_synthetic: bool = False
     is_historical: bool = False
-    raw_attributes: Dict[str, Any] = Field(default_factory=dict)
+    raw_attributes: dict[str, Any] = Field(default_factory=dict)
 
     @field_validator("timestamp", mode="after")
     @classmethod
@@ -45,16 +45,15 @@ class LoginEventBase(BaseModel):
 class LoginEventIngest(LoginEventBase):
     """Request body for POST /events/ingest."""
 
-    pass
 
 
 class LoginEventRecord(LoginEventBase):
     """Full event record after ingestion (has the UUID id assigned)."""
 
     id: UUID = Field(default_factory=uuid4)
-    normalized_attributes: Optional[Dict[str, Any]] = None
-    enriched_signals: Optional[Dict[str, Any]] = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    normalized_attributes: dict[str, Any] | None = None
+    enriched_signals: dict[str, Any] | None = None
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
     @field_validator("created_at", mode="after")
     @classmethod
@@ -96,7 +95,7 @@ class UnanimousResolution(ResolutionDetailBase):
     """All sources agreed on this attribute's value."""
 
     resolution: Literal["unanimous"]
-    resolved_value: Optional[str] = None
+    resolved_value: str | None = None
     sources: list[SourceProtocol]
 
 
@@ -104,9 +103,9 @@ class PriorityResolution(ResolutionDetailBase):
     """Sources disagreed; highest-priority source's value won."""
 
     resolution: Literal["priority"]
-    resolved_value: Optional[str] = None
+    resolved_value: str | None = None
     winner_source: SourceProtocol
-    conflicting_values: Dict[SourceProtocol, Any]
+    conflicting_values: dict[SourceProtocol, Any]
     penalty_applied: bool
 
 
@@ -114,7 +113,7 @@ class SingleSourceResolution(ResolutionDetailBase):
     """Only one source provided this attribute (no conflict possible)."""
 
     resolution: Literal["single_source"]
-    resolved_value: Optional[str] = None
+    resolved_value: str | None = None
     sources: list[SourceProtocol]
 
 
@@ -129,12 +128,7 @@ class ListMergeResolution(ResolutionDetailBase):
 
 
 ResolutionDetail = Annotated[
-    Union[
-        UnanimousResolution,
-        PriorityResolution,
-        SingleSourceResolution,
-        ListMergeResolution,
-    ],
+    UnanimousResolution | PriorityResolution | SingleSourceResolution | ListMergeResolution,
     Field(discriminator="resolution"),
 ]
 
@@ -170,7 +164,7 @@ class EnrichmentSkipped(BaseModel):
 
 
 EnrichmentMetadata = Annotated[
-    Union[EnrichmentApplied, EnrichmentSkipped],
+    EnrichmentApplied | EnrichmentSkipped,
     Field(discriminator="applied"),
 ]
 
@@ -194,16 +188,16 @@ class NormalizedAttributes(BaseModel):
     """
 
     # Unified identity attributes
-    display_name: Optional[str] = None
-    primary_email: Optional[str] = None
-    department: Optional[str] = None
-    employee_type: Optional[Literal["FTE", "contractor", "vendor"]] = None
+    display_name: str | None = None
+    primary_email: str | None = None
+    department: str | None = None
+    employee_type: Literal["FTE", "contractor", "vendor"] | None = None
     groups: list[str] = Field(default_factory=list)
 
     # Provenance
     source_protocol: SourceProtocol
     normalization_confidence: float = Field(ge=0.0, le=1.0, default=1.0)
-    resolution_details: Dict[str, ResolutionDetail] = Field(default_factory=dict)
+    resolution_details: dict[str, ResolutionDetail] = Field(default_factory=dict)
 
     # Cross-protocol enrichment metadata (always populated; even LDAP events
     # get EnrichmentSkipped(applied=False, skip_reason="ldap_event"))
@@ -216,12 +210,12 @@ class RiskDecision(BaseModel):
     event_id: str
     user_id: str
     rule_based_score: float
-    ml_based_score: Optional[float] = None
+    ml_based_score: float | None = None
     final_score: float
     decision: Literal["allow", "step_up_mfa", "deny"]
-    contributing_factors: Dict[str, Any] = Field(default_factory=dict)
-    shadow_decision: Optional[str] = None
-    shadow_score: Optional[float] = None
+    contributing_factors: dict[str, Any] = Field(default_factory=dict)
+    shadow_decision: str | None = None
+    shadow_score: float | None = None
     is_historical: bool = False
     timestamp: datetime
 
@@ -245,4 +239,4 @@ class HealthResponse(BaseModel):
     status: Literal["healthy", "degraded", "unhealthy"]
     service: str
     version: str = "2.0.0"
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))

@@ -622,13 +622,14 @@ def _extract_section_53(doc_text: str) -> str:
     for i, line in enumerate(lines):
         if re.match(r"^#{1,3}\s+5\.3\b", line):
             section_start = i
-        elif section_start is not None:
-            # Stop at next heading of depth <= 3 that is NOT §5.3
-            if re.match(r"^#{1,3}\s+", line) and not re.match(
-                r"^#{1,3}\s+5\.3\b", line
-            ):
-                section_end = i
-                break
+        # Stop at next heading of depth <= 3 that is NOT §5.3
+        elif (
+            section_start is not None
+            and re.match(r"^#{1,3}\s+", line)
+            and not re.match(r"^#{1,3}\s+5\.3\b", line)
+        ):
+            section_end = i
+            break
 
     if section_start is None:
         return ""
@@ -653,8 +654,7 @@ class TestSpec0Section53Mirror:
     @pytest.fixture(scope="class")
     def section_53(self) -> str:
         doc_text = SPEC0_DOC.read_text(encoding="utf-8")
-        text = _extract_section_53(doc_text)
-        return text
+        return _extract_section_53(doc_text)
 
     def test_section_53_exists(self, section_53):
         """SPEC_0 must contain a §5.3 heading.

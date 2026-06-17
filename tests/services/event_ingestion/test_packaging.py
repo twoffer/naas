@@ -5,12 +5,9 @@ from typing import Any
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Repo-root discovery (needed to locate committed files under test)
 # ---------------------------------------------------------------------------
-
-
 from tests.helpers import REPO_ROOT
 
 SERVICE_DIR = REPO_ROOT / "services" / "event-ingestion"
@@ -227,10 +224,7 @@ class TestRequirementsTxt:
         redis_lines = [
             line
             for line in lines
-            if line == "redis"
-            or line.startswith("redis==")
-            or line.startswith("redis>=")
-            or line.startswith("redis~=")
+            if line == "redis" or line.startswith(("redis==", "redis>=", "redis~="))
         ]
         assert not redis_lines, (
             f"requirements.in must NOT declare 'redis' — it is owned by "

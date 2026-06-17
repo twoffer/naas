@@ -1,8 +1,9 @@
 """normalization_values.py: department/employee_type canonical maps and normalize helpers."""
 
+from typing import ClassVar
+
 # third-party
 import pytest
-
 
 # ===========================================================================
 # CLASS 1 — Module import
@@ -1152,7 +1153,7 @@ class TestDepartmentCanonicalExactEquality:
     intentional and spec-compliant.
     """
 
-    _EXPECTED_DEPARTMENT_CANONICAL: dict[str, str] = {
+    _EXPECTED_DEPARTMENT_CANONICAL: ClassVar[dict[str, str]] = {
         "eng": "Engineering",
         "engineering": "Engineering",
         "software engineering": "Engineering",
@@ -1208,7 +1209,7 @@ class TestEmployeeTypeCanonicalExactEquality:
     to be discarded to None, potentially bypassing access controls that check the field.
     """
 
-    _EXPECTED_EMPLOYEE_TYPE_CANONICAL: dict[str, str] = {
+    _EXPECTED_EMPLOYEE_TYPE_CANONICAL: ClassVar[dict[str, str]] = {
         "fte": "FTE",
         "e": "FTE",
         "employee": "FTE",

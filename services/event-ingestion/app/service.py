@@ -67,7 +67,7 @@ class IngestionService:
         """
         try:
             await self._publisher.publish(record)
-        except Exception:
+        except Exception:  # noqa: BLE001 — committed row is replayable; publish failure must not re-raise (spec §5.5)
             self._log.error(
                 "login_events publish failed",
                 event_id=str(record.id),

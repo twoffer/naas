@@ -14,16 +14,14 @@ import importlib.util
 import re
 import subprocess
 import sys
+from typing import ClassVar
 
 # third-party
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Repo-root discovery
 # ---------------------------------------------------------------------------
-
-
 from tests.helpers import REPO_ROOT
 
 DEMO_DIR = REPO_ROOT / "demo"
@@ -122,7 +120,7 @@ class TestValidPython:
 class TestCliHelp:
     """python demo/demo_normalization.py --help exits 0 and lists all flags."""
 
-    EXPECTED_FLAGS = [
+    EXPECTED_FLAGS: ClassVar[list[str]] = [
         "--keep",
         "--pace",
         "--step",
@@ -592,7 +590,7 @@ class TestRequirementsTxt:
         naas_lines = [
             ln
             for ln in lines
-            if ln.startswith("naas_shared") or ln.startswith("naas-shared")
+            if ln.startswith(("naas_shared", "naas-shared"))
         ]
         assert not naas_lines, (
             f"naas_shared must not appear in requirements.txt (soft import only), "
@@ -676,7 +674,7 @@ class TestReadme:
 class TestNoMetaLanguage:
     """Demo files must not contain promotional or audience-targeting language."""
 
-    BANNED_TOKENS = [
+    BANNED_TOKENS: ClassVar[list[str]] = [
         "money shot",
         "hiring",
         "recruiter",

@@ -13,11 +13,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.adapters.ldap import LdapAdapter
-from app.adapters.oidc import OidcAdapter
-from app.adapters.saml import SamlAdapter
-from app.normalization_config import NormalizationConfig
-from app.resolution import resolve
 import naas_shared.redis_client as _redis_mod
 from naas_shared.constants import STREAM_NORMALIZED_EVENTS
 from naas_shared.logging import get_logger
@@ -27,6 +22,12 @@ from naas_shared.models import (
     LoginEventRecord,
     NormalizedAttributes,
 )
+
+from app.adapters.ldap import LdapAdapter
+from app.adapters.oidc import OidcAdapter
+from app.adapters.saml import SamlAdapter
+from app.normalization_config import NormalizationConfig
+from app.resolution import resolve
 
 _logger = get_logger(__name__)
 
@@ -161,7 +162,7 @@ class NormalizationService:
                 timeout_ms=ldap_cfg.timeout_ms,
                 enrich_attributes=ldap_cfg.enrich_attributes,
             )
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001 — enrichment failure must never drop the event (ADR-0008 graceful degradation)
             log.error(
                 "ldap_enrichment_unexpected_exception",
                 error=str(exc),

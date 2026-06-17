@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-
-from naas_shared.constants import STREAM_LOGIN_EVENTS, GROUP_NORMALIZATION
-
+from naas_shared.constants import GROUP_NORMALIZATION, STREAM_LOGIN_EVENTS
 
 # ===========================================================================
 # E.12. Health endpoint regression
@@ -52,8 +51,7 @@ class TestHealthRegression:
                     async with AsyncClient(
                         transport=transport, base_url="http://testserver"
                     ) as ac:
-                        resp = await ac.get("/health")
-                        return resp
+                        return await ac.get("/health")
 
         resp = await _run_health()
         assert resp.status_code == 200, (
@@ -69,8 +67,8 @@ class TestHealthRegression:
 
     def test_create_app_returns_fastapi_app(self):
         """create_app() must remain importable and return a FastAPI instance."""
-        from fastapi import FastAPI
         import app.main as _main
+        from fastapi import FastAPI
 
         the_app = _main.create_app()
         assert isinstance(the_app, FastAPI), (
@@ -100,8 +98,8 @@ class TestInvalidConfigAbortsStartup:
         We simulate by patching load_config to raise ValueError and running
         the lifespan startup phase.
         """
-        from fastapi import FastAPI
         import app.main as _main
+        from fastapi import FastAPI
 
         # We need to exercise the lifespan context manager startup phase.
         # Strategy: use a fresh FastAPI app and run lifespan manually.
@@ -143,8 +141,8 @@ class TestInvalidConfigAbortsStartup:
 
     async def test_valid_config_does_not_raise_during_startup(self):
         """Valid normalization.yaml allows startup to proceed without exception."""
-        from fastapi import FastAPI
         import app.main as _main
+        from fastapi import FastAPI
 
         startup_raised = [False]
 
@@ -180,8 +178,8 @@ class TestLifespanEnsuresConsumerGroup:
 
     async def test_ensure_consumer_group_called_on_startup(self):
         """ensure_consumer_group must be called exactly once during lifespan startup."""
-        from fastapi import FastAPI
         import app.main as _main
+        from fastapi import FastAPI
 
         ensure_calls: list[tuple] = []
 
@@ -223,8 +221,8 @@ class TestLifespanLaunchesConsumerLoop:
 
     async def test_consumer_loop_launched_on_startup(self):
         """The consumer loop function is called/scheduled during lifespan startup."""
-        from fastapi import FastAPI
         import app.main as _main
+        from fastapi import FastAPI
 
         loop_started = [False]
 
@@ -288,10 +286,9 @@ class TestLifespanLaunchesConsumerLoop:
                 async with _main.lifespan(FastAPI()):
                     pass  # startup done
 
-            try:
+            # May fail if other deps are missing, but we want to confirm the patch is valid
+            with contextlib.suppress(Exception):
                 await _run_inner()
-            except Exception:
-                pass  # may fail if other deps are missing, but we want to confirm the patch is valid
 
         # The patch path "app.main.run_consumer_loop" must be valid.
         # If it weren't, patch() would raise AttributeError during context entry.
@@ -318,8 +315,8 @@ class TestLifespanShutdown:
         We verify this by making the consumer loop block forever until cancelled,
         and confirming the lifespan exits cleanly (no hang).
         """
-        from fastapi import FastAPI
         import app.main as _main
+        from fastapi import FastAPI
 
         cancel_observed = [False]
 
@@ -346,7 +343,7 @@ class TestLifespanShutdown:
         # Must complete without hanging (timeout)
         try:
             await asyncio.wait_for(_run_lifecycle(), timeout=5.0)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pytest.fail(
                 "Lifespan shutdown timed out — the consumer task must be cancelled cleanly on shutdown"
             )

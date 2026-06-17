@@ -108,7 +108,7 @@ def pg_connection(compose_stack: dict):
     Module-scoped so all tests in this file share one connection — saves
     repeated connect/disconnect overhead during the test run.
     """
-    import psycopg  # noqa: PLC0415
+    import psycopg
 
     conn = psycopg.connect(**compose_stack["pg_conninfo"])
     conn.autocommit = True
@@ -173,7 +173,7 @@ def redis_client():
     Deferred import avoids a collection-time ImportError when redis-py is absent
     in non-integration environments (the skip gate fires before this fixture runs).
     """
-    import redis as redis_lib  # noqa: PLC0415
+    import redis as redis_lib
 
     port = _resolve_redis_port()
     client = redis_lib.Redis(host="localhost", port=port, db=0, decode_responses=True)
@@ -552,8 +552,7 @@ class TestBulkIngestRoundTrip:
         status_code, body = _http_post_json_bulk(bulk_url, events)
 
         # Register ids for cleanup before asserting so partial failures still clean up
-        for eid in body.get("event_ids", []):
-            cleanup_event_ids.append(eid)
+        cleanup_event_ids.extend(body.get("event_ids", []))
 
         assert status_code == 202, (
             f"POST /events/bulk expected 202, got {status_code}. Body: {body}"
@@ -587,8 +586,7 @@ class TestBulkIngestRoundTrip:
         )
 
         event_ids = body.get("event_ids", [])
-        for eid in event_ids:
-            cleanup_event_ids.append(eid)
+        cleanup_event_ids.extend(event_ids)
 
         assert len(event_ids) == 3, (
             f"Expected 3 event_ids in response, got {len(event_ids)}."

@@ -9,13 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock
 
 from tests.services.identity_normalization.conftest import (
     FakeRedis as _FakeRedis,
+)
+from tests.services.identity_normalization.conftest import (
     inject_fake_ldap as _inject_fake_ldap,
 )
-
 
 # ===========================================================================
 # D — Corrupted-cache PII redaction
@@ -51,7 +53,7 @@ class TestCorruptedCacheLogRedaction:
         corrupted_cache = (
             f'{{"primary_email": "{pii_token}", "display_name": "Alice Smith", '
             f'"dept": "Eng"'  # intentionally unclosed — corrupt JSON
-        ).encode("utf-8")
+        ).encode()
 
         fake_redis = _FakeRedis(get_return=corrupted_cache)
         monkeypatch.setattr(
@@ -117,16 +119,17 @@ class TestMalformedMessageLogRedaction:
     def _make_valid_message_data(self) -> str:
         """Return a valid LoginEventRecord JSON string for use as stream message data."""
         import json as _json
-        from naas_shared.models import LoginEventRecord
-        from datetime import datetime, timezone
+        from datetime import datetime
         from uuid import UUID
+
+        from naas_shared.models import LoginEventRecord
 
         record = LoginEventRecord(
             id=UUID("12345678-1234-5678-1234-567812345678"),
             user_id="alice",
             client_ip="192.168.1.1",
             protocol="oidc",
-            timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=timezone.utc),
+            timestamp=datetime(2024, 1, 15, 10, 30, 0, tzinfo=UTC),
             source="user",
             is_synthetic=False,
             is_historical=False,
@@ -161,9 +164,9 @@ class TestMalformedMessageLogRedaction:
         must still be truncated (str(exc)[:200]); only ValidationError gets the
         location-based treatment (see TestValidationErrorLogRedaction).
         """
+        import app.consumer as _consumer_mod
         from app.consumer import run_consumer_loop
         from naas_shared.constants import STREAM_LOGIN_EVENTS
-        import app.consumer as _consumer_mod
 
         valid_data = self._make_valid_message_data()
         one_good_message_bad_normalize = [
@@ -258,9 +261,9 @@ class TestValidationErrorLogRedaction:
         str(ValidationError)[:200] contains 'alice@corp.com' as input_value. After
         the fix, the logged event omits that email entirely (uses location info instead).
         """
+        import app.consumer as _consumer_mod
         from app.consumer import run_consumer_loop
         from naas_shared.constants import STREAM_LOGIN_EVENTS
-        import app.consumer as _consumer_mod
 
         pii_email = "alice@corp.com"
 

@@ -88,14 +88,14 @@ async def health() -> HealthResponse:
         factory = _db_mod.get_session_factory()
         async with factory() as session:
             await session.execute(text("SELECT 1"))
-    except Exception:
+    except Exception:  # noqa: BLE001 — health probe must report unhealthy on any failure, never raise
         pg_ok = False
 
     redis_ok = True
     try:
         client = await _redis_mod.get_redis()
         await client.ping()
-    except Exception:
+    except Exception:  # noqa: BLE001 — health probe must report unhealthy on any failure, never raise
         redis_ok = False
 
     if not pg_ok:
