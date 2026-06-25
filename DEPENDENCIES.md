@@ -21,7 +21,7 @@ service image.
   | Lockfile | Compiled from | Installed by |
   |----------|---------------|--------------|
   | `requirements-dev.txt` | `requirements-dev.in` (pins shared via `./shared`) | CI unit + integration jobs |
-  | `services/event-ingestion/requirements.txt` | that service's `requirements.in` (pins shared via `./shared`) | `services/event-ingestion/Dockerfile` |
+  | `services/event-ingestion/requirements.txt` | that service's `requirements.in` (pins shared via `../../shared`) | `services/event-ingestion/Dockerfile` |
   | `services/identity-normalization/requirements.txt` | that service's `requirements.in` (pins shared via `./shared`) | `services/identity-normalization/Dockerfile` |
   | `demo/requirements.txt` | `demo/requirements.in` | `demo/README.md` |
 
@@ -88,8 +88,11 @@ Then run the compile(s) for whatever you changed (from the repo root):
 UNSAFE="--unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools"
 pip-compile --strip-extras $UNSAFE \
     --output-file=requirements-dev.txt requirements-dev.in
-pip-compile --strip-extras $UNSAFE \
-    --output-file=services/event-ingestion/requirements.txt services/event-ingestion/requirements.in
+# event-ingestion compiles from its own directory: its `.in` lists shared as
+# `../../shared` (relative to the manifest dir, the way Dependabot resolves path
+# deps), which only resolves when pip-compile runs from that directory too.
+( cd services/event-ingestion && pip-compile --strip-extras $UNSAFE \
+    --output-file=requirements.txt requirements.in )
 pip-compile --strip-extras $UNSAFE \
     --output-file=services/identity-normalization/requirements.txt services/identity-normalization/requirements.in
 pip-compile --strip-extras --output-file=demo/requirements.txt \
@@ -109,10 +112,11 @@ it without a floor change produces no diff — the lock is deterministic.
 
 > **Recompile in place.** This pin-preservation only happens when the
 > `--output-file` target already exists and is read first. Always compile onto
-> the committed lock (the commands above run from the repo root, so they do).
-> Compiling to a *fresh* or empty path re-resolves everything to latest and will
-> show large false drift — the CI `lockfiles` job recompiles in place for this
-> reason.
+> the committed lock — the commands above do, whether run from the repo root or,
+> for event-ingestion, from the service directory (where `requirements.txt`
+> already exists). Compiling to a *fresh* or empty path re-resolves everything to
+> latest and will show large false drift — the CI `lockfiles` job recompiles in
+> place for this reason.
 
 ## Guardrails
 
