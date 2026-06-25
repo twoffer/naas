@@ -16,7 +16,7 @@ This spec **creates** the following:
 services/event-ingestion/
 ├── Dockerfile                  # Option A build (repo-root context); establishes the service-image pattern
 ├── requirements.in             # service-direct dependency floors (fastapi, uvicorn); data-layer deps owned by naas_shared
-├── requirements.txt            # pip-compiled lock (from requirements.in, which pins shared via the ./shared path dep); full pinned closure (ADR-0012)
+├── requirements.txt            # pip-compiled lock (from requirements.in, which pins shared via the ../../shared path dep); full pinned closure (ADR-0012)
 └── app/
     ├── __init__.py
     ├── main.py                 # composition root: app factory, lifespan, dependency wiring, router mount
@@ -353,7 +353,7 @@ EXPOSE 8001
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8001"]
 ```
 
-Dependencies follow the repo-wide lockfile posture (ADR-0012). `services/event-ingestion/requirements.in` declares the service-direct **floors** only — `fastapi` and `uvicorn[standard]`; the data-layer dependencies (SQLAlchemy, asyncpg, redis, pydantic, pydantic-settings, structlog) are owned by `naas_shared` and are not redeclared here. `services/event-ingestion/requirements.txt` is the pip-compiled **lock** (from that `.in`, which pulls in shared's runtime closure via the `./shared` path dependency); it pins the full transitive closure, which is why the image installs it first and then adds `naas_shared` editable with `--no-deps`. See `DEPENDENCIES.md` for the regenerate workflow.
+Dependencies follow the repo-wide lockfile posture (ADR-0012). `services/event-ingestion/requirements.in` declares the service-direct **floors** only — `fastapi` and `uvicorn[standard]`; the data-layer dependencies (SQLAlchemy, asyncpg, redis, pydantic, pydantic-settings, structlog) are owned by `naas_shared` and are not redeclared here. `services/event-ingestion/requirements.txt` is the pip-compiled **lock** (from that `.in`, which pulls in shared's runtime closure via the `../../shared` path dependency); it pins the full transitive closure, which is why the image installs it first and then adds `naas_shared` editable with `--no-deps`. See `DEPENDENCIES.md` for the regenerate workflow.
 
 `.dockerignore` at the repo root (keeps the build context lean — all service builds share it):
 
