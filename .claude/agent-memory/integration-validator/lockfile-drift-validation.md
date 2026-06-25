@@ -20,13 +20,13 @@ false positives.
   WRONG and not what CI does.
 - Correct: recompile IN PLACE (output = the committed lock), then `git diff`. This is
   exactly the CI sequence. On PR #22 this produced ZERO drift (clean working tree).
-- The four compile commands (run from repo root, `.venv` active; pin all 3 resolver tools to match CI: `pip==26.1.2 setuptools==82.0.1 pip-tools==7.5.3`):
-  - shared is now folded into each `.in` as the `./shared` path dep (single input, so Dependabot can't drop it on regen); suppress it + build backends with `--unsafe-package`. Let `U="--unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools"`:
+- The four compile commands (dev and demo run from repo root; the service locks run from the service directory — see next bullet; `.venv` active; pin all 3 resolver tools to match CI: `pip==26.1.2 setuptools==82.0.1 pip-tools==7.5.3`):
+  - shared is folded into each `.in` as a path dep (single input, so Dependabot can't drop it on regen); suppress it + build backends with `--unsafe-package`. Let `U="--unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools"`. The service `.in` files point to `../../shared` (relative to the manifest dir, the way Dependabot resolves path deps), so their lock MUST be compiled from the service directory or the path won't resolve:
   - `pip-compile --strip-extras $U -o requirements-dev.txt requirements-dev.in -q`
-  - `pip-compile --strip-extras $U -o services/event-ingestion/requirements.txt services/event-ingestion/requirements.in -q`
-  - `pip-compile --strip-extras $U -o services/identity-normalization/requirements.txt services/identity-normalization/requirements.in -q`
+  - `( cd services/event-ingestion && pip-compile --strip-extras $U -o requirements.txt requirements.in -q )`
+  - `( cd services/identity-normalization && pip-compile --strip-extras $U -o requirements.txt requirements.in -q )`
   - `pip-compile --strip-extras -o demo/requirements.txt demo/requirements.in -q`
-  - identity-normalization needs python-ldap metadata; resolves fine in dev venv (no install).
+  - identity-normalization needs python-ldap metadata; on a bare system install its build headers first (`sudo apt-get install -y libldap2-dev libsasl2-dev`, as the CI `lockfiles` job does).
 - Restore after: `git checkout -- <the four .txt files>` (in-place recompile may touch them).
 
 **Env facts confirmed (2026-06-16):** pip-tools 7.5.3 present in `.venv`; fastapi

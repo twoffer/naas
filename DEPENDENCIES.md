@@ -22,22 +22,33 @@ service image.
   |----------|---------------|--------------|
   | `requirements-dev.txt` | `requirements-dev.in` (pins shared via `./shared`) | CI unit + integration jobs |
   | `services/event-ingestion/requirements.txt` | that service's `requirements.in` (pins shared via `../../shared`) | `services/event-ingestion/Dockerfile` |
-  | `services/identity-normalization/requirements.txt` | that service's `requirements.in` (pins shared via `./shared`) | `services/identity-normalization/Dockerfile` |
+  | `services/identity-normalization/requirements.txt` | that service's `requirements.in` (pins shared via `../../shared`) | `services/identity-normalization/Dockerfile` |
   | `demo/requirements.txt` | `demo/requirements.in` | `demo/README.md` |
 
-Each lock that needs shared lists it as the local path dependency `./shared` in
-its `.in`, so the lock pins **shared's entire transitive closure**, not just the
-service's own two or three lines. `./shared` is the *only* compile input — shared
-itself is suppressed from the lock with `--unsafe-package=naas-shared` (a local
-path is not a portable pin; `pip` and `setuptools` are suppressed the same way as
-build backends). A single input is deliberate (see the callout below). Folding
-shared in as `./shared` keeps the closure inside a `.in` input Dependabot does
-compile, while the suppression flags survive in the header. The service images
-install the lock first, then the shared package editable
-with `pip install -e shared/ --no-deps` — the lock already pins shared's
-dependencies, so `--no-deps` keeps the locked versions authoritative and prevents
-any re-resolution. The dev lock works the same way for the unit tests, which
-import the shared package and the service `app/` code.
+Each lock that needs shared lists it as a local path dependency in its `.in`, so
+the lock pins **shared's entire transitive closure**, not just the service's own
+two or three lines. That path is the *only* compile input — shared itself is
+suppressed from the lock with `--unsafe-package=naas-shared` (a local path is not
+a portable pin; `pip` and `setuptools` are suppressed the same way as build
+backends). A single input is deliberate (see the callout below). Folding shared
+in as a path dep keeps the closure inside a `.in` input Dependabot does compile,
+while the suppression flags survive in the header. The service images install the
+lock first, then the shared package editable with `pip install -e shared/
+--no-deps` — the lock already pins shared's dependencies, so `--no-deps` keeps the
+locked versions authoritative and prevents any re-resolution. The dev lock works
+the same way for the unit tests, which import the shared package and the service
+`app/` code.
+
+> **The path is written relative to each `.in` file's own directory**, and the
+> lock is compiled from that directory, because Dependabot resolves a path-based
+> dependency relative to the manifest's directory (not the repo root). So
+> `requirements-dev.in`, at the repo root, points to `./shared`; the service
+> `.in` files, two levels down, point to `../../shared`. A root-relative
+> `./shared` in a service `.in` compiles fine from the repo root but leaves
+> Dependabot unable to fetch it (it looks for `services/<svc>/shared`, which does
+> not exist) — silently blocking that lock's security and version PRs. The
+> regen commands below compile each service lock from its own directory for this
+> reason.
 
 > **⚠️ Do not "simplify" this back to the two-input form**
 > (`pip-compile … <service>/requirements.in shared/pyproject.toml`). It looks
@@ -53,7 +64,7 @@ import the shared package and the service `app/` code.
 >   re-derived by regex-scanning the committed lock's header comment lines. The
 >   `--unsafe-package` scan is a `.scan().uniq`, so all three of ours survive.
 >
-> The `./shared` path dependency lives in a `.in` (an input Dependabot compiles)
+> The shared path dependency lives in a `.in` (an input Dependabot compiles)
 > and the `--unsafe-package` flags live in the header (which it scans), so both
 > halves of the lock regenerate correctly. The two-input form satisfies neither.
 
@@ -82,19 +93,19 @@ Pin `pip` and `setuptools` alongside `pip-tools` (as above and in the CI
 unpinned upgrade can re-resolve the closure and produce a spurious diff against
 an otherwise-correct lock.
 
-Then run the compile(s) for whatever you changed (from the repo root):
+Then run the compile(s) for whatever you changed — from the repo root, except the
+service locks, which compile from their own directory (their `.in` lists shared as
+`../../shared`, relative to the manifest dir the way Dependabot resolves path deps,
+which only resolves when pip-compile runs from that directory too):
 
 ```bash
 UNSAFE="--unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools"
 pip-compile --strip-extras $UNSAFE \
     --output-file=requirements-dev.txt requirements-dev.in
-# event-ingestion compiles from its own directory: its `.in` lists shared as
-# `../../shared` (relative to the manifest dir, the way Dependabot resolves path
-# deps), which only resolves when pip-compile runs from that directory too.
 ( cd services/event-ingestion && pip-compile --strip-extras $UNSAFE \
     --output-file=requirements.txt requirements.in )
-pip-compile --strip-extras $UNSAFE \
-    --output-file=services/identity-normalization/requirements.txt services/identity-normalization/requirements.in
+( cd services/identity-normalization && pip-compile --strip-extras $UNSAFE \
+    --output-file=requirements.txt requirements.in )
 pip-compile --strip-extras --output-file=demo/requirements.txt \
     demo/requirements.in
 ```
@@ -113,7 +124,7 @@ it without a floor change produces no diff — the lock is deterministic.
 > **Recompile in place.** This pin-preservation only happens when the
 > `--output-file` target already exists and is read first. Always compile onto
 > the committed lock — the commands above do, whether run from the repo root or,
-> for event-ingestion, from the service directory (where `requirements.txt`
+> for the service locks, from the service directory (where `requirements.txt`
 > already exists). Compiling to a *fresh* or empty path re-resolves everything to
 > latest and will show large false drift — the CI `lockfiles` job recompiles in
 > place for this reason.

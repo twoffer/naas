@@ -13,8 +13,8 @@ from tests.helpers import REPO_ROOT
 SERVICE_DIR = REPO_ROOT / "services" / "event-ingestion"
 DOCKERFILE_PATH = SERVICE_DIR / "Dockerfile"
 # requirements.in holds the declared floors; requirements.txt is the pip-compiled
-# lock generated from it (shared's runtime closure enters via the ./shared path
-# dep in requirements.in; see DEPENDENCIES.md).
+# lock generated from it (shared's runtime closure enters via the ../../shared
+# path dep in requirements.in; see DEPENDENCIES.md).
 REQUIREMENTS_IN_PATH = SERVICE_DIR / "requirements.in"
 REQUIREMENTS_PATH = SERVICE_DIR / "requirements.txt"
 DOCKERIGNORE_PATH = REPO_ROOT / ".dockerignore"

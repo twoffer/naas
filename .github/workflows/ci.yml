@@ -79,11 +79,11 @@ jobs:
       - name: Recompile lockfiles
         run: |
           pip-compile --strip-extras --unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools --output-file=requirements-dev.txt requirements-dev.in -q
-          # event-ingestion compiles from its own directory so pip-compile resolves
-          # the ../../shared path dependency the same way Dependabot does (relative to
-          # the manifest dir). See DEPENDENCIES.md.
+          # Each service compiles from its own directory so pip-compile resolves the
+          # ../../shared path dependency the same way Dependabot does (relative to the
+          # manifest dir). See DEPENDENCIES.md.
           (cd services/event-ingestion && pip-compile --strip-extras --unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools --output-file=requirements.txt requirements.in -q)
-          pip-compile --strip-extras --unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools --output-file=services/identity-normalization/requirements.txt services/identity-normalization/requirements.in -q
+          (cd services/identity-normalization && pip-compile --strip-extras --unsafe-package=naas-shared --unsafe-package=pip --unsafe-package=setuptools --output-file=requirements.txt requirements.in -q)
           pip-compile --strip-extras --output-file=demo/requirements.txt demo/requirements.in -q
 
       - name: Fail if lockfiles are out of date

@@ -8,8 +8,8 @@ metadata:
 ADR-0012 (`docs/adr/0012-dependency-pinning-reproducible-builds.md`) + `DEPENDENCIES.md` define the repo dependency posture. Verified at PR #22 (`fix/dependency-drift-hardening`).
 
 ## Layout
-- **Floors (compile inputs):** `requirements-dev.in`, `demo/requirements.in`, `services/*/requirements.in`. `shared/pyproject.toml` declares shared's runtime floors and is pulled into each lock (except demo) via the `./shared` path dep listed in the `.in`. Human-authored `>=` minimums. Edit these to add/re-floor.
-- **Locks (install artifacts):** the generated `*.txt`. Never hand-edit. Each lock except demo lists `./shared` as a path dep so it subsumes shared's full transitive closure (`naas-shared`/`pip`/`setuptools` suppressed from the lock via `--unsafe-package` — a single compile input, required for Dependabot to regenerate correctly; see `DEPENDENCIES.md`). `demo/requirements.txt` compiled from `demo/requirements.in` alone (no shared).
+- **Floors (compile inputs):** `requirements-dev.in`, `demo/requirements.in`, `services/*/requirements.in`. `shared/pyproject.toml` declares shared's runtime floors and is pulled into each lock (except demo) via the shared path dep listed in the `.in` — written relative to that `.in`'s own directory (`./shared` in the repo-root dev lock, `../../shared` in the service `.in` files, the way Dependabot resolves path deps), so the service locks compile from the service directory. Human-authored `>=` minimums. Edit these to add/re-floor.
+- **Locks (install artifacts):** the generated `*.txt`. Never hand-edit. Each lock except demo lists the shared path dep so it subsumes shared's full transitive closure (`naas-shared`/`pip`/`setuptools` suppressed from the lock via `--unsafe-package` — a single compile input, required for Dependabot to regenerate correctly; see `DEPENDENCIES.md`). `demo/requirements.txt` compiled from `demo/requirements.in` alone (no shared).
 - Dev lock = superset of demo lock (demo deps floored in `requirements-dev.in` too), so CI installs only the dev lock for both unit + integration.
 
 ## Install path (every env)
