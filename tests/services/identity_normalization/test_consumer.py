@@ -666,7 +666,7 @@ class TestPoisonMessageNoAck:
         # Build a JSON payload that parses fine but fails LoginEventRecord validation.
         invalid_payload = json.dumps(
             {
-                "id": "this-is-not-a-uuid",   # invalid UUID
+                "id": "this-is-not-a-uuid",  # invalid UUID
                 "user_id": "alice",
                 "client_ip": "192.168.1.1",
                 "protocol": "oidc",
@@ -735,7 +735,14 @@ class TestPoisonMessageNoAck:
                 STREAM_LOGIN_EVENTS,
                 [
                     ("bad-3-0", {"data": "not-json"}),
-                    ("good-3-1", {"data": json.dumps(good_record.model_dump(mode="json"), default=str)}),
+                    (
+                        "good-3-1",
+                        {
+                            "data": json.dumps(
+                                good_record.model_dump(mode="json"), default=str
+                            )
+                        },
+                    ),
                 ],
             ]
         ]

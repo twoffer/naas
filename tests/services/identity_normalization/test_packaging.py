@@ -149,9 +149,7 @@ class TestRequirementsTxt:
         lines = _requirements_in_lines()
         # Match 'python-ldap', 'python_ldap' — pip normalizes these
         ldap_lines = [
-            line
-            for line in lines
-            if line.startswith(("python-ldap", "python_ldap"))
+            line for line in lines if line.startswith(("python-ldap", "python_ldap"))
         ]
         assert ldap_lines, (
             f"requirements.in must list 'python-ldap' (with or without version pin). "

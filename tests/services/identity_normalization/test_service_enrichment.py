@@ -803,7 +803,7 @@ class TestLdapAttrMergeIntoResolution:
             raw_attributes={
                 "name": "Alice Smith",
                 "email": "alice@corp.com",
-                "department": "fin",   # → 'Finance' after normalization
+                "department": "fin",  # → 'Finance' after normalization
                 "employee_type": "fte",
                 "groups": [],
             },
@@ -878,7 +878,7 @@ class TestLdapAttrMergeIntoResolution:
         ldap_attrs = {
             "display_name": "Alice Smith",
             "primary_email": "alice@corp.com",
-            "department": "WidgetCorp",   # unmapped — not in DEPARTMENT_CANONICAL
+            "department": "WidgetCorp",  # unmapped — not in DEPARTMENT_CANONICAL
             "employee_type": "FTE",
             "groups": [],
         }

@@ -230,10 +230,13 @@ class TestHealthStatusDegraded:
         from app.main import app
         from starlette.testclient import TestClient
 
-        with _patch_health_deps(
-            db_session=_make_ok_db_session(),
-            redis_client=_make_failing_redis_client(),
-        ) as _, TestClient(app, raise_server_exceptions=False) as client:
+        with (
+            _patch_health_deps(
+                db_session=_make_ok_db_session(),
+                redis_client=_make_failing_redis_client(),
+            ) as _,
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
             response = client.get("/health")
 
         assert response.status_code == 200
@@ -319,10 +322,13 @@ class TestHealthStatusUnhealthy:
         from app.main import app
         from starlette.testclient import TestClient
 
-        with _patch_health_deps(
-            db_session=_make_failing_db_session(),
-            redis_client=_make_ok_redis_client(),
-        ) as _, TestClient(app, raise_server_exceptions=False) as client:
+        with (
+            _patch_health_deps(
+                db_session=_make_failing_db_session(),
+                redis_client=_make_ok_redis_client(),
+            ) as _,
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
             response = client.get("/health")
 
         assert response.status_code == 200
@@ -343,10 +349,13 @@ class TestHealthStatusUnhealthy:
         from app.main import app
         from starlette.testclient import TestClient
 
-        with _patch_health_deps(
-            db_session=_make_failing_db_session(),
-            redis_client=_make_failing_redis_client(),
-        ) as _, TestClient(app, raise_server_exceptions=False) as client:
+        with (
+            _patch_health_deps(
+                db_session=_make_failing_db_session(),
+                redis_client=_make_failing_redis_client(),
+            ) as _,
+            TestClient(app, raise_server_exceptions=False) as client,
+        ):
             response = client.get("/health")
 
         assert response.status_code == 200

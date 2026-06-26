@@ -24,11 +24,11 @@ from app.adapters._mapping import (
 from app.normalization_values import normalize_department_value, normalize_employee_type
 
 SAML_FIELD_RULES: dict[str, FieldRule] = {
-    "display_name":  FieldRule(("displayName",),   coerce_str),
-    "primary_email": FieldRule(("email",),         coerce_str),
-    "department":    FieldRule(("dept",),          normalize_department_value),
-    "employee_type": FieldRule(("employeeType",),  normalize_employee_type),
-    "groups":        FieldRule(("groups",),        coerce_str_list),
+    "display_name": FieldRule(("displayName",), coerce_str),
+    "primary_email": FieldRule(("email",), coerce_str),
+    "department": FieldRule(("dept",), normalize_department_value),
+    "employee_type": FieldRule(("employeeType",), normalize_employee_type),
+    "groups": FieldRule(("groups",), coerce_str_list),
 }
 
 

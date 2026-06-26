@@ -20,7 +20,6 @@ class Base(DeclarativeBase):
     """Shared declarative base for all NAAS ORM models."""
 
 
-
 class EventORM(Base):
     """ORM mapping for the `events` table.
 

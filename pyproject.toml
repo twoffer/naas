@@ -13,6 +13,10 @@ markers = [
 
 [tool.ruff]
 target-version = "py312"
+# Shared by the formatter and the linter's E501. Pinned explicitly so an upstream
+# default change can't silently reflow the codebase. (E501 itself is not yet in the
+# lint `select` — see docs/FOLLOWUPS.md.)
+line-length = 88
 
 [tool.ruff.lint]
 # Enterprise rule-set ratchet (see the `select` groups below). The lint standard
@@ -101,4 +105,18 @@ extend-immutable-calls = [
     "S603",  # subprocess-without-shell — controlled test-harness invocations
     "S607",  # start-process-with-partial-path — e.g. `docker`/`python` on PATH in harness
 ]
+
+# Enterprise format standard, enforced by the `ruff format --check .` step in
+# .github/workflows/ci.yml. Black-compatible; line-ending pinned for determinism.
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+# Pinned to LF (vs. the "auto" default) so the gate is deterministic across platforms
+# and guards against future CRLF creep; zero diff today (the repo is all-LF).
+line-ending = "lf"
+# Respect the "magic trailing comma": a trailing comma in a collection/call/signature
+# keeps it expanded one-per-line, leaving authors manual control over vertical layout.
+skip-magic-trailing-comma = false
+# docstring-code-format intentionally left off (default false): the repo's docstrings
+# carry box-drawing / arrow glyphs that CLAUDE.md mandates preserving verbatim.
 
