@@ -1193,7 +1193,8 @@ class TestDepartmentCanonicalExactEquality:
                     k: (DEPARTMENT_CANONICAL[k], self._EXPECTED_DEPARTMENT_CANONICAL[k])
                     for k in self._EXPECTED_DEPARTMENT_CANONICAL
                     if k in DEPARTMENT_CANONICAL
-                    and DEPARTMENT_CANONICAL[k] != self._EXPECTED_DEPARTMENT_CANONICAL[k]
+                    and DEPARTMENT_CANONICAL[k]
+                    != self._EXPECTED_DEPARTMENT_CANONICAL[k]
                 }
             )
         )

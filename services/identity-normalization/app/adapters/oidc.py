@@ -24,11 +24,11 @@ from app.adapters._mapping import (
 from app.normalization_values import normalize_department_value, normalize_employee_type
 
 OIDC_FIELD_RULES: dict[str, FieldRule] = {
-    "display_name":  FieldRule(("name",),          coerce_str),
-    "primary_email": FieldRule(("email",),         coerce_str),
-    "department":    FieldRule(("department",),    normalize_department_value),
+    "display_name": FieldRule(("name",), coerce_str),
+    "primary_email": FieldRule(("email",), coerce_str),
+    "department": FieldRule(("department",), normalize_department_value),
     "employee_type": FieldRule(("employee_type",), normalize_employee_type),
-    "groups":        FieldRule(("groups",),        coerce_str_list),
+    "groups": FieldRule(("groups",), coerce_str_list),
 }
 
 

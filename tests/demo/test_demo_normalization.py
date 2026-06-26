@@ -588,9 +588,7 @@ class TestRequirementsTxt:
         """requirements.txt must NOT list naas_shared — it is a soft optional import."""
         lines = [ln.strip() for ln in requirements_text.splitlines()]
         naas_lines = [
-            ln
-            for ln in lines
-            if ln.startswith(("naas_shared", "naas-shared"))
+            ln for ln in lines if ln.startswith(("naas_shared", "naas-shared"))
         ]
         assert not naas_lines, (
             f"naas_shared must not appear in requirements.txt (soft import only), "

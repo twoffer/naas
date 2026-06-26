@@ -46,7 +46,6 @@ class LoginEventIngest(LoginEventBase):
     """Request body for POST /events/ingest."""
 
 
-
 class LoginEventRecord(LoginEventBase):
     """Full event record after ingestion (has the UUID id assigned)."""
 
@@ -128,7 +127,10 @@ class ListMergeResolution(ResolutionDetailBase):
 
 
 ResolutionDetail = Annotated[
-    UnanimousResolution | PriorityResolution | SingleSourceResolution | ListMergeResolution,
+    UnanimousResolution
+    | PriorityResolution
+    | SingleSourceResolution
+    | ListMergeResolution,
     Field(discriminator="resolution"),
 ]
 

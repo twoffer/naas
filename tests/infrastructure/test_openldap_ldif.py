@@ -288,9 +288,7 @@ class TestLdifUserAttributes:
         cross-protocol enrichment to fail for that user.
         """
         block = self._user_block(blocks, uid)
-        assert block.get("mail"), (
-            f"User {uid!r}: missing or empty 'mail' attribute"
-        )
+        assert block.get("mail"), f"User {uid!r}: missing or empty 'mail' attribute"
 
     @pytest.mark.parametrize("uid", ["alice", "bob", "charlie", "diana", "eve"])
     def test_user_has_uid_attribute(self, blocks, uid):
@@ -300,9 +298,7 @@ class TestLdifUserAttributes:
         attribute as required by inetOrgPerson schema.
         """
         block = self._user_block(blocks, uid)
-        assert block.get("uid"), (
-            f"User {uid!r}: missing or empty 'uid' attribute"
-        )
+        assert block.get("uid"), f"User {uid!r}: missing or empty 'uid' attribute"
         assert uid in block["uid"], (
             f"User {uid!r}: uid attribute value {block['uid']!r} does not contain {uid!r}"
         )

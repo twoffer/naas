@@ -623,8 +623,11 @@ class TestUnanimousMixedWasMappedPenalty:
         result = resolve(
             attribute_sources={
                 "department": {
-                    "ldap": ("X", True),   # ldap recognized 'X' as canonical
-                    "oidc": ("X", False),  # oidc used title-case fallback — uncertain mapping
+                    "ldap": ("X", True),  # ldap recognized 'X' as canonical
+                    "oidc": (
+                        "X",
+                        False,
+                    ),  # oidc used title-case fallback — uncertain mapping
                 }
             },
             config=cfg,

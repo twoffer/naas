@@ -188,11 +188,11 @@ def reduce_member_of(value: object) -> list[str]:
 
 
 LDAP_FIELD_RULES: dict[str, FieldRule] = {
-    "display_name":  FieldRule(("cn",),               coerce_str),
-    "primary_email": FieldRule(("mail",),             coerce_str),
-    "department":    FieldRule(("departmentNumber",), normalize_department_value),
-    "employee_type": FieldRule(("employeeType",),     normalize_employee_type),
-    "groups":        FieldRule(("memberOf",),         reduce_member_of),
+    "display_name": FieldRule(("cn",), coerce_str),
+    "primary_email": FieldRule(("mail",), coerce_str),
+    "department": FieldRule(("departmentNumber",), normalize_department_value),
+    "employee_type": FieldRule(("employeeType",), normalize_employee_type),
+    "groups": FieldRule(("memberOf",), reduce_member_of),
 }
 
 
