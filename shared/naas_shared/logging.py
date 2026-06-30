@@ -29,5 +29,10 @@ def setup_logging(service_name: str, log_level: str = "INFO") -> None:
 
 
 def get_logger(name: str | None = None) -> structlog.BoundLogger:
-    """Get a structlog logger. Bind correlation_id in middleware."""
+    """Get a structlog logger.
+
+    Per-request ``correlation_id`` is bound into the logging context by
+    ``naas_shared.middleware.CorrelationIdMiddleware`` and merged into every log
+    line via ``merge_contextvars`` (configured in :func:`setup_logging`).
+    """
     return structlog.get_logger(name or __name__)

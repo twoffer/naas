@@ -13,6 +13,7 @@ import naas_shared.redis_client as _redis_mod
 from fastapi import FastAPI
 from naas_shared.database import dispose_engine
 from naas_shared.logging import get_logger, setup_logging
+from naas_shared.middleware import CorrelationIdMiddleware
 from naas_shared.redis_client import close_redis
 
 from app.routes import router
@@ -53,6 +54,10 @@ def create_app() -> FastAPI:
         version="2.0.0",
         lifespan=lifespan,
     )
+    # Bind a per-request correlation_id into the structlog context (see
+    # naas_shared.middleware.CorrelationIdMiddleware) so every log line emitted
+    # while serving a request is traceable to that request.
+    application.add_middleware(CorrelationIdMiddleware)
     application.include_router(router)
 
     return application

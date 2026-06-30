@@ -109,7 +109,7 @@ If `.venv/` exists, activate it (`source .venv/bin/activate`) before running any
 
 - **Every service:** Own `Dockerfile`, `requirements.txt`, `app/main.py` (FastAPI)
 - **Validation:** Pydantic models for all API schemas
-- **Logging:** Structlog with `correlation_id` propagated through pipeline
+- **Logging:** Structlog (JSON) with a per-request `correlation_id` bound by ASGI middleware; `event_id` correlates events across the stream pipeline
 - **Stream consumers:** `XREADGROUP` with consumer groups; ACK only after success
 - **Fail-safe:** Unknown risk → DENY; service down → CHALLENGE
 - **Metadata on every event:** `source`, `is_synthetic`, `is_historical`, `protocol`

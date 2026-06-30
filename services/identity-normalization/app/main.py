@@ -18,6 +18,7 @@ from fastapi import APIRouter, FastAPI
 from naas_shared.constants import GROUP_NORMALIZATION, STREAM_LOGIN_EVENTS
 from naas_shared.database import dispose_engine, get_session_factory
 from naas_shared.logging import get_logger, setup_logging
+from naas_shared.middleware import CorrelationIdMiddleware
 from naas_shared.models import HealthResponse
 from naas_shared.redis_client import close_redis
 from sqlalchemy import text
@@ -199,6 +200,10 @@ def create_app() -> FastAPI:
         # and its presence breaks scope-boundary tests that enumerate all routes.
         swagger_ui_oauth2_redirect_url=None,
     )
+    # Bind a per-request correlation_id into the structlog context (see
+    # naas_shared.middleware.CorrelationIdMiddleware) so every log line emitted
+    # while serving a request is traceable to that request.
+    application.add_middleware(CorrelationIdMiddleware)
     application.include_router(router)
 
     return application
