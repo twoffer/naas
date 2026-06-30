@@ -482,10 +482,11 @@ class TestEnrichNoMatchAndErrors:
     WHY (spec §5.3, §5.4 — graceful degradation, ADR-0008):
     Enrichment failure must NEVER propagate as an exception to the consumer
     loop. A raised exception would cause the consumer to skip XACK, leaving
-    the event in the pending list. On redelivery, the event would fail again
-    (since the LDAP condition persists), creating an infinite redelivery loop
-    that fills the Redis pending list and prevents all subsequent events
-    from being processed. All LDAP error conditions must be absorbed.
+    the event stuck in the pending-entries list (PEL). Redis Streams do not
+    auto-redeliver, so the event would never be reprocessed — its enrichment
+    is silently lost instead of degrading gracefully — and repeated failures
+    would accumulate unACKed entries in the PEL with no retry path. All LDAP
+    error conditions must be absorbed.
     """
 
     async def test_enrich_empty_search_result_returns_none(self, monkeypatch) -> None:
