@@ -551,3 +551,199 @@ class TestFieldValidationRejections:
             f"got {response.status_code}. "
             "The IPv4 regex must accept all valid addresses in range 0.0.0.0–255.255.255.255."
         )
+
+
+# ===========================================================================
+# CLASS 3 — Field size caps (422, writes nothing)
+# ===========================================================================
+
+
+class TestFieldSizeCaps:
+    """POST /events/ingest must enforce the per-field size caps on LoginEventBase.
+
+    WHY: These caps bound an untrusted event so a single request cannot carry an
+    unbounded payload into the pipeline / JSONB column (`raw_attributes` max 200
+    keys) or the persisted `user_agent` column (max 2048 chars). Like every other
+    field constraint, the caps are declarative Pydantic constraints and must reject
+    at the body-validation layer BEFORE the handler runs — so the service must NOT
+    be called for an over-cap request. Each cap is boundary-tested inclusive-at-max
+    / rejected-just-over to pin the off-by-one.
+    """
+
+    def test_user_agent_at_max_length_is_accepted(self) -> None:
+        """user_agent of exactly 2048 chars must NOT return 422.
+
+        WHY: 2048 is the inclusive maximum on `LoginEventBase.user_agent`. A `<` vs
+        `<=` off-by-one would reject a UA string sitting exactly at the ceiling.
+        """
+        from app.main import app
+        from starlette.testclient import TestClient
+
+        payload = dict(_VALID_EVENT, user_agent="u" * 2048)
+
+        class _GoodFake:
+            async def ingest_one(self, event):
+                return _KNOWN_UUID
+
+            async def ingest_many(self, events):
+                return [_KNOWN_UUID] * len(events)
+
+        dep_callable = _get_dep_callable()
+        if dep_callable is not None:
+            app.dependency_overrides[dep_callable] = lambda: _GoodFake()
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                response = client.post("/events/ingest", json=payload)
+        finally:
+            if dep_callable is not None:
+                app.dependency_overrides.clear()
+
+        assert response.status_code != 422, (
+            f"user_agent of exactly 2048 chars must not return 422 "
+            f"(the cap is inclusive). Got {response.status_code}."
+        )
+
+    def test_oversized_user_agent_returns_422(self) -> None:
+        """user_agent of 2049 chars returns HTTP 422.
+
+        WHY: `LoginEventBase.user_agent` caps at 2048 chars to bound the persisted
+        value. 2049 is one over the ceiling and must be rejected at validation.
+        """
+        from app.main import app
+        from starlette.testclient import TestClient
+
+        payload = dict(_VALID_EVENT, user_agent="u" * 2049)
+        spy = SpyIngestionService()
+        dep_callable = _get_dep_callable()
+
+        if dep_callable is not None:
+            app.dependency_overrides[dep_callable] = lambda: spy
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                response = client.post("/events/ingest", json=payload)
+        finally:
+            if dep_callable is not None:
+                app.dependency_overrides.clear()
+
+        assert response.status_code == 422, (
+            f"user_agent of 2049 chars must return 422, got {response.status_code}. "
+            f"Body: {response.text!r}. LoginEventBase.user_agent caps at 2048."
+        )
+
+    def test_oversized_user_agent_does_not_call_ingest_one(self) -> None:
+        """When user_agent exceeds the cap → 422, ingest_one must NOT be called.
+
+        WHY: The cap must fire at the Pydantic layer, before the handler. If
+        ingest_one ran, the over-cap value would be written to PostgreSQL and
+        published to the stream — defeating the purpose of the bound.
+        """
+        from app.main import app
+        from starlette.testclient import TestClient
+
+        payload = dict(_VALID_EVENT, user_agent="u" * 2049)
+        spy = SpyIngestionService()
+        dep_callable = _get_dep_callable()
+
+        if dep_callable is not None:
+            app.dependency_overrides[dep_callable] = lambda: spy
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.post("/events/ingest", json=payload)
+        finally:
+            if dep_callable is not None:
+                app.dependency_overrides.clear()
+
+        assert spy.ingest_one_call_count == 0, (
+            f"service.ingest_one must NOT be called when user_agent exceeds 2048 chars. "
+            f"Got {spy.ingest_one_call_count} calls."
+        )
+
+    def test_raw_attributes_at_max_keys_is_accepted(self) -> None:
+        """raw_attributes with exactly 200 keys must NOT return 422.
+
+        WHY: 200 is the inclusive maximum key count on `LoginEventBase.raw_attributes`.
+        A `<` vs `<=` off-by-one would reject an attribute bag sitting exactly at the
+        ceiling.
+        """
+        from app.main import app
+        from starlette.testclient import TestClient
+
+        payload = dict(_VALID_EVENT, raw_attributes={f"k{i}": i for i in range(200)})
+
+        class _GoodFake:
+            async def ingest_one(self, event):
+                return _KNOWN_UUID
+
+            async def ingest_many(self, events):
+                return [_KNOWN_UUID] * len(events)
+
+        dep_callable = _get_dep_callable()
+        if dep_callable is not None:
+            app.dependency_overrides[dep_callable] = lambda: _GoodFake()
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                response = client.post("/events/ingest", json=payload)
+        finally:
+            if dep_callable is not None:
+                app.dependency_overrides.clear()
+
+        assert response.status_code != 422, (
+            f"raw_attributes with exactly 200 keys must not return 422 "
+            f"(the cap is inclusive). Got {response.status_code}."
+        )
+
+    def test_oversized_raw_attributes_returns_422(self) -> None:
+        """raw_attributes with 201 keys returns HTTP 422.
+
+        WHY: `LoginEventBase.raw_attributes` caps at 200 keys so a single event
+        cannot carry an unbounded attribute bag into the pipeline / JSONB column.
+        201 keys is one over the ceiling and must be rejected at validation.
+        """
+        from app.main import app
+        from starlette.testclient import TestClient
+
+        payload = dict(_VALID_EVENT, raw_attributes={f"k{i}": i for i in range(201)})
+        spy = SpyIngestionService()
+        dep_callable = _get_dep_callable()
+
+        if dep_callable is not None:
+            app.dependency_overrides[dep_callable] = lambda: spy
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                response = client.post("/events/ingest", json=payload)
+        finally:
+            if dep_callable is not None:
+                app.dependency_overrides.clear()
+
+        assert response.status_code == 422, (
+            f"raw_attributes with 201 keys must return 422, got {response.status_code}. "
+            f"Body: {response.text!r}. LoginEventBase.raw_attributes caps at 200 keys."
+        )
+
+    def test_oversized_raw_attributes_does_not_call_ingest_one(self) -> None:
+        """When raw_attributes exceeds the cap → 422, ingest_one must NOT be called.
+
+        WHY: The cap must fire at the Pydantic layer, before the handler. If
+        ingest_one ran, the over-cap attribute bag would be written to the JSONB
+        column and published to the stream — defeating the purpose of the bound.
+        """
+        from app.main import app
+        from starlette.testclient import TestClient
+
+        payload = dict(_VALID_EVENT, raw_attributes={f"k{i}": i for i in range(201)})
+        spy = SpyIngestionService()
+        dep_callable = _get_dep_callable()
+
+        if dep_callable is not None:
+            app.dependency_overrides[dep_callable] = lambda: spy
+        try:
+            with TestClient(app, raise_server_exceptions=False) as client:
+                client.post("/events/ingest", json=payload)
+        finally:
+            if dep_callable is not None:
+                app.dependency_overrides.clear()
+
+        assert spy.ingest_one_call_count == 0, (
+            f"service.ingest_one must NOT be called when raw_attributes exceeds 200 keys. "
+            f"Got {spy.ingest_one_call_count} calls."
+        )

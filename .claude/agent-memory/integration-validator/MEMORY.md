@@ -9,6 +9,7 @@
 - [ldap-memberof-overlay.md](ldap-memberof-overlay.md) — normalization-demo memberOf back-population: RESOLVED via 00-memberof-overlay.ldif (the .sh hook never ran); Scene-6 0.80 is by design post-b6d7a81; verify now fails token-only merges; --keep prints ids; LDAP creds + demo DB host gotchas (POSTGRES_PASSWORD now required)
 
 ## Validation Recipes / Results
+- [correlation-middleware-validation.md](correlation-middleware-validation.md) — chore/pre-public-fixes (2026-07-01) full PASS: how to prove correlation_id in real logs (no httpx→drive raw ASGI, only publish-fail path logs via structlog); event_id chain across streams; input-cap boundaries; compose scope ends at normalized_events
 - [public-release-validation.md](public-release-validation.md) — pre-public-flip E2E (2026-06-30): full PASS, README headline holds; 30/30 integration, demo exit 0 all 6 scenes, both /health healthy; .env is gitignored (drift is local-only)
 - [normalization-validation.md](normalization-validation.md) — live inject+trace recipe (redis host="redis" gotcha) + adapter rule-table refactor regression PASS (2026-06-07)
 - [lockfile-drift-validation.md](lockfile-drift-validation.md) — PR #22 dep-pinning: faithfully replicate CI drift job by recompiling IN PLACE (fresh-output gives false drift); GO verdict, 1572 unit tests green
