@@ -2,7 +2,7 @@
 ## Complete Architectural Reference
 
 **Version:** 2.0
-**Status:** Design Finalized, Ready for Implementation
+**Status:** Design Finalized, Ready for Implementation — Stages 0–2 implemented & validated; remainder designed.
 
 ---
 

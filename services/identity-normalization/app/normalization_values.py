@@ -76,6 +76,11 @@ UNIFIED_TO_LDAP: dict[str, str] = {
 
 _logger = get_logger(__name__)
 
+# Cap on how many characters of a user-influenced raw attribute value may reach
+# the logs. Bounds exposure of a mis-configured/oversized IdP claim while keeping
+# the value legible enough to extend the canonical maps above.
+_MAX_LOGGED_VALUE_LEN = 64
+
 
 def normalize_department(value: object) -> tuple[str | None, bool]:
     """Map a raw department string to its canonical form.
@@ -103,10 +108,15 @@ def normalize_department(value: object) -> tuple[str | None, bool]:
     if canonical is not None:
         return canonical, True
 
+    # Length-bound the raw value: it is user-influenced (from an IdP claim), so
+    # cap what reaches logs to match the PII/log discipline used elsewhere
+    # (dn_length, cached_value_length, str(exc)[:200]). The truncated value stays
+    # legible enough to extend the canonical map; the full length is recorded.
     _logger.warning(
         "unmapped_attribute_value",
         attribute="department",
-        raw_value=value,
+        raw_value=value[:_MAX_LOGGED_VALUE_LEN],
+        raw_value_length=len(value),
     )
     return value.strip().title(), False
 
@@ -158,9 +168,11 @@ def normalize_employee_type(value: object) -> str | None:
     if canonical is not None:
         return canonical
 
+    # Length-bound the raw value (see normalize_department for rationale).
     _logger.warning(
         "unmapped_attribute_value",
         attribute="employee_type",
-        raw_value=value,
+        raw_value=value[:_MAX_LOGGED_VALUE_LEN],
+        raw_value_length=len(value),
     )
     return None

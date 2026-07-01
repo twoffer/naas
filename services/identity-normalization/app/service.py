@@ -165,7 +165,7 @@ class NormalizationService:
         except Exception as exc:  # noqa: BLE001 — enrichment failure must never drop the event (ADR-0008 graceful degradation)
             log.error(
                 "ldap_enrichment_unexpected_exception",
-                error=str(exc),
+                error=str(exc)[:200],
             )
             return EnrichmentSkipped(applied=False, skip_reason="ldap_search_error")
 
