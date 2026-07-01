@@ -313,7 +313,7 @@ class BulkIngestAccepted(BaseModel):
 
 ### 5.7 Composition root — `app/main.py`
 
-- `create_app() -> FastAPI` builds the app, calls `setup_logging("event-ingestion")`, includes the router, and exposes a module-level `app = create_app()` for uvicorn.
+- `create_app() -> FastAPI` builds the app, calls `setup_logging("event-ingestion")`, installs `CorrelationIdMiddleware` (SPEC_0 §3.7 — binds a per-request `correlation_id` into the log context), includes the router, and exposes a module-level `app = create_app()` for uvicorn.
 - Use a FastAPI dependency that, given a session from `get_db_session`, constructs `IngestionService(PostgresEventRepository(session), RedisEventPublisher(), get_logger("event-ingestion"))`.
 - A lifespan handler may warm the Redis client. **Do not** create consumer groups (this service is a producer, not a consumer).
 - CMD: `uvicorn app.main:app --host 0.0.0.0 --port 8001`.

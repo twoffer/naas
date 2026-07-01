@@ -189,7 +189,7 @@ The service follows the project's hexagonal (ports/adapters) structure (ADR-0009
 
 ### 5.1 Service composition and the consumer loop
 
-The composition root (`main.py`) builds the app, wires the adapters into `NormalizationService`, and on lifespan startup: (1) calls `setup_logging("identity-normalization")`; (2) calls `ensure_consumer_group(...)`; (3) loads and validates `config/normalization.yaml` (§5.6) — **invalid config aborts startup**; (4) launches the consumer loop as a background task. On shutdown it cancels the loop cleanly.
+The composition root (`main.py`) builds the app, installs `CorrelationIdMiddleware` (SPEC_0 §3.7 — binds a per-request `correlation_id` into the log context for `/health` requests), wires the adapters into `NormalizationService`, and on lifespan startup: (1) calls `setup_logging("identity-normalization")`; (2) calls `ensure_consumer_group(...)`; (3) loads and validates `config/normalization.yaml` (§5.6) — **invalid config aborts startup**; (4) launches the consumer loop as a background task. On shutdown it cancels the loop cleanly.
 
 The consumer loop (`consumer.py`) processes one message at a time:
 
@@ -260,12 +260,15 @@ The LDAP adapter has two methods. `extract(raw_attributes)` is the passive mappi
 - **Connection:** a small pool of `settings.ldap_pool_size` connections (default 3) to `ldap://{settings.ldap_host}:{settings.ldap_port}`, bound with `settings.ldap_admin_dn` / `settings.ldap_admin_password`. `python-ldap` is synchronous; **⚠️ wrap every blocking LDAP call in `asyncio.to_thread(...)`** so the async event loop is never blocked.
 - **Reverse mapping:** `enrich` receives a **unified** field name (e.g., `primary_email`) and reverse-maps it to the LDAP attribute (`mail`) using the adapter's own mapping table — the single source of truth for LDAP↔unified translation. The enrichment config never names LDAP attributes (§5.6). The fetched attribute list is likewise the reverse-mapped set of unified fields.
 - **Search:** `search_s(settings.ldap_base_dn, SCOPE_SUBTREE, filter_str, attrlist)`, where `filter_str` is built from the reverse-mapped attribute and the **sanitized** lookup value.
-- **⚠️ LDAP injection sanitization (required):** escape the lookup value with `ldap.filter.escape_filter_chars` before building the filter. Never interpolate a raw value into a filter string.
+- **⚠️ LDAP injection sanitization (required):** escape the lookup **value** with `ldap.filter.escape_filter_chars` before building the filter. Never interpolate a raw value into a filter string. The **attribute name** is not escapable (RFC 4515 attribute descriptors have no escape form), so validate it against the known unified→LDAP attribute set and raise on anything else rather than interpolating it verbatim — closing the one injection vector value-escaping can't cover for external callers (`enrich()` itself only ever passes trusted `UNIFIED_TO_LDAP` constants).
 
 ```python
 # [EXEMPLARY]
 import ldap.filter
+_ALLOWED_LDAP_ATTRS = frozenset(UNIFIED_TO_LDAP.values())
 def build_search_filter(ldap_attr: str, lookup_value: str) -> str:
+    if ldap_attr not in _ALLOWED_LDAP_ATTRS:
+        raise ValueError(f"unknown LDAP attribute: {ldap_attr!r}")
     return f"({ldap_attr}={ldap.filter.escape_filter_chars(lookup_value)})"
 ```
 
