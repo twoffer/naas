@@ -26,7 +26,7 @@ click==8.4.1
     # via pip-tools
 coverage==7.14.1
     # via pytest-cov
-fastapi==0.137.1
+fastapi==0.138.2
     # via naas-shared
 greenlet==3.5.1
     # via sqlalchemy
@@ -86,7 +86,7 @@ pyproject-hooks==1.2.0
     # via
     #   build
     #   pip-tools
-pytest==9.0.3
+pytest==9.1.1
     # via
     #   -r requirements-dev.in
     #   pytest-asyncio
@@ -105,11 +105,11 @@ python-dotenv==1.2.2
     # via pydantic-settings
 pyyaml==6.0.3
     # via -r requirements-dev.in
-redis==8.0.0
+redis==8.0.1
     # via naas-shared
 rich==15.0.0
     # via -r requirements-dev.in
-ruff==0.15.17
+ruff==0.15.20
     # via -r requirements-dev.in
 sqlalchemy==2.0.51
     # via naas-shared

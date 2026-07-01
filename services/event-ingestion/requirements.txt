@@ -16,7 +16,7 @@ asyncpg==0.31.0
     # via naas-shared
 click==8.4.1
     # via uvicorn
-fastapi==0.137.1
+fastapi==0.138.2
     # via
     #   -r requirements.in
     #   naas-shared
@@ -43,7 +43,7 @@ python-dotenv==1.2.2
     #   uvicorn
 pyyaml==6.0.3
     # via uvicorn
-redis==8.0.0
+redis==8.0.1
     # via naas-shared
 sqlalchemy==2.0.51
     # via naas-shared
