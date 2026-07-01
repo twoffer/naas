@@ -4,7 +4,8 @@ description: "Run the pipeline-simulator agent for a scenario and persist its re
 argument-hint: [scenario]
 disable-model-invocation: true
 allowed-tools: Agent Write Bash Read
-model: claude-sonnet-4-6
+model: claude-sonnet-5
+effort: medium
 ---
 
 You are a thin wrapper around the `pipeline-simulator` agent. Your job is exactly two things:

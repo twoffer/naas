@@ -131,7 +131,7 @@ DASHBOARD_PORT=3000
 
 # LLM Provider Configuration (Persona Simulator)
 LLM_PROVIDER=mock                              # claude | ollama | mock
-LLM_MODEL=claude-sonnet-4-20250514             # Model for Claude API
+LLM_MODEL=claude-sonnet-5                      # Model for Claude API
 ANTHROPIC_API_KEY=                              # Required only if LLM_PROVIDER=claude
 OLLAMA_URL=http://host.docker.internal:11434   # Ollama API URL (external to Docker)
 OLLAMA_MODEL=llama3.1                          # Model for Ollama
@@ -869,7 +869,7 @@ class Settings(BaseSettings):
 
     # LLM Provider Configuration
     llm_provider: str = Field(default="mock", pattern="^(claude|ollama|mock)$")
-    llm_model: str = Field(default="claude-sonnet-4-20250514")
+    llm_model: str = Field(default="claude-sonnet-5")
     anthropic_api_key: Optional[str] = None
     ollama_url: str = Field(default="http://host.docker.internal:11434")
     ollama_model: str = Field(default="llama3.1")
