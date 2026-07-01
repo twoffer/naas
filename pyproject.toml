@@ -10,6 +10,14 @@ consider_namespace_packages = true
 markers = [
     "integration: live-docker integration test (skip by default; opt in via --integration flag or NAAS_RUN_INTEGRATION=1 env var)",
 ]
+# Turn every warning into a test failure so future deprecations surface loudly,
+# with one deliberate carve-out: Starlette's TestClient warns that its `httpx`
+# backend is deprecated in favor of `httpx2`, which has no stable release yet —
+# nothing to migrate to, so this one known third-party warning stays ignored.
+filterwarnings = [
+    "error",
+    "ignore::starlette.exceptions.StarletteDeprecationWarning",
+]
 
 [tool.ruff]
 target-version = "py312"
