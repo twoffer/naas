@@ -43,7 +43,7 @@ class Settings(BaseSettings):
 
     # LLM Provider Configuration
     llm_provider: str = Field(default="mock", pattern="^(claude|ollama|mock)$")
-    llm_model: str = Field(default="claude-sonnet-4-20250514")
+    llm_model: str = Field(default="claude-sonnet-5")
     anthropic_api_key: str | None = None
     ollama_url: str = Field(default="http://host.docker.internal:11434")
     ollama_model: str = Field(default="llama3.1")

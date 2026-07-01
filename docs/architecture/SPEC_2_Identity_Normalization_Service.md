@@ -189,7 +189,7 @@ The service follows the project's hexagonal (ports/adapters) structure (ADR-0009
 
 ### 5.1 Service composition and the consumer loop
 
-The composition root (`main.py`) builds the app, wires the adapters into `NormalizationService`, and on lifespan startup: (1) calls `setup_logging("identity-normalization")`; (2) calls `ensure_consumer_group(...)`; (3) loads and validates `config/normalization.yaml` (§5.6) — **invalid config aborts startup**; (4) launches the consumer loop as a background task. On shutdown it cancels the loop cleanly.
+The composition root (`main.py`) builds the app, installs `CorrelationIdMiddleware` (SPEC_0 §3.7 — binds a per-request `correlation_id` into the log context for `/health` requests), wires the adapters into `NormalizationService`, and on lifespan startup: (1) calls `setup_logging("identity-normalization")`; (2) calls `ensure_consumer_group(...)`; (3) loads and validates `config/normalization.yaml` (§5.6) — **invalid config aborts startup**; (4) launches the consumer loop as a background task. On shutdown it cancels the loop cleanly.
 
 The consumer loop (`consumer.py`) processes one message at a time:
 
@@ -205,10 +205,10 @@ loop:
       await publisher.publish_normalized(record, normalized)                  # 4. XADD normalized_events
       XACK(login_events, normalization_workers, msg_id)                       # 5. ACK only after 3 & 4 succeed
     except Exception:
-      log.error(...); # do NOT XACK — message stays pending and is redelivered
+      log.error(...); # do NOT XACK — message stays in the pending-entries list (PEL)
 ```
 
-**⚠️ CRITICAL ordering (ADR-0002 dual-write):** persist to PostgreSQL and commit **before** publishing to `normalized_events`, and `XACK` **only after** both the commit and the publish succeed. If any step raises, do **not** ACK; the message remains in the pending-entries list and is redelivered. Because the `UPDATE` is idempotent and `normalized_events` carries the full record, at-least-once redelivery is safe (a duplicate downstream message is reprocessed idempotently). Do not drop, skip, or dead-letter a message merely because LDAP enrichment failed — enrichment failure is handled by graceful degradation (§5.4), not by failing the event.
+**⚠️ CRITICAL ordering (ADR-0002 dual-write):** persist to PostgreSQL and commit **before** publishing to `normalized_events`, and `XACK` **only after** both the commit and the publish succeed. If any step raises, do **not** ACK; the message remains in the consumer group's pending-entries list (PEL). Note: Redis Streams do **not** auto-redeliver pending entries — there is no visibility timeout, and the exemplary loop above reads only `">"` (new messages). Reprocessing a stuck entry therefore requires an explicit claim step (`XAUTOCLAIM`/`XCLAIM`, or a startup `"0"` read), which is **deferred** to a retry / dead-letter policy (tracked in `docs/FOLLOWUPS.md`). The persist-before-publish ordering keeps the event recoverable for that future policy rather than silently dropped: because the `UPDATE` is idempotent and `normalized_events` carries the full record, the intended at-least-once reprocessing is safe (a duplicate downstream message is reprocessed idempotently). Do not drop, skip, or dead-letter a message merely because LDAP enrichment failed — enrichment failure is handled by graceful degradation (§5.4), not by failing the event.
 
 The worker obtains DB sessions from `get_session_factory()` directly (opening and committing one session per event), **not** from the request-scoped `get_db_session` dependency — the latter is a FastAPI dependency tied to the HTTP request lifecycle and is used only by `/health` (§5.8).
 
@@ -260,12 +260,15 @@ The LDAP adapter has two methods. `extract(raw_attributes)` is the passive mappi
 - **Connection:** a small pool of `settings.ldap_pool_size` connections (default 3) to `ldap://{settings.ldap_host}:{settings.ldap_port}`, bound with `settings.ldap_admin_dn` / `settings.ldap_admin_password`. `python-ldap` is synchronous; **⚠️ wrap every blocking LDAP call in `asyncio.to_thread(...)`** so the async event loop is never blocked.
 - **Reverse mapping:** `enrich` receives a **unified** field name (e.g., `primary_email`) and reverse-maps it to the LDAP attribute (`mail`) using the adapter's own mapping table — the single source of truth for LDAP↔unified translation. The enrichment config never names LDAP attributes (§5.6). The fetched attribute list is likewise the reverse-mapped set of unified fields.
 - **Search:** `search_s(settings.ldap_base_dn, SCOPE_SUBTREE, filter_str, attrlist)`, where `filter_str` is built from the reverse-mapped attribute and the **sanitized** lookup value.
-- **⚠️ LDAP injection sanitization (required):** escape the lookup value with `ldap.filter.escape_filter_chars` before building the filter. Never interpolate a raw value into a filter string.
+- **⚠️ LDAP injection sanitization (required):** escape the lookup **value** with `ldap.filter.escape_filter_chars` before building the filter. Never interpolate a raw value into a filter string. The **attribute name** is not escapable (RFC 4515 attribute descriptors have no escape form), so validate it against the known unified→LDAP attribute set and raise on anything else rather than interpolating it verbatim — closing the one injection vector value-escaping can't cover for external callers (`enrich()` itself only ever passes trusted `UNIFIED_TO_LDAP` constants).
 
 ```python
 # [EXEMPLARY]
 import ldap.filter
+_ALLOWED_LDAP_ATTRS = frozenset(UNIFIED_TO_LDAP.values())
 def build_search_filter(ldap_attr: str, lookup_value: str) -> str:
+    if ldap_attr not in _ALLOWED_LDAP_ATTRS:
+        raise ValueError(f"unknown LDAP attribute: {ldap_attr!r}")
     return f"({ldap_attr}={ldap.filter.escape_filter_chars(lookup_value)})"
 ```
 
@@ -443,7 +446,7 @@ The `NormalizationService.normalize(record)` is the domain orchestration: select
 4. **Enrichment skipped — no match.** For an OIDC event whose user does **not** exist in OpenLDAP: verify `enrichment.applied: false`, `enrichment.skip_reason: "no_ldap_match"`, single-source resolution throughout, and that the event was still processed (not dropped).
 5. **LDAP event skips enrichment.** For a `protocol: "ldap"` event: verify `enrichment.applied: false`, `skip_reason: "ldap_event"`, `source_protocol: "ldap"`.
 6. **Negative cache.** Two successive OIDC logins for the same absent user produce only **one** LDAP query (the second resolves from the negative cache); `XINFO`/logs confirm no second directory hit within the TTL.
-7. **Pipeline + ACK semantics.** `XINFO GROUPS login_events` shows `normalization_workers`; a successfully processed message is ACKed (pending count returns to 0); a message that fails processing remains pending (not ACKed) and is redelivered. `normalized_events` gains one message per processed event, carrying the full record with `normalized_attributes` populated.
+7. **Pipeline + ACK semantics.** `XINFO GROUPS login_events` shows `normalization_workers`; a successfully processed message is ACKed (pending count returns to 0); a message that fails processing remains pending (not ACKed) in the PEL — Redis does not auto-redeliver it, so it is not reprocessed until the deferred claim-and-retry policy (`XAUTOCLAIM`) lands. `normalized_events` gains one message per processed event, carrying the full record with `normalized_attributes` populated.
 8. **Health.** `curl -s http://localhost:8002/health` → `{"status":"healthy","service":"identity-normalization",...}`.
 9. **Config validation.** Starting with an invalid `correlation_key` (e.g., `favorite_color`) aborts startup with a descriptive error.
 
@@ -460,6 +463,6 @@ The `NormalizationService.normalize(record)` is the domain orchestration: select
 - **Do NOT** make the attribute mapping table runtime-configurable, and **do NOT** hot-reload `normalization.yaml` (startup load only).
 - **Do NOT** `Base.metadata.create_all`, add migrations, or alter the `events` table — insert/`SELECT`-free `UPDATE` by `id` only.
 - **Do NOT** add endpoints beyond `/health`, and **do NOT** add authentication (handled upstream in a later spec).
-- **Do NOT** roll back or skip the PostgreSQL commit on a publish failure in a way that loses the event — leave the message unACKed for redelivery instead.
+- **Do NOT** roll back or skip the PostgreSQL commit on a publish failure in a way that loses the event — leave the message unACKed in the PEL instead, so the deferred claim-and-retry policy can reprocess it (Redis does not auto-redeliver it).
 - **Do NOT** touch other services or other `naas_shared` modules beyond the modifications named in §1, and **do NOT** modify any document under `docs/` other than the SPEC_0 § 3.3 / § 3.8 mirrors named in §1.
 - **Do NOT** defer the SPEC_0 documentation mirror to a separate change manifest or a later session. The § 3.3 / § 3.8 updates are part of this spec's work and are applied in the same pipeline run as the shared-module changes, so the code and its canonical mirror move in lockstep.

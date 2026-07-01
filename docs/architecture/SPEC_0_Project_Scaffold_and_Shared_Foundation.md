@@ -45,6 +45,7 @@ naas/
 │       ├── models.py                 # Base Pydantic models (LoginEvent, etc.)
 │       ├── schemas.py                # SQLAlchemy ORM table definitions
 │       ├── logging.py                # Structlog configuration
+│       ├── middleware.py             # ASGI CorrelationIdMiddleware (binds per-request correlation_id)
 │       ├── config.py                 # Pydantic Settings (env-driven config)
 │       ├── constants.py              # Stream names, channel names, consumer groups
 │       ├── ml_features.py            # ML feature column ordering contract (16-feature vector — used by training script and Risk Evaluator)
@@ -130,7 +131,7 @@ DASHBOARD_PORT=3000
 
 # LLM Provider Configuration (Persona Simulator)
 LLM_PROVIDER=mock                              # claude | ollama | mock
-LLM_MODEL=claude-sonnet-4-20250514             # Model for Claude API
+LLM_MODEL=claude-sonnet-5                      # Model for Claude API
 ANTHROPIC_API_KEY=                              # Required only if LLM_PROVIDER=claude
 OLLAMA_URL=http://host.docker.internal:11434   # Ollama API URL (external to Docker)
 OLLAMA_MODEL=llama3.1                          # Model for Ollama
@@ -409,11 +410,14 @@ class LoginEventBase(BaseModel):
     )
     protocol: Literal["oidc", "saml", "ldap"]
     timestamp: datetime
-    user_agent: Optional[str] = None
+    user_agent: Optional[str] = Field(default=None, max_length=2048)
     source: Literal["user", "simulator", "api"] = "user"
     is_synthetic: bool = False
     is_historical: bool = False
-    raw_attributes: Dict[str, Any] = Field(default_factory=dict)
+    # Bound the untrusted attribute bag so a single event can't carry an
+    # unbounded payload into the pipeline / JSONB column. The 200-key cap is a
+    # generous ceiling over any real IdP token or directory entry.
+    raw_attributes: Dict[str, Any] = Field(default_factory=dict, max_length=200)
 
     @field_validator("timestamp", mode="after")
     @classmethod
@@ -802,9 +806,18 @@ def setup_logging(service_name: str, log_level: str = "INFO") -> None:
 
 
 def get_logger(name: str | None = None) -> structlog.BoundLogger:
-    """Get a structlog logger. Bind correlation_id in middleware."""
+    """Get a structlog logger.
+
+    Per-request ``correlation_id`` is bound into the logging context by
+    ``naas_shared.middleware.CorrelationIdMiddleware`` and merged into every log
+    line via ``merge_contextvars`` (configured in :func:`setup_logging`).
+    """
     return structlog.get_logger(name or __name__)
 ```
+
+**Correlation-ID middleware (`shared/naas_shared/middleware.py`).** `setup_logging` installs `structlog.contextvars.merge_contextvars` as the first processor specifically so a per-request id can ride on every log line; `CorrelationIdMiddleware` is what populates that context for HTTP requests. It is a **pure ASGI middleware** (not a Starlette `BaseHTTPMiddleware`, whose `dispatch` runs the downstream app in a separate task so contextvars bound there never reach the route handler — a raw ASGI callable runs in the same task and context as the handler). Per request it: reads the inbound `X-Request-ID` header (the de-facto proxy/load-balancer standard), adopts it **only** if it matches a bounded id-safe allowlist (`[A-Za-z0-9._-]{1,128}` — defense against CRLF/header-splitting, log-line forgery, and unbounded log bloat) else mints a fresh `uuid4().hex`, binds it as `correlation_id` for the request's lifetime, echoes it back on the response header, and clears the context when the request ends. Each service's `create_app()` installs it via `application.add_middleware(CorrelationIdMiddleware)`.
+
+**Scope:** this binds a `correlation_id` within a single service's HTTP request scope. Correlation across the async Redis Streams pipeline (ingestion → normalization → …) is carried by `event_id` on the stream payload and the DB row, not by this header.
 
 ### 3.8 Shared Config Module
 
@@ -856,7 +869,7 @@ class Settings(BaseSettings):
 
     # LLM Provider Configuration
     llm_provider: str = Field(default="mock", pattern="^(claude|ollama|mock)$")
-    llm_model: str = Field(default="claude-sonnet-4-20250514")
+    llm_model: str = Field(default="claude-sonnet-5")
     anthropic_api_key: Optional[str] = None
     ollama_url: str = Field(default="http://host.docker.internal:11434")
     ollama_model: str = Field(default="llama3.1")

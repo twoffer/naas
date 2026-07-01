@@ -50,8 +50,9 @@ class TestOidcAdapterProtocolConformance:
 
     WHY: The NormalizationService is typed to accept ProtocolAdapter instances.
     If OidcAdapter is missing the extract() method, the service raises AttributeError
-    on the first OIDC event and that event goes unprocessed (and unACKed, causing
-    infinite redelivery).
+    on the first OIDC event and that event goes unprocessed — caught per-message and
+    left unACKed in the pending-entries list (PEL), which Redis does not auto-redeliver,
+    so it is never reprocessed.
     """
 
     def test_oidc_adapter_has_extract_method(self) -> None:

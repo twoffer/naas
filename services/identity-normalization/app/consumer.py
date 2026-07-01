@@ -10,12 +10,15 @@ Critical ordering (§5.1, ADR-0002):
   3. publisher.publish_normalized() — XADD to normalized_events
   4. redis.xack()                — ONLY after both 2 and 3 succeed
 
-WHY this ordering: if the service crashes between write+commit and publish the
-event is re-delivered and re-published (at-least-once delivery); downstream
-services receiving a duplicate normalized event is safe because normalization is
-idempotent.  If publish fails without a preceding commit, the event stays pending
-and will be re-processed — correct behaviour.  If we ACK before commit, a crash
-can lose a normalized result with no recovery path.
+WHY this ordering: persisting before publishing and ACKing only after BOTH
+succeed means a crash or failure at any step leaves the message in the consumer
+group's Pending Entries List (PEL) rather than silently dropped — so no
+normalized result is lost.  ACKing before commit, by contrast, could drop a
+result on a crash with no recovery path.  Note: Redis Streams do NOT
+auto-redeliver pending entries (there is no visibility timeout); reprocessing a
+stuck entry requires a claim-and-retry / dead-letter policy (XAUTOCLAIM), which
+is deferred (docs/FOLLOWUPS.md).  Downstream services stay safe against any such
+future reprocessing because normalization is idempotent.
 """
 
 from __future__ import annotations
@@ -52,13 +55,16 @@ async def run_consumer_loop(
     """Process login events from the Redis Stream indefinitely.
 
     Uses XREADGROUP so messages are delivered to exactly one consumer in the
-    group at a time (at-least-once semantics with pending-entries redelivery).
-    The consumer name is derived from the hostname to be unique per replica.
+    group at a time.  The consumer name is derived from the hostname to be
+    unique per replica.
 
     On any per-message exception: log the error, do NOT XACK (the message
-    stays in the pending-entries list and will be redelivered by Redis after
-    the visibility timeout).  The loop continues to the next batch — a single
-    bad message does not stall the pipeline.
+    stays in the consumer group's Pending Entries List).  Redis Streams do NOT
+    auto-redeliver pending entries — there is no visibility timeout, and a
+    claim-and-retry / dead-letter policy (XAUTOCLAIM) is deferred
+    (docs/FOLLOWUPS.md) — so the entry is not reprocessed automatically.  The
+    loop simply continues to the next batch, so a single bad message does not
+    stall the pipeline.
 
     EnrichmentSkipped in the normalized result is NOT a processing failure;
     such messages proceed through the full write → publish → XACK path.
@@ -135,7 +141,8 @@ async def _process_message(
     """Handle one stream message end-to-end.
 
     Failures at any step are caught, logged, and do NOT XACK.  This keeps the
-    message in the pending-entries list for redelivery.
+    message in the consumer group's Pending Entries List (Redis does not
+    auto-redeliver it; see run_consumer_loop and docs/FOLLOWUPS.md).
 
     WHY bytes handling: redis-py may return field keys/values as either str or
     bytes depending on decode_responses setting.  We normalize here so the
@@ -187,4 +194,4 @@ async def _process_message(
                 error=str(exc)[:200],
                 error_type=type(exc).__name__,
             )
-        # Do NOT XACK — message stays pending for redelivery
+        # Do NOT XACK — message stays in the consumer group's PEL (no auto-redelivery)

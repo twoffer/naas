@@ -2,7 +2,8 @@
 name: test-suite-generator
 description: "Generates test suites for NAAS services — TDD-first tests defining behavior contracts before implementation, or validation tests for existing code, coverage gaps, and regressions. Use when tests are needed for any component, whether before or after implementation. In the automated pipeline, invoked per-chunk before the feature-implementer to write failing tests that define success criteria."
 tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, LSP
-model: claude-sonnet-4-6
+model: claude-sonnet-5
+effort: high
 color: blue
 memory: project
 ---

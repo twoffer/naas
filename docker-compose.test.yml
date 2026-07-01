@@ -19,4 +19,9 @@ services:
     environment:
       # Prevent Python from writing .pyc files into the read-only mount.
       PYTHONDONTWRITEBYTECODE: "1"
-    command: ["sh", "-c", "pip install --quiet -r requirements-dev.txt && python -m pytest tests/ --ignore=tests/integration --ignore=tests/infrastructure/test_docker_compose.py -p no:cacheprovider --rootdir /workspace -o cache_dir=/tmp/.pytest_cache"]
+    # `-p no:cacheprovider` fully disables the pytest cache (nothing is written
+    # to the read-only mount). We deliberately do NOT also pass
+    # `-o cache_dir=...`: with the cache provider disabled, `cache_dir` is an
+    # unknown config option, and the repo's `filterwarnings = ["error"]` promotes
+    # the resulting PytestConfigWarning to a collection-time INTERNALERROR.
+    command: ["sh", "-c", "pip install --quiet -r requirements-dev.txt && python -m pytest tests/ --ignore=tests/integration --ignore=tests/infrastructure/test_docker_compose.py -p no:cacheprovider --rootdir /workspace"]

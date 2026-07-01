@@ -189,7 +189,7 @@ class TestConsumerOrdering:
             )
 
         assert "xack" not in call_order, (
-            "XACK must NOT be called when write/commit fails — message stays pending for redelivery"
+            "XACK must NOT be called when write/commit fails — message stays in the pending-entries list (PEL)"
         )
 
 
@@ -199,7 +199,7 @@ class TestConsumerOrdering:
 
 
 class TestConsumerFailureHandling:
-    """On any step exception, message is NOT XACKed (stays pending for redelivery)."""
+    """On any step exception, message is NOT XACKed (stays pending in the PEL)."""
 
     async def test_normalize_exception_no_xack(self):
         """If normalize() raises, message is not ACKed and loop continues."""
@@ -659,7 +659,7 @@ class TestPoisonMessageNoAck:
 
         LoginEventRecord.model_validate() raises Pydantic ValidationError on a schema
         violation (e.g., wrong type for 'id').  The consumer must catch it, log, and
-        leave the message unACKed for redelivery.
+        leave the message unACKed in the pending-entries list (PEL).
         """
         from app.consumer import run_consumer_loop
 

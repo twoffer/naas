@@ -29,11 +29,14 @@ class LoginEventBase(BaseModel):
     )
     protocol: Literal["oidc", "saml", "ldap"]
     timestamp: datetime
-    user_agent: str | None = None
+    user_agent: str | None = Field(default=None, max_length=2048)
     source: Literal["user", "simulator", "api"] = "user"
     is_synthetic: bool = False
     is_historical: bool = False
-    raw_attributes: dict[str, Any] = Field(default_factory=dict)
+    # Bound the untrusted attribute bag so a single event can't carry an
+    # unbounded payload into the pipeline / JSONB column. The 200-key cap is a
+    # generous ceiling over any real IdP token or directory entry.
+    raw_attributes: dict[str, Any] = Field(default_factory=dict, max_length=200)
 
     @field_validator("timestamp", mode="after")
     @classmethod

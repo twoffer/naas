@@ -200,6 +200,7 @@ class TestAllModulesImportCleanly:
             "naas_shared.database",
             "naas_shared.redis_client",
             "naas_shared.logging",
+            "naas_shared.middleware",
             "naas_shared.schemas",
             "naas_shared.ml_features",
             "naas_shared.simulation_tools",

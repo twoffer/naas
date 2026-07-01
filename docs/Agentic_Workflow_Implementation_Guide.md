@@ -66,13 +66,13 @@ This design:
 
 ### Design Philosophy: Defense in Depth for Increased Rigor
 
-The pipeline incorporates several layers of guardrails — iteration caps on the implementer (3 attempts to make tests pass), iteration caps on the security review reflection loop (3 attempts before escalation), an invocation-count budget guard (pause at 30 invocations), regression checks after every security fix, and explicit HUMAN_REVIEW escalation paths. With current-generation frontier models (Claude Opus 4.8, Claude Sonnet 4.6), some of this scaffolding is heavier than what is strictly required for the pipeline to produce correct output. Modern models exhibit stronger task persistence, better self-verification, and more reliable tool use than earlier generations, and many runs would succeed without any of these guardrails firing.
+The pipeline incorporates several layers of guardrails — iteration caps on the implementer (3 attempts to make tests pass), iteration caps on the security review reflection loop (3 attempts before escalation), an invocation-count budget guard (pause at 30 invocations), regression checks after every security fix, and explicit HUMAN_REVIEW escalation paths. With current-generation frontier models (Claude Opus 4.8, Claude Sonnet 5), some of this scaffolding is heavier than what is strictly required for the pipeline to produce correct output. Modern models exhibit stronger task persistence, better self-verification, and more reliable tool use than earlier generations, and many runs would succeed without any of these guardrails firing.
 
 These layers are retained deliberately for three reasons:
 
 1. **Demonstration value.** A pipeline that includes explicit quality gates, escalation paths, and budget controls visibly demonstrates agentic engineering discipline — exactly the discipline that distinguishes a production-ready agentic system from a prototype. The receipts (iteration counts, security fixes, escalations) tell a verifiable story.
 
-2. **Robustness across model generations.** The pipeline is designed to remain reliable if a less capable model is substituted for cost reasons (e.g., Sonnet 4.6 in place of Opus 4.8), or if a future model exhibits regression on a particular workflow. The guardrails are calibrated for the *minimum* trustworthy behavior, not the typical case.
+2. **Robustness across model generations.** The pipeline is designed to remain reliable if a less capable model is substituted for cost reasons (e.g., Sonnet 5 in place of Opus 4.8), or if a future model exhibits regression on a particular workflow. The guardrails are calibrated for the *minimum* trustworthy behavior, not the typical case.
 
 3. **Catching the long tail.** Even with a well-behaved model, edge cases — flaky test environments, ambiguous spec requirements, intricate security findings — can produce a runaway loop or a confidently wrong output. The guardrails catch these without requiring the developer to babysit every run.
 
@@ -158,7 +158,7 @@ The `technical-architect` absorbs the plan decomposition responsibility that was
 |-------|-------|-----------|
 | `tools` | `Read`, `Write`, `Grep`, `Glob`, `AskUserQuestion` | `Write` for plan files and chunks.json. `AskUserQuestion` for manual invocation mode. No `Bash` (doesn't run code). No `Agent` (doesn't invoke other agents — the orchestrator invokes it). |
 | `model` | `claude-opus-4-8[1m]` | Deep reasoning for architectural analysis and plan decomposition. |
-| `effort` | `xhigh` | Most reasoning-intensive role; decomposition quality scales with reasoning depth, and a decomposition error cascades through every downstream chunk. Deviates from the `high` default — see "Effort levels" below. |
+| `effort` | `xhigh` | Most reasoning-intensive role; decomposition quality scales with reasoning depth, and a decomposition error cascades through every downstream chunk. Deviates from the `high` baseline most components use — see "Effort levels" below. |
 | `memory` | `project` | Remembers architectural decisions across spec implementations. |
 
 **Delete the chunking skill:** Remove `.claude/skills/chunk-plans/SKILL.md` — its functionality is now part of the architect's standard responsibilities.
@@ -186,24 +186,24 @@ No worker subagent has access to `Bash` for git operations. The `feature-impleme
 
 **2. Verify `model:` and `effort:` fields.**
 
-Use `claude-opus-4-8[1m]` for components that benefit from deeper reasoning (`pipeline-orchestrator`, `technical-architect`, `code-security-reviewer`, `integration-validator`). Use `claude-sonnet-4-6` for components that benefit from speed (`feature-implementer`, `test-suite-generator`).
+Use `claude-opus-4-8[1m]` for components that benefit from deeper reasoning (`pipeline-orchestrator`, `technical-architect`, `code-security-reviewer`, `integration-validator`). Use `claude-sonnet-5` for components that benefit from speed (`feature-implementer`, `test-suite-generator`).
 
 Opus 4.8 brings three improvements that disproportionately benefit the orchestration and review roles: stronger long-horizon task persistence (relevant to multi-chunk pipeline runs), better file-system-based memory (relevant to the orchestrator's `state.json` and execution-log discipline), and proactive output self-verification (relevant to architect chunks.json validation and security reviewer verdicts). The `[1m]` model id selects the 1M-token context window, and standard Opus pricing applies.
 
-**Effort levels.** Reasoning effort is configurable per agent via the `effort:` frontmatter field. Both subagents (`.claude/agents/*.md`) and skills (`.claude/skills/*/SKILL.md`) support it; it overrides the session effort level and otherwise inherits. Valid values are `low`, `medium`, `high`, `xhigh`, `max`, with the available set depending on the model: **Opus 4.8 supports up to `xhigh`/`max`, while Sonnet 4.6 tops out at `high` (below `max`) and does not support `xhigh`.** The session default effort is already `high` on both Opus 4.8 and Sonnet 4.6, so an agent with no `effort` field runs at `high`.
+**Effort levels.** Reasoning effort is configurable per agent via the `effort:` frontmatter field. Both subagents (`.claude/agents/*.md`) and skills (`.claude/skills/*/SKILL.md`) support it; when set it overrides the session effort level, and when omitted it inherits whatever effort the invoking session is currently using. Valid values are `low`, `medium`, `high`, `xhigh`, `max`; **both Opus 4.8 and Sonnet 5 support the full range, including `xhigh` and `max`.**
 
-**Policy: set `effort` explicitly only where the role deviates from the `high` default.** Redundant `effort: high` lines are avoided so the config reads as a list of intentional exceptions. Rationale that cannot live in the frontmatter is captured here.
+**Convention: every agent and skill sets `effort` explicitly.** Each component's effort level is chosen to match the reasoning demands of its task, and pinning it in the frontmatter keeps that choice stable. An omitted `effort` would inherit the session's level and drift with it — silently down-leveling a component below the depth its task needs, or up-leveling a mechanical one into needless latency and cost. Setting the value explicitly on every component makes effort a deliberate, self-documenting per-component decision rather than an artifact of the ambient session, and prevents inadvertent drift in either direction. Rationale that cannot live in the frontmatter is captured here.
 
 | Component | Model | Effort | Rationale |
 |-----------|-------|--------|-----------|
 | `pipeline-orchestrator` | Opus 4.8 | `high` (explicit) | Coordinator/dispatcher — the deep cognitive work is delegated to workers, each of which gets its own reasoning budget. The explicit line records the deliberate decision *not* to use `xhigh` here despite the long-horizon role, and avoids paying the `xhigh` premium across the dozens of coordinator turns in a full run. |
 | `technical-architect` | Opus 4.8 | `xhigh` | Most reasoning-intensive role; decomposition quality scales with reasoning depth, and a decomposition error cascades through every downstream chunk. Low invocation count per run, so the cost is bounded. |
 | `code-security-reviewer` | Opus 4.8 | `xhigh` | Subtle vulnerability detection in IAM code benefits from maximum reasoning depth — a missed flaw is a product failure. Also fires only a few times per run. |
-| `integration-validator` | Opus 4.8 | `high` (inherited) | Mostly execution and diagnosis against running services; the `high` default is sufficient. |
-| `feature-implementer` | Sonnet 4.6 | `high` (inherited) | Chosen for speed; `high` is both the default and the practical ceiling (Sonnet 4.6 does not offer `xhigh`). |
-| `test-suite-generator` | Sonnet 4.6 | `high` (inherited) | Chosen for speed; test generation is well-served by the default. |
+| `integration-validator` | Opus 4.8 | `high` (explicit) | Mostly execution and diagnosis against running services; `high` matches the task, and pinning it keeps the level from drifting with the session. |
+| `feature-implementer` | Sonnet 5 | `high` (explicit) | Chosen for speed; `effort: high` is pinned so implementation reasoning can't silently drop below `high` when the session effort is lowered. Sonnet 5 offers `xhigh`/`max`, but mechanical implementation work doesn't warrant the added latency. |
+| `test-suite-generator` | Sonnet 5 | `high` (explicit) | Chosen for speed; `effort: high` is pinned so test-generation reasoning is fixed at the intended baseline rather than inherited from the session. |
 
-Only `technical-architect` and `code-security-reviewer` carry an explicit `effort` line above the default; every other worker inherits `high`. The `pipeline-orchestrator` skill keeps an explicit `effort: high` as a deliberate, documented hold against `xhigh` rather than silent inheritance.
+`technical-architect` and `code-security-reviewer` set `effort: xhigh` for their deep-reasoning roles; every other pipeline component pins `effort: high`. No component inherits its effort — each value is chosen for its task and fixed in the frontmatter so it cannot drift with the session.
 
 **3. Refactor system prompts to remove duplicated project context.**
 

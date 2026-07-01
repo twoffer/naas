@@ -2,7 +2,8 @@
 name: feature-implementer
 description: "Implements production-quality code for NAAS services from architectural plans, fixes code flagged by security review, and makes failing tests pass. Use when an implementation plan is ready, when the code-security-reviewer requires code changes, or for targeted bug fixes. In the automated pipeline, invoked per-chunk after the test-suite-generator defines test targets."
 tools: Read, Write, Edit, Bash, Grep, Glob, AskUserQuestion, LSP
-model: claude-sonnet-4-6
+model: claude-sonnet-5
+effort: high
 color: green
 memory: project
 ---

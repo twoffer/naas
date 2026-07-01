@@ -6,7 +6,7 @@
 
 `Python` · `FastAPI` · `PostgreSQL` · `Redis Streams` · `Keycloak` · `OpenLDAP` · `Docker`
 
-**Status:** foundation + first two pipeline stages **implemented and integration-validated end-to-end** · remaining stages fully specified — see the [roadmap](#whats-designed-but-not-yet-built)
+**Status:** foundation + first two pipeline stages **implemented and integration-validated end-to-end** · remaining stages architecturally specified — see the [roadmap](#whats-designed-but-not-yet-built)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/twoffer/naas/ci.yml?branch=main&label=CI)](https://github.com/twoffer/naas/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/)
@@ -65,7 +65,7 @@ Three design choices make this hold up under scrutiny:
 
 ## What's designed but not yet built
 
-The remaining stages are fully specified and follow a validated dependency order — each pipeline stage consumes its predecessor's stream, and the downstream decisioning stages communicate over Pub/Sub — so there is no large, deferred integration effort waiting at the end. The implementation sequencing is deliberate: the hardest, most differentiating capability (normalization) was built and proven first.
+The remaining stages are specified in the system architecture and follow a validated dependency order — each pipeline stage consumes its predecessor's stream, and the downstream decisioning stages communicate over Pub/Sub — so there is no large, deferred integration effort waiting at the end. The implementation sequencing is deliberate: the hardest, most differentiating capability (normalization) was built and proven first.
 
 | Stage | What it adds |
 |-------|--------------|
@@ -173,7 +173,7 @@ Connection parameters all default sensibly; the one thing the script won't guess
 ## Going deeper
 
 - **[`docs/architecture/SYSTEM_ARCHITECTURE.md`](docs/architecture/SYSTEM_ARCHITECTURE.md)** — the full system architecture: services, data flow, database schema, stream topology.
-- **[`docs/architecture/`](docs/architecture/)** — the functional specifications defining each service's contracts and behavior.
+- **[`docs/architecture/`](docs/architecture/)** — the functional specifications for what's built (the project scaffold, event ingestion, identity normalization, and the demo), alongside the full system architecture that defines the remaining stages.
 - **[`docs/adr/`](docs/adr/)** — architectural decision records in MADR format, each capturing the context, the alternatives genuinely considered, and the consequences. A few worth starting with:
   - **[0002](docs/adr/0002-why-redis-streams.md)** — Redis Streams as the pipeline transport, PostgreSQL as the system of record
   - **[0005](docs/adr/0005-hybrid-policy-scoring-model.md)** — the hybrid policy scoring model and its safe expression evaluator

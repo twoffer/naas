@@ -71,6 +71,11 @@ from app.normalization_values import (
 
 _logger = get_logger(__name__)
 
+# Recognized LDAP attribute names (the values of the unified→LDAP map). Used to
+# validate the attribute descriptor in build_search_filter, which cannot be
+# RFC 4515-escaped the way a value can.
+_ALLOWED_LDAP_ATTRS = frozenset(UNIFIED_TO_LDAP.values())
+
 # Default enrichment cache TTL (seconds). Service passes the YAML-configured
 # value per-call; this constant is the fallback when called without kwargs.
 _DEFAULT_CACHE_TTL = 60
@@ -264,18 +269,31 @@ def build_search_filter(ldap_attr: str, lookup_value: str) -> str:
     escaped via ldap.filter.escape_filter_chars before interpolation so that
     LDAP metacharacters cannot alter the filter semantics.
 
+    The attribute name is NOT escaped (RFC 4515 attribute descriptors are not
+    escapable), so it is validated against the known unified→LDAP attribute set
+    rather than interpolated verbatim. This closes the one injection vector the
+    value-escaping doesn't cover for external callers (enrich() itself only ever
+    passes trusted UNIFIED_TO_LDAP constants).
+
     The returned filter is parenthesised as required by RFC 4515. This function
     is used by enrich() internally and exported for external callers (diagnostic
     tools, etc.).
 
     Args:
-        ldap_attr:    The LDAP attribute name (e.g. 'mail').
+        ldap_attr:    The LDAP attribute name (e.g. 'mail'). Must be one of the
+                      known LDAP attributes in UNIFIED_TO_LDAP.
         lookup_value: The raw value to match (e.g. 'alice@corp.com').
 
     Returns:
         A parenthesised equality filter string, e.g. '(mail=alice@corp.com)'.
+
+    Raises:
+        ValueError: if ldap_attr is not a recognized LDAP attribute name.
     """
     import ldap.filter
+
+    if ldap_attr not in _ALLOWED_LDAP_ATTRS:
+        raise ValueError(f"unknown LDAP attribute: {ldap_attr!r}")
 
     escaped = ldap.filter.escape_filter_chars(lookup_value)
     return f"({ldap_attr}={escaped})"

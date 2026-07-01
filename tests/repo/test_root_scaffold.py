@@ -233,7 +233,9 @@ EXPECTED_SERVICES = [
 # Application services whose directories now contain implementation code (not just
 # a README) because their spec has landed.  Append here as future specs land so the
 # "only README" guard keeps protecting un-implemented services without flagging the
-# implemented ones.  The README existence/content tests still apply to all eight.
+# implemented ones.  README existence/is-file still apply to all eight; the canonical
+# scaffold-marker phrase is required only for the scaffold-only services, while the
+# implemented services carry substantive, hand-written READMEs instead.
 IMPLEMENTED_APP_SERVICES = {
     "event-ingestion",
     "identity-normalization",
@@ -249,9 +251,10 @@ REQUIRED_README_PHRASE = "Part of the NAAS system."
 
 class TestServiceReadmeFiles:
     """
-    Each service directory must contain a README.md with the canonical phrase.
-    The phrase confirms that the README was created intentionally
-    (not accidentally empty or copied from somewhere else).
+    Each service directory must contain a README.md. Scaffold-only services must
+    carry the canonical phrase, which confirms the README was created intentionally
+    (not accidentally empty or copied from somewhere else). Implemented services
+    instead carry substantive, hand-written READMEs (guarded for non-triviality).
     """
 
     @pytest.mark.parametrize("service_name", EXPECTED_SERVICES)
@@ -270,11 +273,13 @@ class TestServiceReadmeFiles:
             f"services/{service_name}/README.md exists but is not a regular file"
         )
 
-    @pytest.mark.parametrize("service_name", EXPECTED_SERVICES)
-    def test_service_readme_contains_required_phrase(self, service_name):
+    @pytest.mark.parametrize("service_name", SCAFFOLD_ONLY_SERVICES)
+    def test_scaffold_service_readme_contains_required_phrase(self, service_name):
         """
-        Every README.md must contain 'Part of the NAAS system.' — the canonical
-        phrase that marks the file as intentionally scaffolded.
+        Each scaffold-only service README.md must contain 'Part of the NAAS system.'
+        — the canonical phrase that marks the file as intentionally scaffolded.
+        Implemented services are exempt (they carry real READMEs); see
+        test_implemented_service_readme_is_substantive.
         """
         readme = REPO_ROOT / "services" / service_name / "README.md"
         if not readme.exists():
@@ -285,6 +290,23 @@ class TestServiceReadmeFiles:
         assert REQUIRED_README_PHRASE in content, (
             f"services/{service_name}/README.md does not contain "
             f"'{REQUIRED_README_PHRASE}'. Actual content: {content!r}"
+        )
+
+    @pytest.mark.parametrize("service_name", sorted(IMPLEMENTED_APP_SERVICES))
+    def test_implemented_service_readme_is_substantive(self, service_name):
+        """
+        Each implemented service README.md must be a real, hand-written document —
+        not the scaffold stub and not accidentally empty. Guards non-triviality
+        (a meaningful length and a title heading) without pinning exact prose.
+        """
+        readme = REPO_ROOT / "services" / service_name / "README.md"
+        content = readme.read_text(encoding="utf-8")
+        assert len(content) > 400, (
+            f"services/{service_name}/README.md looks like a stub "
+            f"({len(content)} chars) — implemented services need a real README"
+        )
+        assert content.lstrip().startswith("# "), (
+            f"services/{service_name}/README.md must open with a top-level heading"
         )
 
 
