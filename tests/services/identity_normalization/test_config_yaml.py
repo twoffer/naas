@@ -72,7 +72,8 @@ class TestCommittedYamlWeights:
     """
 
     @pytest.fixture(scope="class")
-    def cfg(self):
+    @classmethod
+    def cfg(cls):
         """Load the committed config/normalization.yaml once for all weight tests."""
         from app.normalization_config import load_config
 
@@ -267,7 +268,8 @@ class TestCommittedYamlPriorities:
     """
 
     @pytest.fixture(scope="class")
-    def cfg(self):
+    @classmethod
+    def cfg(cls):
         """Load the committed config once for all priority tests."""
         from app.normalization_config import load_config
 
@@ -351,7 +353,8 @@ class TestCommittedYamlMergeStrategy:
     """merge_strategy_for from the committed config must match §5.6."""
 
     @pytest.fixture(scope="class")
-    def cfg(self):
+    @classmethod
+    def cfg(cls):
         """Load the committed config once for merge strategy tests."""
         from app.normalization_config import load_config
 
@@ -391,7 +394,8 @@ class TestCommittedYamlEnrichment:
     """
 
     @pytest.fixture(scope="class")
-    def cfg(self):
+    @classmethod
+    def cfg(cls):
         """Load the committed config once for enrichment tests."""
         from app.normalization_config import load_config
 

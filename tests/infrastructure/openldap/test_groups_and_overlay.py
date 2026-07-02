@@ -450,7 +450,8 @@ class TestMemberofOverlayLdif:
     """
 
     @pytest.fixture(scope="class")
-    def overlay_ldif_lines(self) -> list[str]:
+    @classmethod
+    def overlay_ldif_lines(cls) -> list[str]:
         """Non-comment, non-blank lines of 00-memberof-overlay.ldif, stripped."""
         assert OVERLAY_LDIF.exists(), (
             f"00-memberof-overlay.ldif not found at {OVERLAY_LDIF}. "
@@ -550,7 +551,8 @@ class TestDockerfileMemberofCopy:
         assert DOCKERFILE.exists(), f"Dockerfile not found at {DOCKERFILE}"
 
     @pytest.fixture(scope="class")
-    def dockerfile_content(self) -> str:
+    @classmethod
+    def dockerfile_content(cls) -> str:
         return DOCKERFILE.read_text(encoding="utf-8")
 
     def test_dockerfile_from_osixia_openldap(self, dockerfile_content):
@@ -652,7 +654,8 @@ class TestSpec0Section53Mirror:
         assert SPEC0_DOC.exists(), f"SPEC_0 document not found at {SPEC0_DOC}"
 
     @pytest.fixture(scope="class")
-    def section_53(self) -> str:
+    @classmethod
+    def section_53(cls) -> str:
         doc_text = SPEC0_DOC.read_text(encoding="utf-8")
         return _extract_section_53(doc_text)
 
