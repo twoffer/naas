@@ -4,7 +4,7 @@ Spec §§5.6, 5.7, 3.3: POST /events/ingest, POST /events/bulk, GET /health.
 Route handlers translate HTTP to/from IngestionService; no dual-write logic lives here.
 """
 
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 import naas_shared.database as _db_mod
@@ -98,6 +98,7 @@ async def health() -> HealthResponse:
     except Exception:  # noqa: BLE001 — health probe must report unhealthy on any failure, never raise
         redis_ok = False
 
+    status: Literal["healthy", "degraded", "unhealthy"]
     if not pg_ok:
         status = "unhealthy"
     elif not redis_ok:

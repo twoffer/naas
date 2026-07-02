@@ -50,8 +50,19 @@ jobs:
       - name: Format check (ruff)
         run: ruff format --check .
 
-      - name: Run unit tests
-        run: python -m pytest tests/ -m "not integration" -q
+      # Both services expose a top-level package named `app`, so a single mypy
+      # invocation cannot cover them both (duplicate module name). Each run
+      # includes shared/naas_shared so the services' use of the shared
+      # models/schemas is type-checked too. Config: pyproject.toml [tool.mypy].
+      - name: Type check (mypy)
+        run: |
+          mypy shared/naas_shared services/event-ingestion/app
+          mypy shared/naas_shared services/identity-normalization/app
+
+      # Coverage scope is pyproject.toml [tool.coverage.run]; measured and
+      # reported here, not gated (no --cov-fail-under).
+      - name: Run unit tests (with coverage)
+        run: python -m pytest tests/ -m "not integration" -q --cov --cov-report=term-missing
 
   # ── Lockfile drift ─────────────────────────────────────────────────────────
   # Enforces ADR-0012: the committed lockfiles must match what the floors
@@ -95,6 +106,35 @@ jobs:
             echo "::error::Lockfiles are out of date. Run the pip-compile commands in DEPENDENCIES.md and commit the result."
             exit 1
           fi
+
+  # ── Dependency CVE audit ───────────────────────────────────────────────────
+  # pip-audit checks every compiled lockfile against the Python advisory DBs —
+  # ruff's bandit rules (S) cover SAST; this covers the dependency supply chain.
+  # Blocking by design: the lockfiles are fully pinned, so a failure means a
+  # real published advisory against a shipped pin — fix by bumping the affected
+  # floor and recompiling (see DEPENDENCIES.md). --no-deps audits the lockfiles
+  # as written; they are complete closures, so no resolution is needed.
+  audit:
+    name: Dependency Audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Install pip-audit
+        run: pip install pip-audit==2.10.1
+
+      - name: Audit lockfiles
+        run: >
+          pip-audit --no-deps
+          -r requirements-dev.txt
+          -r services/event-ingestion/requirements.txt
+          -r services/identity-normalization/requirements.txt
+          -r demo/requirements.txt
 
   # ── Integration tests ──────────────────────────────────────────────────────
   # Requires the live docker compose stack.  Only runs after unit tests pass.

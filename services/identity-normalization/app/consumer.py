@@ -26,9 +26,11 @@ from __future__ import annotations
 import asyncio
 import json
 import socket
+from typing import cast
 
 import naas_shared.redis_client as _redis_mod
 import pydantic
+import redis.asyncio as aioredis
 import structlog
 from naas_shared.constants import GROUP_NORMALIZATION, STREAM_LOGIN_EVENTS
 from naas_shared.logging import get_logger
@@ -50,7 +52,7 @@ async def run_consumer_loop(
     service: Normalizer,
     repository: NormalizationRepository,
     publisher: EventPublisher,
-    redis: object | None = None,
+    redis: aioredis.Redis | None = None,
 ) -> None:
     """Process login events from the Redis Stream indefinitely.
 
@@ -91,12 +93,18 @@ async def run_consumer_loop(
         # is NOT caught — it signals intentional task cancellation on shutdown and
         # must propagate to allow clean termination.
         try:
-            batches = await redis.xreadgroup(
-                GROUP_NORMALIZATION,
-                consumer_name,
-                streams={STREAM_LOGIN_EVENTS: ">"},
-                count=10,
-                block=2000,
+            # redis-py types the XREADGROUP reply loosely (ResponseT); with
+            # decode_responses=True it is [(stream, [(msg_id, fields), ...]), ...],
+            # or None/[] when `block` elapses (the falsy guard below covers both).
+            batches = cast(
+                "list[tuple[str, list[tuple[str, dict]]]] | None",
+                await redis.xreadgroup(
+                    GROUP_NORMALIZATION,
+                    consumer_name,
+                    streams={STREAM_LOGIN_EVENTS: ">"},
+                    count=10,
+                    block=2000,
+                ),
             )
         except Exception as xread_exc:  # noqa: BLE001 — any transient read error must not kill the consumer loop
             log.warning(
@@ -135,8 +143,8 @@ async def _process_message(
     service: Normalizer,
     repository: NormalizationRepository,
     publisher: EventPublisher,
-    redis: object,
-    log: structlog.stdlib.BoundLogger,
+    redis: aioredis.Redis,
+    log: structlog.BoundLogger,
 ) -> None:
     """Handle one stream message end-to-end.
 
@@ -151,6 +159,8 @@ async def _process_message(
     try:
         # Decode bytes if needed (redis-py without decode_responses returns bytes)
         data_raw = fields.get("data") or fields.get(b"data")
+        if data_raw is None:
+            raise ValueError("stream message has no 'data' field")
         if isinstance(data_raw, bytes):
             data_raw = data_raw.decode("utf-8")
 

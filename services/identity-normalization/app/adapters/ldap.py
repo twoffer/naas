@@ -51,6 +51,7 @@ import contextlib
 import inspect
 import json
 import re
+from typing import Any
 
 import naas_shared.redis_client as _redis_module
 from naas_shared.config import get_settings
@@ -233,7 +234,7 @@ def _decode_list(value: list | bytes | None) -> list[str]:
     if not value:
         return []
     result: list[str] = []
-    for item in value:  # type: ignore[union-attr]
+    for item in value:
         if isinstance(item, bytes):
             try:
                 result.append(item.decode("utf-8"))
@@ -362,7 +363,7 @@ def _create_ldap_connection(
     return conn
 
 
-def _do_unbind_s(conn: object) -> None:
+def _do_unbind_s(conn: Any) -> None:
     """Call unbind_s() on an LDAP connection (blocking — call via to_thread).
 
     WHY: python-ldap is a blocking C extension; unbind_s() must run in a thread.
@@ -371,11 +372,11 @@ def _do_unbind_s(conn: object) -> None:
     limit and block all future clients. Any exception from unbind_s() is swallowed
     by the caller — the point is best-effort cleanup, not error propagation.
     """
-    conn.unbind_s()  # type: ignore[union-attr]
+    conn.unbind_s()
 
 
 def _ldap_search_on_conn(
-    conn: object,
+    conn: Any,
     base_dn: str,
     filter_str: str,
     attrlist: list[str],
@@ -389,7 +390,7 @@ def _ldap_search_on_conn(
     """
     import ldap
 
-    return conn.search_s(base_dn, ldap.SCOPE_SUBTREE, filter_str, attrlist)  # type: ignore[union-attr]
+    return conn.search_s(base_dn, ldap.SCOPE_SUBTREE, filter_str, attrlist)
 
 
 async def _pool_search(
@@ -680,7 +681,7 @@ def _classify_ldap_error(exc: Exception) -> str:
     return "ldap_unexpected_error"
 
 
-async def _cache_write(redis: object, key: str, value: str, ttl: int) -> None:
+async def _cache_write(redis: Any, key: str, value: str, ttl: int) -> None:
     """Write a value to Redis with TTL, using setex when available.
 
     WHY: Supports both real aioredis clients (which have setex) and the fake

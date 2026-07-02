@@ -19,6 +19,42 @@ filterwarnings = [
     "ignore::starlette.exceptions.StarletteDeprecationWarning",
 ]
 
+# Coverage scope for pytest-cov (the CI unit-test step passes --cov): all
+# shipped code — the shared library plus both implemented services' app/ trees.
+# Measured and reported, not gated: a --cov-fail-under threshold is deliberately
+# omitted (the number is the signal, not a ratchet).
+[tool.coverage.run]
+source = [
+    "shared/naas_shared",
+    "services/event-ingestion/app",
+    "services/identity-normalization/app",
+]
+
+# Type-checking gate over all shipped code: shared/naas_shared plus both
+# implemented services' app/ trees (enforced by the mypy step in
+# .github/workflows/ci.yml). Both services expose a top-level package named
+# `app`, so one mypy invocation cannot cover them both (duplicate module name);
+# the gate runs as two commands, each including shared/naas_shared so
+# cross-package use of the shared models/schemas is type-checked too:
+#   mypy shared/naas_shared services/event-ingestion/app
+#   mypy shared/naas_shared services/identity-normalization/app
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+# Ratchet flags: everything shipped is fully annotated today; these keep it so
+# and flag ignore-comments/casts that become stale as dependencies update.
+disallow_untyped_defs = true
+check_untyped_defs = true
+warn_unused_ignores = true
+warn_redundant_casts = true
+
+# python-ldap is an untyped C extension, deliberately absent from the dev venv
+# (containers-only; the adapter lazy-imports it — see CLAUDE.md). Resolve its
+# modules to Any instead of erroring on the missing package.
+[[tool.mypy.overrides]]
+module = ["ldap", "ldap.*"]
+ignore_missing_imports = true
+
 [tool.ruff]
 target-version = "py312"
 # Shared by the formatter and the linter's E501. Pinned explicitly so an upstream
