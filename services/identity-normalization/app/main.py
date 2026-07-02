@@ -9,6 +9,7 @@ Exposes GET /health; the full consumer loop pipeline is wired in the lifespan
 
 import asyncio
 import os
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
@@ -99,7 +100,7 @@ def _resolve_config_path() -> Path:
 
 
 @asynccontextmanager
-async def lifespan(application: FastAPI):
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Startup: load config, ensure consumer group, construct pipeline components, launch consumer.
 
     WHY exception propagation on invalid config: the service MUST NOT start

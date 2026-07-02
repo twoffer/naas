@@ -1,4 +1,5 @@
 import json
+from typing import cast
 
 import redis.asyncio as aioredis
 
@@ -42,7 +43,10 @@ async def close_redis() -> None:
 async def publish_to_stream(stream: str, data: dict) -> str:
     """XADD to a Redis Stream. Returns the message ID."""
     r = await get_redis()
-    return await r.xadd(stream, {"data": json.dumps(data)}, maxlen=STREAM_MAXLEN)
+    # redis-py types XADD as bytes | str; decode_responses=True guarantees str.
+    return cast(
+        str, await r.xadd(stream, {"data": json.dumps(data)}, maxlen=STREAM_MAXLEN)
+    )
 
 
 async def publish_to_channel(channel: str, data: dict) -> int:

@@ -22,3 +22,8 @@ dependencies = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["naas_shared*"]
+
+# PEP 561: ship the py.typed marker so installed consumers (the service
+# containers) get naas_shared's inline type annotations, not Any.
+[tool.setuptools.package-data]
+naas_shared = ["py.typed"]

@@ -36,6 +36,11 @@ dashboard/dist/
 *.pkl
 *.joblib
 
+# Test coverage (pytest-cov / coverage.py data files)
+.coverage
+.coverage.*
+htmlcov/
+
 # Logs
 *.log
 tests/integration/.logs/

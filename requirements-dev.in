@@ -18,6 +18,8 @@ pytest-mock>=3.14.0
 pytest-timeout>=2.3.1
 ruff>=0.9.3
 mypy>=1.14.1
+# Type stubs for the mypy gate: pyyaml (below) ships untyped.
+types-PyYAML>=6.0.12
 # pip-tools provides pip-compile, used to regenerate every lockfile in the repo.
 pip-tools>=7.5.3
 # Integration test harness deps — floored to match demo/requirements.in so the

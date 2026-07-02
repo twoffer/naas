@@ -17,6 +17,7 @@ from naas_shared.models import (
     ListMergeResolution,
     NormalizedAttributes,
     PriorityResolution,
+    ResolutionDetail,
     SingleSourceResolution,
     UnanimousResolution,
 )
@@ -118,7 +119,7 @@ def resolve(
         department=resolved_department,
         employee_type=resolved_employee_type,
         groups=resolved_groups,
-        source_protocol=source_protocol,  # type: ignore[arg-type]
+        source_protocol=source_protocol,
         normalization_confidence=normalization_confidence,
         resolution_details=resolution_details,
         enrichment=enrichment,
@@ -139,6 +140,7 @@ def _resolve_scalar(
     """
     n = len(sources_map)
 
+    detail: ResolutionDetail
     if n == 1:
         src, val = next(iter(sources_map.items()))
         weight = config.weight_for(attr, src)
@@ -146,7 +148,7 @@ def _resolve_scalar(
             resolution="single_source",
             resolved_value=val,
             confidence=weight,
-            sources=[src],  # type: ignore[list-item]
+            sources=[src],
         )
         return detail, weight, val
 
@@ -160,7 +162,7 @@ def _resolve_scalar(
             resolution="unanimous",
             resolved_value=agreed,
             confidence=conf,
-            sources=sorted(sources_map.keys()),  # type: ignore[list-item]
+            sources=sorted(sources_map.keys()),
         )
         return detail, conf, agreed
 
@@ -172,7 +174,7 @@ def _resolve_scalar(
         resolution="priority",
         resolved_value=winner_val,
         confidence=conf,
-        winner_source=winner_src,  # type: ignore[arg-type]
+        winner_source=winner_src,
         conflicting_values=conflicting,
         penalty_applied=True,
     )
@@ -194,6 +196,7 @@ def _resolve_department(
     """
     n = len(sources_map)
 
+    detail: ResolutionDetail
     if n == 1:
         src, (val, was_mapped) = next(iter(sources_map.items()))
         weight = config.weight_for(attr, src)
@@ -202,7 +205,7 @@ def _resolve_department(
             resolution="single_source",
             resolved_value=val,
             confidence=conf,
-            sources=[src],  # type: ignore[list-item]
+            sources=[src],
         )
         return detail, conf, val
 
@@ -223,7 +226,7 @@ def _resolve_department(
             resolution="unanimous",
             resolved_value=agreed,
             confidence=conf,
-            sources=sorted(sources_map.keys()),  # type: ignore[list-item]
+            sources=sorted(sources_map.keys()),
         )
         return detail, conf, agreed
 
@@ -237,7 +240,7 @@ def _resolve_department(
         resolution="priority",
         resolved_value=winner_val,
         confidence=conf,
-        winner_source=winner_src,  # type: ignore[arg-type]
+        winner_source=winner_src,
         conflicting_values=conflicting,
         penalty_applied=True,
     )
@@ -305,7 +308,7 @@ def _resolve_groups(
             resolution="list_merge",
             resolved_value=merged,
             confidence=conf,
-            strategy=strategy,  # type: ignore[arg-type]
+            strategy=strategy,
             total_unique_groups=len(merged),
             sources=[src],
         )
@@ -331,7 +334,7 @@ def _resolve_groups(
         resolution="list_merge",
         resolved_value=merged,
         confidence=conf,
-        strategy=strategy,  # type: ignore[arg-type]
+        strategy=strategy,
         total_unique_groups=len(merged),
         sources=sorted(groups_map.keys()),
     )

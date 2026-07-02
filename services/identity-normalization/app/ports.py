@@ -15,6 +15,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
+    from uuid import UUID
+
     from naas_shared.models import LoginEventRecord, NormalizedAttributes
 
 
@@ -131,7 +133,7 @@ class NormalizationRepository(Protocol):
 
     async def write(
         self,
-        event_id,
+        event_id: UUID,
         normalized: NormalizedAttributes,
     ) -> None:
         """UPDATE events.normalized_attributes for the given event_id.

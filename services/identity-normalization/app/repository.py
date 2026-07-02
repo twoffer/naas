@@ -19,6 +19,7 @@ from naas_shared.logging import get_logger
 from naas_shared.models import NormalizedAttributes
 from naas_shared.schemas import EventORM
 from sqlalchemy import update
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 _logger = get_logger(__name__)
 
@@ -36,12 +37,12 @@ class PostgresNormalizationRepository:
     HTTP request context.
     """
 
-    def __init__(self, session_factory: object) -> None:
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         """
         Args:
-            session_factory: An async_sessionmaker (or compatible callable) that
-                returns an async context manager yielding an AsyncSession when
-                called.  Use naas_shared.database.get_session_factory().
+            session_factory: An async_sessionmaker that returns an async context
+                manager yielding an AsyncSession when called.  Use
+                naas_shared.database.get_session_factory().
         """
         self._session_factory = session_factory
 

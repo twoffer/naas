@@ -7,6 +7,7 @@ Mounts the APIRouter from app.routes, which provides the three endpoints
 defined in spec §§5.6, 5.7: POST /events/ingest, POST /events/bulk, GET /health.
 """
 
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import naas_shared.redis_client as _redis_mod
@@ -20,7 +21,7 @@ from app.routes import router
 
 
 @asynccontextmanager
-async def lifespan(application: FastAPI):
+async def lifespan(application: FastAPI) -> AsyncIterator[None]:
     """Warm the Redis client at startup; tear down connections on shutdown."""
     try:
         await _redis_mod.get_redis()

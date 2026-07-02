@@ -136,6 +136,7 @@ it without a floor change produces no diff — the lock is deterministic.
   lock and fails if the committed result differs from the floors. This catches a
   floor that was changed without regenerating its lock. Because it does not pass
   `--upgrade`, a routine upstream release never trips it — only a stale lock does.
+- **CI — Dependency Audit (pip-audit).** The `audit` job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) runs a pinned `pip-audit --no-deps` over every compiled lockfile on each push/PR and fails on any published advisory against a pinned version. It is the in-repo, blocking complement to the Dependabot security channel below (which is a repo-UI toggle and acts asynchronously): CI itself refuses to stay green while a shipped pin carries a known CVE. Fix by taking the advisory's version (bump the floor if needed), regenerating the lock, and committing.
 - **Dependabot.** [`.github/dependabot.yml`](.github/dependabot.yml) opens
   CI-gated pull requests proposing newer versions. For the pip ecosystem it reads
   the `pip-compile` header in each lock and regenerates the lock with the newer
