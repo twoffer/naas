@@ -426,7 +426,8 @@ class TestGitignoreLines:
     """
 
     @pytest.fixture(scope="class")
-    def gitignore_lines(self):
+    @classmethod
+    def gitignore_lines(cls):
         gitignore_path = REPO_ROOT / ".gitignore"
         assert gitignore_path.exists(), f".gitignore not found at {gitignore_path}"
         # Split into lines, strip trailing whitespace per line, keep blank lines

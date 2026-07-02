@@ -22,11 +22,13 @@ class TestPyprojectToml:
     """
 
     @pytest.fixture(scope="class")
-    def pyproject_path(self) -> Path:
+    @classmethod
+    def pyproject_path(cls) -> Path:
         return SHARED_DIR / "pyproject.toml"
 
     @pytest.fixture(scope="class")
-    def pyproject_content(self, pyproject_path) -> str:
+    @classmethod
+    def pyproject_content(cls, pyproject_path) -> str:
         if not pyproject_path.exists():
             pytest.fail(
                 f"shared/pyproject.toml not found at {pyproject_path} — "
