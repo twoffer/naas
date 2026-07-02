@@ -16,7 +16,7 @@ asyncpg==0.31.0
     # via naas-shared
 click==8.4.1
     # via uvicorn
-fastapi==0.137.1
+fastapi==0.139.0
     # via
     #   -r requirements.in
     #   naas-shared
