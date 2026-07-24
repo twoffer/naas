@@ -28,7 +28,7 @@ httptools==0.8.0
     # via uvicorn
 idna==3.18
     # via anyio
-pyasn1==0.6.3
+pyasn1==0.6.4
     # via
     #   pyasn1-modules
     #   python-ldap
