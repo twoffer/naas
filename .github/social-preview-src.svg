@@ -1,0 +1,70 @@
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="NAAS — Normalized Adaptive Access System. Normalize once. Secure everywhere.">
+  <!--
+    NAAS social preview card (master source, live text)
+    Canvas: 1280x640 (GitHub recommended social preview size)
+    Palette: bg #0d1117 · fg #f0f6fc / #e6edf3 · muted #8b949e · hairline #30363d · accent #58a6ff
+    Type: Inter (fallbacks: system UI sans)
+  -->
+  <defs>
+    <style>
+      text { font-family: "Inter", -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    </style>
+  </defs>
+
+  <!-- Ground -->
+  <rect x="0" y="0" width="1280" height="640" fill="#0d1117"/>
+  <!-- Hairline inset frame: keeps the card self-contained on light-mode clients -->
+  <rect x="0.5" y="0.5" width="1279" height="639" fill="none" stroke="#30363d" stroke-width="1"/>
+
+  <!-- ============ 1. Wordmark ============ -->
+  <text x="90" y="212" font-size="122" font-weight="800" letter-spacing="-3" fill="#f0f6fc">NAAS</text>
+  <text x="93" y="256" font-size="18" font-weight="600" letter-spacing="5.5" fill="#b1bac4">NORMALIZED ADAPTIVE ACCESS SYSTEM</text>
+
+  <!-- ============ 2. Tagline ============ -->
+  <text x="92" y="352" font-size="32" font-weight="600" fill="#e6edf3">Normalize once. <tspan fill="#58a6ff">Secure everywhere.</tspan></text>
+
+  <!-- ============ 3. Convergence diagram ============ -->
+  <!-- Source boxes -->
+  <g stroke="#8b949e" stroke-width="4.5" fill="none">
+    <rect x="742" y="177" width="148" height="52" rx="8"/>
+    <rect x="742" y="267" width="148" height="52" rx="8"/>
+    <rect x="742" y="357" width="148" height="52" rx="8"/>
+  </g>
+  <g font-size="21" font-weight="600" fill="#e6edf3" text-anchor="middle">
+    <text x="816" y="210">OIDC</text>
+    <text x="816" y="300">SAML</text>
+    <text x="816" y="390">LDAP</text>
+  </g>
+
+  <!-- Converging connectors -->
+  <g stroke="#8b949e" stroke-width="6" fill="none" opacity="0.8">
+    <path d="M 890 203 C 940 203, 940 269, 986 275"/>
+    <path d="M 890 293 L 986 293"/>
+    <path d="M 890 383 C 940 383, 940 317, 986 311"/>
+  </g>
+
+  <!-- Unified identity box (accent) -->
+  <rect x="990" y="235" width="204" height="116" rx="10" fill="#58a6ff" fill-opacity="0.08" stroke="#58a6ff" stroke-width="6.5"/>
+  <g text-anchor="middle">
+    <text x="1092" y="283" font-size="20" font-weight="700" letter-spacing="0.5" fill="#f0f6fc">UNIFIED IDENTITY</text>
+    <text x="1092" y="321" font-size="19" font-weight="600" fill="#58a6ff">confidence 0.823</text>
+  </g>
+
+  <!-- ============ 4. Chip row ============ -->
+  <g>
+    <g stroke="#30363d" stroke-width="1" fill="none">
+      <rect x="90"  y="540" width="95"  height="40" rx="20"/>
+      <rect x="199" y="540" width="106" height="40" rx="20"/>
+      <rect x="319" y="540" width="137" height="40" rx="20"/>
+      <rect x="470" y="540" width="154" height="40" rx="20"/>
+      <rect x="638" y="540" width="114" height="40" rx="20"/>
+    </g>
+    <g font-size="19" font-weight="500" fill="#b1bac4" text-anchor="middle">
+      <text x="137" y="567">Python</text>
+      <text x="252" y="567">FastAPI</text>
+      <text x="387" y="567">PostgreSQL</text>
+      <text x="547" y="567">Redis Streams</text>
+      <text x="695" y="567">Keycloak</text>
+    </g>
+  </g>
+</svg>
