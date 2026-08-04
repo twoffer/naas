@@ -57,6 +57,10 @@ ignore_missing_imports = true
 
 [tool.ruff]
 target-version = "py312"
+# ruff 0.16 formats Python code blocks inside Markdown by default. Our Markdown
+# snippets are illustrative excerpts (spec docs, agent-memory notes), often
+# deliberately compacted — keep the formatter/linter to real Python sources.
+extend-exclude = ["*.md"]
 # Shared by the formatter and the linter's E501. Pinned explicitly so an upstream
 # default change can't silently reflow the codebase. (E501 itself is not yet in the
 # lint `select` — see docs/FOLLOWUPS.md.)

@@ -26,7 +26,7 @@ click==8.4.1
     # via pip-tools
 coverage==7.14.1
     # via pytest-cov
-fastapi==0.139.0
+fastapi==0.141.1
     # via naas-shared
 greenlet==3.5.1
     # via sqlalchemy
@@ -59,7 +59,7 @@ packaging==26.2
     #   wheel
 pathspec==1.1.1
     # via mypy
-pip-tools==7.5.3
+pip-tools==7.6.0
     # via -r requirements-dev.in
 pluggy==1.6.0
     # via
@@ -105,11 +105,11 @@ python-dotenv==1.2.2
     # via pydantic-settings
 pyyaml==6.0.3
     # via -r requirements-dev.in
-redis==8.0.0
+redis==8.1.0
     # via naas-shared
 rich==15.0.0
     # via -r requirements-dev.in
-ruff==0.15.20
+ruff==0.16.1
     # via -r requirements-dev.in
 sqlalchemy==2.0.51
     # via naas-shared
