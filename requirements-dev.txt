@@ -59,7 +59,7 @@ packaging==26.2
     #   wheel
 pathspec==1.1.1
     # via mypy
-pip-tools==7.6.0
+pip-tools==7.6.1
     # via -r requirements-dev.in
 pluggy==1.6.0
     # via
@@ -76,7 +76,7 @@ pydantic==2.13.4
     #   pydantic-settings
 pydantic-core==2.46.4
     # via pydantic
-pydantic-settings==2.14.2
+pydantic-settings==2.15.0
     # via naas-shared
 pygments==2.20.0
     # via
@@ -109,9 +109,9 @@ redis==8.1.0
     # via naas-shared
 rich==15.0.0
     # via -r requirements-dev.in
-ruff==0.16.1
+ruff==0.16.5
     # via -r requirements-dev.in
-sqlalchemy==2.0.51
+sqlalchemy==2.0.52
     # via naas-shared
 starlette==1.3.1
     # via fastapi
