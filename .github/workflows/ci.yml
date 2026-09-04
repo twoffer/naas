@@ -88,7 +88,14 @@ jobs:
         # Pin pip and setuptools too, not just pip-tools: pip-compile resolves
         # package metadata through them, so an unpinned runner upgrade could
         # re-resolve the closure and fail this job on an unchanged, correct lock.
-        run: pip install pip==26.1.2 setuptools==82.0.1 pip-tools==7.5.3
+        # click is pinned for the same reason from the other end: pip-compile
+        # rebuilds the header's command line by comparing each option's value
+        # against its click default, and click 8.5.0 reports an unset flag
+        # default as a sentinel rather than False -- so `--no-index` (default
+        # False, never passed) stops matching and lands in every header, making
+        # this job fail on correct lockfiles. Keep this in step with the click==
+        # pin in requirements-dev.txt; pip-tools matches that lock's pin too.
+        run: pip install pip==26.1.2 setuptools==82.0.1 pip-tools==7.6.0 click==8.4.1
 
       - name: Recompile lockfiles
         run: |
